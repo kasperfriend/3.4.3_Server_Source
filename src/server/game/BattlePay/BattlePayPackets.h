@@ -112,7 +112,7 @@ namespace WorldPackets
 
         struct DistributionObject
         {
-            Optional<Product> Product;
+            Optional<Product> ProductData;
             ObjectGuid TargetPlayer;
             uint64 DistributionID = 0;
             uint64 PurchaseID = 0;
@@ -177,7 +177,7 @@ namespace WorldPackets
             WorldPacket const* Write() override;
 
             uint32 Result = 0;
-            std::vector<Purchase> Purchase;
+            std::vector<Purchase> PurchaseData;
         };
 
         class SyncWowEntitlements final : public ServerPacket
@@ -189,7 +189,7 @@ namespace WorldPackets
 
             std::vector<uint32> purchaseCount;
             std::vector<uint32> productCount;
-            std::vector<Product> Product;
+            std::vector<Product> ProductData;
         };
 
         class DistributionListResponse final : public ServerPacket
@@ -200,7 +200,7 @@ namespace WorldPackets
             WorldPacket const* Write() override;
 
             uint32 Result = 0;
-            std::vector<DistributionObject> DistributionObject;
+            std::vector<DistributionObject> DistributionObjectData;
            // uint16 Unk = 0;
         };
 
@@ -221,7 +221,7 @@ namespace WorldPackets
 
             WorldPacket const* Write() override;
 
-            DistributionObject DistributionObject;
+            DistributionObject DistributionObjectData;
         };
 
         class ProductListResponse final : public ServerPacket
@@ -282,7 +282,7 @@ namespace WorldPackets
 
             WorldPacket const* Write() override;
 
-            std::vector<Purchase> Purchase;
+            std::vector<Purchase> PurchaseData;
         };
 
         class ConfirmPurchase final : public ServerPacket
