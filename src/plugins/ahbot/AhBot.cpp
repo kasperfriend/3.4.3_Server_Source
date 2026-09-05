@@ -1,3 +1,4 @@
+#include "../pchdef.h"
 #include "AhBot.h"
 #include "Entities/Item/ItemTemplate.h"
 #include <cmath>

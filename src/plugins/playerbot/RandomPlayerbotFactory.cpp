@@ -74,35 +74,39 @@ RandomPlayerbotFactory::RandomPlayerbotFactory(uint32 accountId) : accountId(acc
     availableRaces[CLASS_DRUID].push_back(RACE_TAUREN);
 }
 
-typedef std::multimap<uint32, CharSectionsEntry const*> CharSectionsMap;
-extern CharSectionsMap sCharSectionMap;
-CharSectionsEntry const* GetRandomCharSection(uint8 race, CharSectionType genType, uint8 gender, uint8 color = 255)
+static void FillRandomCustomizations(uint8 race, uint8 gender, WorldPackets::Array<UF::ChrCustomizationChoice, 250>& customizations)
 {
-    vector<CharSectionsEntry const*> charSections;
-    std::pair<CharSectionsMap::const_iterator, CharSectionsMap::const_iterator> eqr = sCharSectionMap.equal_range(uint32(genType) | uint32(gender << 8) | uint32(race << 16));
-    for (CharSectionsMap::const_iterator itr = eqr.first; itr != eqr.second; ++itr)
-    {
-        CharSectionsEntry const* charSection = itr->second;
-        if ((charSection->Flags & SECTION_FLAG_PLAYER) && !(charSection->Flags & SECTION_FLAG_DEATH_KNIGHT)
-                && (charSection->Color == color || color == 255))
-        {
-            charSections.push_back(itr->second);
-        }
-    }
-    if (charSections.empty())
-    {
-        TC_LOG_DEBUG("playerbot",  "No match for race=%u gender=%u color=%u type=%u",
-                race, gender, color, genType);;
-        return NULL;
-    }
+    std::vector<ChrCustomizationOptionEntry const*> const* options = sDB2Manager.GetCustomiztionOptions(race, gender);
+    if (!options)
+        return;
 
-    uint32 charSectionIndex = urand(0, charSections.size() - 1);
-    return charSections[charSectionIndex];
+    for (ChrCustomizationOptionEntry const* option : *options)
+    {
+        std::vector<ChrCustomizationChoiceEntry const*> const* choices = sDB2Manager.GetCustomiztionChoices(option->ID);
+        if (!choices || choices->empty())
+            continue;
+
+        // only pick choices without additional requirements so that the bot always looks valid
+        std::vector<ChrCustomizationChoiceEntry const*> usable;
+        for (ChrCustomizationChoiceEntry const* choice : *choices)
+            if (!choice->ChrCustomizationReqID)
+                usable.push_back(choice);
+
+        if (usable.empty())
+            usable = *choices;
+
+        ChrCustomizationChoiceEntry const* picked = usable[urand(0, usable.size() - 1)];
+
+        UF::ChrCustomizationChoice choice;
+        choice.ChrCustomizationOptionID = option->ID;
+        choice.ChrCustomizationChoiceID = picked->ID;
+        customizations.push_back(choice);
+    }
 }
 
 bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
 {
-    TC_LOG_DEBUG("playerbot",  "Creating new random bot for class %d", cls);;
+    TC_LOG_DEBUG("playerbot", "Creating new random bot for class {}", cls);
 
     uint8 gender = rand() % 2 ? GENDER_MALE : GENDER_FEMALE;
 
@@ -111,41 +115,30 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     if (name.empty())
         return false;
 
-    CharSectionsEntry const* skin = GetRandomCharSection(race, SECTION_TYPE_SKIN, gender);
-    CharSectionsEntry const* face = GetRandomCharSection(race, SECTION_TYPE_FACE, gender, skin->Color);
-    CharSectionsEntry const* hair = GetRandomCharSection(race, SECTION_TYPE_HAIR, gender);
-    CharSectionsEntry const* facialHair = GetRandomCharSection(race, SECTION_TYPE_FACIAL_HAIR, gender, hair->Color);
-    uint8 outfitId = 0;
+    std::string accountName;
+    if (!AccountMgr::GetName(accountId, accountName))
+        accountName = "rndbot";
 
-    WorldSession* session = new WorldSession(accountId, "rndbot", NULL, SEC_PLAYER, 2, 0, LOCALE_enUS, 0, false);
-    if (!session)
-    {
-        TC_LOG_ERROR("playerbot",  "Couldn't create session for random bot account %d", accountId);;
-        delete session;
-        return false;
-    }
+    WorldSession* session = new WorldSession(accountId, std::move(accountName), 0, nullptr, SEC_PLAYER,
+        uint8(sWorld->getIntConfig(CONFIG_EXPANSION)), 0, "", Minutes(0), LOCALE_enUS, 0, false);
 
-    Player *player = new Player(session);
+    session->SetBotSession(true);
 
-    CharacterCreateInfo cci;
+    Player* player = new Player(session);
+
+    WorldPackets::Character::CharacterCreateInfo cci;
     cci.Name = name;
     cci.Race = race;
     cci.Class = cls;
-    cci.Gender = gender;
-    cci.Skin = skin->Color;
-    cci.Face = face->Type;
-    cci.HairStyle = hair->Type;
-    cci.HairColor = hair->Color;
-    cci.FacialHair = facialHair ? facialHair->Type : 0;
-    cci.OutfitId = outfitId;
+    cci.Sex = gender;
+    FillRandomCustomizations(race, gender, cci.Customizations);
 
     if (!player->Create(sObjectMgr->GetGenerator<HighGuid::Player>().Generate(), &cci))
     {
-        player->DeleteFromDB(player->GetGUID(), accountId, true, true);
-        delete session;
+        TC_LOG_ERROR("playerbot", "Unable to create random bot for account {} - name: \"{}\"; race: {}; class: {}",
+                accountId, name.c_str(), race, cls);
         delete player;
-        TC_LOG_ERROR("playerbot",  "Unable to create random bot for account %d - name: \"%s\"; race: %u; class: %u",
-                accountId, name.c_str(), race, cls);;
+        delete session;
         return false;
     }
 
@@ -153,9 +146,11 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     player->SetAtLoginFlag(AT_LOGIN_NONE);
     player->SaveToDB(true);
 
-    TC_LOG_DEBUG("playerbot",  "Random bot created for account %d - name: \"%s\"; race: %u; class: %u",
-            accountId, name.c_str(), race, cls);;
+    TC_LOG_DEBUG("playerbot", "Random bot created for account {} - name: \"{}\"; race: {}; class: {}",
+            accountId, name.c_str(), race, cls);
 
+    delete player;
+    delete session;
     return true;
 }
 
@@ -164,7 +159,7 @@ string RandomPlayerbotFactory::CreateRandomBotName()
     QueryResult result = CharacterDatabase.Query("SELECT MAX(name_id) FROM ai_playerbot_names");
     if (!result)
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");;
+        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");
         return "";
     }
 
@@ -174,10 +169,10 @@ string RandomPlayerbotFactory::CreateRandomBotName()
     uint32 id = urand(0, maxId);
     result = CharacterDatabase.PQuery("SELECT n.name FROM ai_playerbot_names n "
             "LEFT OUTER JOIN characters e ON e.name = n.name "
-            "WHERE e.guid IS NULL AND n.name_id >= '%u' LIMIT 1", id);
+            "WHERE e.guid IS NULL AND n.name_id >= '{}' LIMIT 1", id);
     if (!result)
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random bots");;
+        TC_LOG_ERROR("playerbot",  "No more names left for random bots");
         return "";
     }
 
@@ -190,8 +185,8 @@ void RandomPlayerbotFactory::CreateRandomBots()
 {
     if (sPlayerbotAIConfig.deleteRandomBotAccounts)
     {
-        TC_LOG_INFO("playerbot",  "Deleting random bot accounts...");;
-        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username like '%s%%'", sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
+        TC_LOG_INFO("playerbot",  "Deleting random bot accounts...");
+        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username like '{}%'", sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
         if (results)
         {
             do
@@ -202,14 +197,14 @@ void RandomPlayerbotFactory::CreateRandomBots()
         }
 
         CharacterDatabase.Execute("DELETE FROM ai_playerbot_random_bots");
-        TC_LOG_INFO("playerbot",  "Random bot accounts deleted");;
+        TC_LOG_INFO("playerbot",  "Random bot accounts deleted");
     }
 
     for (int accountNumber = 0; accountNumber < sPlayerbotAIConfig.randomBotAccountCount; ++accountNumber)
     {
         ostringstream out; out << sPlayerbotAIConfig.randomBotAccountPrefix << accountNumber;
         string accountName = out.str();
-        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username = '%s'", accountName.c_str());
+        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username = '{}'", accountName.c_str());
         if (results)
         {
             continue;
@@ -222,10 +217,10 @@ void RandomPlayerbotFactory::CreateRandomBots()
         }
         sAccountMgr->CreateAccount(accountName, password, "playerbot");
 
-        TC_LOG_DEBUG("playerbot",  "Account %s created for random bots", accountName.c_str());;
+        TC_LOG_DEBUG("playerbot",  "Account {} created for random bots", accountName.c_str());
     }
 
-    LoginDatabase.PExecute("UPDATE account SET expansion = '%u' where username like '%s%%'", 2, sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
+    LoginDatabase.PExecute("UPDATE account SET expansion = '{}' where username like '{}%'", 2, sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
 
     int totalRandomBotChars = 0;
     for (int accountNumber = 0; accountNumber < sPlayerbotAIConfig.randomBotAccountCount; ++accountNumber)
@@ -233,7 +228,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
         ostringstream out; out << sPlayerbotAIConfig.randomBotAccountPrefix << accountNumber;
         string accountName = out.str();
 
-        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username = '%s'", accountName.c_str());
+        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username = '{}'", accountName.c_str());
         if (!results)
             continue;
 
@@ -259,14 +254,14 @@ void RandomPlayerbotFactory::CreateRandomBots()
         totalRandomBotChars += sAccountMgr->GetCharactersCount(accountId);
     }
 
-    TC_LOG_INFO("playerbot",  "%d random bot accounts with %d characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);;
+    TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
 }
 
 
 void RandomPlayerbotFactory::CreateRandomGuilds()
 {
     vector<uint32> randomBots;
-    QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username like '%s%%'", sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
+    QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username like '{}%'", sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
     if (results)
     {
         do
@@ -274,7 +269,7 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
             Field* fields = results->Fetch();
             uint32 accountId = fields[0].GetUInt32();
 
-            QueryResult results2 = CharacterDatabase.PQuery("SELECT guid FROM characters where account  = '%u'", accountId);
+            QueryResult results2 = CharacterDatabase.PQuery("SELECT guid FROM characters where account  = '{}'", accountId);
             if (results2)
             {
                 do
@@ -290,21 +285,21 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
 
     if (sPlayerbotAIConfig.deleteRandomBotGuilds)
     {
-        TC_LOG_INFO("playerbot",  "Deleting random bot guilds...");;
+        TC_LOG_INFO("playerbot",  "Deleting random bot guilds...");
         for (vector<uint32>::iterator i = randomBots.begin(); i != randomBots.end(); ++i)
         {
-            ObjectGuid leader(HighGuid::Player, *i);
+            ObjectGuid leader = ObjectGuid::Create<HighGuid::Player>(*i);
             Guild* guild = sGuildMgr->GetGuildByLeader(leader);
             if (guild) guild->Disband();
         }
-        TC_LOG_INFO("playerbot",  "Random bot guilds deleted");;
+        TC_LOG_INFO("playerbot",  "Random bot guilds deleted");
     }
 
     int guildNumber = 0;
     vector<ObjectGuid> availableLeaders;
     for (vector<uint32>::iterator i = randomBots.begin(); i != randomBots.end(); ++i)
     {
-        ObjectGuid leader(HighGuid::Player, *i);
+        ObjectGuid leader = ObjectGuid::Create<HighGuid::Player>(*i);
         Guild* guild = sGuildMgr->GetGuildByLeader(leader);
         if (guild)
         {
@@ -313,7 +308,7 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
         }
         else
         {
-            Player* player = sObjectMgr->GetPlayerByLowGUID(leader);
+            Player* player = ObjectAccessor::FindPlayer(leader);
             if (player)
                 availableLeaders.push_back(leader);
         }
@@ -327,23 +322,23 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
 
         if (availableLeaders.empty())
         {
-            TC_LOG_ERROR("playerbot",  "No leaders for random guilds available");;
+            TC_LOG_ERROR("playerbot",  "No leaders for random guilds available");
             break;
         }
 
         int index = urand(0, availableLeaders.size() - 1);
         ObjectGuid leader = availableLeaders[index];
-        Player* player = sObjectMgr->GetPlayerByLowGUID(leader);
+        Player* player = ObjectAccessor::FindPlayer(leader);
         if (!player)
         {
-            TC_LOG_ERROR("playerbot",  "Cannot find player for leader %u", leader);;
+            TC_LOG_ERROR("playerbot",  "Cannot find player for leader {}", leader.ToString());
             break;
         }
 
         Guild* guild = new Guild();
         if (!guild->Create(player, guildName))
         {
-            TC_LOG_ERROR("playerbot",  "Error creating guild %s", guildName.c_str());;
+            TC_LOG_ERROR("playerbot",  "Error creating guild {}", guildName.c_str());
             break;
         }
 
@@ -351,7 +346,7 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
         sPlayerbotAIConfig.randomBotGuilds.push_back(guild->GetId());
     }
 
-    TC_LOG_INFO("playerbot",  "%d random bot guilds available", guildNumber);;
+    TC_LOG_INFO("playerbot",  "{} random bot guilds available", guildNumber);
 }
 
 string RandomPlayerbotFactory::CreateRandomGuildName()
@@ -359,7 +354,7 @@ string RandomPlayerbotFactory::CreateRandomGuildName()
     QueryResult result = CharacterDatabase.Query("SELECT MAX(name_id) FROM ai_playerbot_guild_names");
     if (!result)
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");;
+        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");
         return "";
     }
 
@@ -369,10 +364,10 @@ string RandomPlayerbotFactory::CreateRandomGuildName()
     uint32 id = urand(0, maxId);
     result = CharacterDatabase.PQuery("SELECT n.name FROM ai_playerbot_guild_names n "
             "LEFT OUTER JOIN guild e ON e.name = n.name "
-            "WHERE e.guildid IS NULL AND n.name_id >= '%u' LIMIT 1", id);
+            "WHERE e.guildid IS NULL AND n.name_id >= '{}' LIMIT 1", id);
     if (!result)
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");;
+        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");
         return "";
     }
 

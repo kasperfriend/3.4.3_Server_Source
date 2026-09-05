@@ -11,15 +11,15 @@ bool SpellCastUsefulValue::Calculate()
 	if (!spellid)
 		return true; // there can be known alternatives
 
-	SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid);
+	SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid, DIFFICULTY_NONE);
 	if (!spellInfo)
 		return true; // there can be known alternatives
 
 	if (spellInfo->Attributes & SPELL_ATTR0_ON_NEXT_SWING ||
-		spellInfo->Attributes & SPELL_ATTR0_ON_NEXT_SWING_2)
+		spellInfo->Attributes & SPELL_ATTR0_ON_NEXT_SWING_NO_DAMAGE)
 	{
 		Spell* spell = bot->GetCurrentSpell(CURRENT_MELEE_SPELL);
-		if (spell && spell->m_spellInfo->Id == spellid && spell->IsNextMeleeSwingSpell() && bot->HasUnitState(UNIT_STATE_MELEE_ATTACKING))
+		if (spell && spell->m_spellInfo->Id == spellid && spell->GetSpellInfo()->IsNextMeleeSwingSpell() && bot->HasUnitState(UNIT_STATE_MELEE_ATTACKING))
 			return false;
 	}
 	else

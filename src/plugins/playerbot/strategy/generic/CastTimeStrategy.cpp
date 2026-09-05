@@ -18,7 +18,7 @@ float CastTimeMultiplier::GetValue(Action* action)
     if (targetHealth < sPlayerbotAIConfig.lowHealth && dynamic_cast<CastSpellAction*>(action))
     {
         uint32 spellId = AI_VALUE2(uint32, "spell id", name);
-        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             return 1.0f;
 

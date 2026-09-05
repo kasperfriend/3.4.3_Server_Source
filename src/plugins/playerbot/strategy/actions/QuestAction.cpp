@@ -50,7 +50,7 @@ bool QuestAction::ProcessQuests(WorldObject* questGiver)
     }
 
     if (!bot->isInFront(questGiver, M_PI / 2))
-        bot->SetFacingTo(bot->GetAngle(questGiver));
+        bot->SetFacingTo(bot->GetAbsoluteAngle(questGiver));
 
     bot->SetSelection(guid);
     bot->PrepareQuestMenu(guid);
@@ -69,7 +69,7 @@ bool QuestAction::ProcessQuests(WorldObject* questGiver)
     return true;
 }
 
-bool QuestAction::AcceptQuest(Quest const* quest, uint64 questGiver)
+bool QuestAction::AcceptQuest(Quest const* quest, ObjectGuid questGiver)
 {
     std::ostringstream out;
 
@@ -91,11 +91,10 @@ bool QuestAction::AcceptQuest(Quest const* quest, uint64 questGiver)
 
     else
     {
-        WorldPacket p(CMSG_QUEST_GIVER_ACCEPT_QUEST);
-        uint32 unk1 = 0;
-        p << questGiver << questId << unk1;
-        p.rpos(0);
-        bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(p);
+        WorldPackets::Quest::QuestGiverAcceptQuest accept{WorldPacket(CMSG_QUEST_GIVER_ACCEPT_QUEST)};
+        accept.QuestGiverGUID = questGiver;
+        accept.QuestID = int32(questId);
+        bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(accept);
 
         if (bot->GetQuestStatus(questId) != QUEST_STATUS_NONE)
         {

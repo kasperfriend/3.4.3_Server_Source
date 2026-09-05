@@ -16,18 +16,18 @@ class RandomItemGuildTaskPredicate : public RandomItemPredicate
 public:
     virtual bool Apply(ItemTemplate const* proto)
     {
-        if (proto->Bonding == BIND_WHEN_PICKED_UP ||
-                proto->Bonding == BIND_QUEST_ITEM ||
-                proto->Bonding == BIND_WHEN_USE)
+        if (proto->GetBonding() == BIND_ON_ACQUIRE ||
+                proto->GetBonding() == BIND_QUEST ||
+                proto->GetBonding() == BIND_ON_USE)
             return false;
 
-        if (proto->Quality < ITEM_QUALITY_UNCOMMON)
+        if (proto->GetQuality() < ITEM_QUALITY_UNCOMMON)
             return false;
 
-        if ((proto->Class == ITEM_CLASS_ARMOR || proto->Class == ITEM_CLASS_WEAPON) && proto->Quality >= ITEM_QUALITY_RARE)
+        if ((proto->GetClass() == ITEM_CLASS_ARMOR || proto->GetClass() == ITEM_CLASS_WEAPON) && proto->GetQuality() >= ITEM_QUALITY_RARE)
             return true;
 
-        if (proto->Class == ITEM_CLASS_TRADE_GOODS || proto->Class == ITEM_CLASS_CONSUMABLE)
+        if (proto->GetClass() == ITEM_CLASS_TRADE_GOODS || proto->GetClass() == ITEM_CLASS_CONSUMABLE)
             return true;
 
         return false;
@@ -41,21 +41,21 @@ public:
 
     virtual bool Apply(ItemTemplate const* proto)
     {
-        if (proto->Bonding == BIND_WHEN_PICKED_UP ||
-                proto->Bonding == BIND_QUEST_ITEM ||
-                proto->Bonding == BIND_WHEN_USE)
+        if (proto->GetBonding() == BIND_ON_ACQUIRE ||
+                proto->GetBonding() == BIND_QUEST ||
+                proto->GetBonding() == BIND_ON_USE)
             return false;
 
-        if (proto->Quality < ITEM_QUALITY_RARE)
+        if (proto->GetQuality() < ITEM_QUALITY_RARE)
             return false;
 
-        if (proto->Class == ITEM_CLASS_QUEST)
+        if (proto->GetClass() == ITEM_CLASS_QUEST)
             return false;
 
-        if (equip && (proto->Class == ITEM_CLASS_ARMOR || proto->Class == ITEM_CLASS_WEAPON))
+        if (equip && (proto->GetClass() == ITEM_CLASS_ARMOR || proto->GetClass() == ITEM_CLASS_WEAPON))
             return true;
 
-        if (!equip && (proto->Class == ITEM_CLASS_TRADE_GOODS || proto->Class == ITEM_CLASS_CONSUMABLE))
+        if (!equip && (proto->GetClass() == ITEM_CLASS_TRADE_GOODS || proto->GetClass() == ITEM_CLASS_CONSUMABLE))
             return true;
 
         return false;
@@ -84,7 +84,7 @@ bool RandomItemMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
 {
     if (!args || !*args)
     {
-        TC_LOG_ERROR("gtask",  "Usage: rnditem");;
+        TC_LOG_ERROR("gtask",  "Usage: rnditem");
         return false;
     }
 
@@ -118,24 +118,24 @@ RandomItemList RandomItemMgr::Query(RandomItemType type)
 {
     RandomItemList items;
 
-    ItemTemplateContainer const* itemTemplates = sObjectMgr->GetItemTemplateStore();
-    for (ItemTemplateContainer::const_iterator i = itemTemplates->begin(); i != itemTemplates->end(); ++i)
+    ItemTemplateContainer const& itemTemplates = sObjectMgr->GetItemTemplateStore();
+    for (ItemTemplateContainer::const_iterator i = itemTemplates.begin(); i != itemTemplates.end(); ++i)
     {
         uint32 itemId = i->first;
         ItemTemplate const* proto = &i->second;
         if (!proto)
             continue;
 
-        if (proto->Duration & 0x80000000)
+        if (proto->GetDuration() & 0x80000000)
             continue;
 
-        if (sAhBotConfig.ignoreItemIds.find(proto->ItemId) != sAhBotConfig.ignoreItemIds.end())
+        if (sAhBotConfig.ignoreItemIds.find(proto->GetId()) != sAhBotConfig.ignoreItemIds.end())
             continue;
 
-        if (strstri(proto->Name1.c_str(), "qa") || strstri(proto->Name1.c_str(), "test") || strstri(proto->Name1.c_str(), "deprecated"))
+        if (strstri(proto->GetDefaultLocaleName(), "qa") || strstri(proto->GetDefaultLocaleName(), "test") || strstri(proto->GetDefaultLocaleName(), "deprecated"))
             continue;
 
-        if ((proto->RequiredLevel && proto->RequiredLevel > sAhBotConfig.maxRequiredLevel) || proto->ItemLevel > sAhBotConfig.maxItemLevel)
+        if ((proto->GetBaseRequiredLevel() && proto->GetBaseRequiredLevel() > sAhBotConfig.maxRequiredLevel) || proto->GetItemLevel() > sAhBotConfig.maxItemLevel)
             continue;
 
         if (predicates[type] && !predicates[type]->Apply(proto))
@@ -148,7 +148,7 @@ RandomItemList RandomItemMgr::Query(RandomItemType type)
     }
 
     if (items.empty())
-        TC_LOG_ERROR("gtask",  "no items available for random item query %u", type);;
+        TC_LOG_ERROR("gtask",  "no items available for random item query {}", type);
 
     return items;
 }

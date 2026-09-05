@@ -15,7 +15,7 @@ NextAction* toNextAction(string action)
     else if (tokens.size() == 1)
         return new NextAction(tokens[0], ACTION_NORMAL);
 
-    TC_LOG_ERROR("playerbot",  "Invalid action '%s'", action);;
+    TC_LOG_ERROR("playerbot",  "Invalid action '{}'", action);
     return NULL;
 }
 
@@ -38,7 +38,7 @@ TriggerNode* toTriggerNode(string actionLine)
     if (tokens.size() == 2)
         return new TriggerNode(tokens[0], toNextActionArray(tokens[1]));
 
-    TC_LOG_ERROR("playerbot",  "Invalid action line '%s'", actionLine);;
+    TC_LOG_ERROR("playerbot",  "Invalid action line '{}'", actionLine);
     return NULL;
 }
 
@@ -48,13 +48,13 @@ void CustomStrategy::InitTriggers(std::list<TriggerNode*> &triggers)
     {
         if (actionLinesCache[qualifier].empty())
         {
-            QueryResult results = CharacterDatabase.PQuery("SELECT action_line FROM ai_playerbot_custom_strategy WHERE name = '%s'", qualifier.c_str());
+            QueryResult results = CharacterDatabase.PQuery("SELECT action_line FROM ai_playerbot_custom_strategy WHERE name = '{}'", qualifier);
             if (results)
             {
                 do
                 {
                     Field* fields = results->Fetch();
-                    string action = fields[0].GetCString();
+                    string action = fields[0].GetString();
                     this->actionLines.push_back(action);
                 } while (results->NextRow());
             }

@@ -19,20 +19,20 @@ public:
 
         const ItemTemplate* proto = item->GetTemplate();
 
-        if (proto->Class != ITEM_CLASS_CONSUMABLE)
+        if (proto->GetClass() != ITEM_CLASS_CONSUMABLE)
             return true;
 
-        if (proto->SubClass != ITEM_SUBCLASS_ELIXIR && 
-            proto->SubClass != ITEM_SUBCLASS_FLASK &&
-            proto->SubClass != ITEM_SUBCLASS_SCROLL && 
-            proto->SubClass != ITEM_SUBCLASS_FOOD &&
-            proto->SubClass != ITEM_SUBCLASS_CONSUMABLE_OTHER &&
-            proto->SubClass != ITEM_SUBCLASS_ITEM_ENHANCEMENT)
+        if (proto->GetSubClass() != ITEM_SUBCLASS_ELIXIR && 
+            proto->GetSubClass() != ITEM_SUBCLASS_FLASK &&
+            proto->GetSubClass() != ITEM_SUBCLASS_SCROLL && 
+            proto->GetSubClass() != ITEM_SUBCLASS_FOOD_DRINK &&
+            proto->GetSubClass() != ITEM_SUBCLASS_CONSUMABLE_OTHER &&
+            proto->GetSubClass() != ITEM_SUBCLASS_ITEM_ENHANCEMENT)
             return true;
 
-        for (int i=0; i<MAX_ITEM_PROTO_SPELLS; i++)
+        for (int i=0; i<MAX_ITEM_PROTO_EFFECTS; i++)
         {
-            uint32 spellId = proto->Spells[i].SpellId;
+            uint32 spellId = ItemSpellId(proto, i);
             if (!spellId)
                 continue;
 
@@ -43,10 +43,10 @@ public:
             if (itemForSpell && itemForSpell->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT))
                 return true;
         
-            if (items.find(proto->SubClass) == items.end())
-                items[proto->SubClass] = list<Item*>();
+            if (items.find(proto->GetSubClass()) == items.end())
+                items[proto->GetSubClass()] = list<Item*>();
 
-            items[proto->SubClass].push_back(item);
+            items[proto->GetSubClass()].push_back(item);
             break;
         }
 
@@ -73,10 +73,10 @@ void BuffAction::TellHeader(uint32 subClass)
     case ITEM_SUBCLASS_SCROLL:
         ai->TellMaster("--- Scroll ---");
         return;
-    case ITEM_SUBCLASS_FOOD:
+    case ITEM_SUBCLASS_FOOD_DRINK:
         ai->TellMaster("--- Food ---");
         return;
-    case ITEM_SUBCLASS_GENERIC:
+    case ITEM_SUBCLASS_CONSUMABLE:
         ai->TellMaster("--- Other ---");
         return;
     case ITEM_SUBCLASS_ITEM_ENHANCEMENT:

@@ -15,7 +15,7 @@ namespace pbot
     {
         // Upper bound covers all WotLK-era spell ids (spell ids below 100000).
         uint32 GetNumRows() const { return 100000; }
-        SpellInfo const* LookupEntry(uint32 id) const { return sSpellMgr->GetSpellInfo(id); }
+        SpellInfo const* LookupEntry(uint32 id) const { return sSpellMgr->GetSpellInfo(id, DIFFICULTY_NONE); }
     };
 }
 

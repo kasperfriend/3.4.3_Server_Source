@@ -362,6 +362,8 @@ class TC_GAME_API Group
         void ChangeMembersGroup(ObjectGuid guid, uint8 group);
         void SwapMembersGroups(ObjectGuid firstGuid, ObjectGuid secondGuid);
         void SetTargetIcon(uint8 symbol, ObjectGuid target, ObjectGuid changedBy);
+        // playerbot mod
+        ObjectGuid GetTargetIcon(uint8 symbol) const { return symbol < TARGET_ICONS_COUNT ? m_targetIcons[symbol] : ObjectGuid::Empty; }
         void SetGroupMemberFlag(ObjectGuid guid, bool apply, GroupMemberFlags flag);
         void RemoveUniqueGroupMemberFlag(GroupMemberFlags flag);
 
@@ -404,6 +406,7 @@ class TC_GAME_API Group
         /*********************************************************/
 
         bool isRollLootActive() const { return !RollId.empty(); }
+        std::vector<Roll*> const& GetRolls() const { return RollId; } // playerbot
         void SendLootStartRollToPlayer(uint32 countDown, uint32 mapId, Player* p, bool canNeed, Roll const& r) const;
         void SendLootRoll(ObjectGuid playerGuid, int32 rollNumber, uint8 rollType, Roll const& roll, bool autoPass = false) const;
         void SendLootRollWon(ObjectGuid winnerGuid, int32 rollNumber, uint8 rollType, Roll const& roll) const;

@@ -31,13 +31,13 @@ bool EquipAction::Execute(Event event)
 
 bool EquipAction::UseEquipmentSet(string& name)
 {
-    EquipmentSets &sets = bot->GetEquipmentSets();
-    for (EquipmentSets::iterator i = sets.begin(); i != sets.end(); i++)
+    for (auto const& itr : bot->GetEquipmentSets())
     {
-        if (i->second.state == EQUIPMENT_SET_DELETED || i->second.Name != name)
+        EquipmentSetInfo const& eqSet = itr.second;
+        if (eqSet.State == EQUIPMENT_SET_DELETED || eqSet.Data.SetName != name)
             continue;
 
-        UseEquipmentSet(i->second);
+        UseEquipmentSet(eqSet.Data);
 
         ostringstream out; out << name << " set equipped";
         ai->TellMaster(out);
@@ -46,32 +46,28 @@ bool EquipAction::UseEquipmentSet(string& name)
     return false;
 }
 
-bool EquipAction::UseEquipmentSet(EquipmentSet& set)
+bool EquipAction::UseEquipmentSet(EquipmentSetInfo::EquipmentSetData const& set)
 {
-    WorldPacket* p = new WorldPacket(CMSG_USE_EQUIPMENT_SET);
-    uint8 srcbag = 0;
-    for(uint8 slot = 0; slot < EQUIPMENT_SLOT_END; ++slot)
+    WorldPackets::EquipmentSet::UseEquipmentSet useSet{WorldPacket(CMSG_USE_EQUIPMENT_SET)};
+    useSet.GUID = set.Guid;
+    for (uint8 slot = 0; slot < EQUIPMENT_SET_SLOTS; ++slot)
     {
-        ObjectGuid guid;
-        uint32 itemId = set.Items[slot];
-        if (set.IgnoreMask & (1 << slot))
-            p->appendPackGUID((uint64(1)));
-        else
-            p->appendPackGUID(itemId);
-        *p << srcbag << slot;
+        useSet.Items[slot].Item = set.Pieces[slot];
+        useSet.Items[slot].ContainerSlot = NULL_BAG;
+        useSet.Items[slot].Slot = slot;
     }
-    bot->GetSession()->QueuePacket(p);
+
+    bot->GetSession()->HandleUseEquipmentSet(useSet);
     return true;
 }
 
 void EquipAction::TellEquipmentSets()
 {
     ai->TellMaster("=== Equipment sets ===");
-    EquipmentSets &sets = bot->GetEquipmentSets();
-    for (EquipmentSets::iterator i = sets.begin(); i != sets.end(); i++)
+    for (auto const& itr : bot->GetEquipmentSets())
     {
-        if (i->second.state != EQUIPMENT_SET_DELETED)
-            ai->TellMaster(i->second.Name);
+        if (itr.second.State != EQUIPMENT_SET_DELETED)
+            ai->TellMaster(itr.second.Data.SetName);
     }
 }
 
@@ -87,9 +83,9 @@ void EquipAction::EquipItem(Item& item)
 {
     uint8 bagIndex = item.GetBagSlot();
     uint8 slot = item.GetSlot();
-    uint32 itemId = item.GetTemplate()->ItemId;
+    uint32 itemId = item.GetTemplate()->GetId();
 
-    if (item.GetTemplate()->InventoryType == INVTYPE_AMMO)
+    if (item.GetTemplate()->GetInventoryType() == INVTYPE_AMMO)
     {
         bot->SetAmmo(itemId);
     }

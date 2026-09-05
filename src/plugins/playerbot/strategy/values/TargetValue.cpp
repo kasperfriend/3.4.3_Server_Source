@@ -13,7 +13,7 @@ Unit* TargetValue::FindTarget(FindTargetStrategy* strategy)
         if (!unit)
             continue;
 
-        ThreatManager &threatManager = unit->getThreatManager();
+        ThreatManager &threatManager = unit->GetThreatManager();
         strategy->CheckAttacker(unit, &threatManager);
     }
 
@@ -33,12 +33,13 @@ void FindTargetStrategy::GetPlayerCount(Unit* creature, int* tankCount, int* dps
     *tankCount = 0;
     *dpsCount = 0;
 
-    for (HostileReference *ref = creature->getHostileRefManager().getFirst(); ref; ref = ref->next())
+    for (auto const& pair : creature->GetThreatManager().GetThreatenedByMeList())
     {
-        ThreatManager *threatManager = ref->GetSource();
-        Unit *attacker = threatManager->GetOwner();
-        Unit *victim = attacker->GetVictim();
-        Player *player = dynamic_cast<Player*>(victim);
+        Unit* attacker = pair.second->GetOwner();
+        if (!attacker)
+            continue;
+
+        Player *player = dynamic_cast<Player*>(attacker->GetVictim());
 
         if (!player)
             continue;

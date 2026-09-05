@@ -18,7 +18,7 @@ bool QueryItemUsageAction::Execute(Event event)
 
         ObjectGuid guid;
         data >> guid;
-        if (guid.GetRawValue() != bot->GetGUID())
+        if (guid != bot->GetGUID())
             return false;
 
         uint32 received, created, isShowChatMessage, notUsed, itemId,
@@ -62,7 +62,7 @@ bool QueryItemUsageAction::Execute(Event event)
 
 bool QueryItemUsageAction::QueryItemUsage(ItemTemplate const *item)
 {
-    ostringstream out; out << item->ItemId;
+    ostringstream out; out << item->GetId();
     ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", out.str());
     switch (usage)
     {
@@ -91,10 +91,10 @@ void QueryItemUsageAction::QueryItemPrice(ItemTemplate const *item)
     if (!sRandomPlayerbotMgr.IsRandomBot(bot))
         return;
 
-    if (item->Bonding == BIND_WHEN_PICKED_UP)
+    if (item->GetBonding() == BIND_ON_ACQUIRE)
         return;
 
-    list<Item*> items = InventoryAction::parseItems(item->Name1);
+    list<Item*> items = InventoryAction::parseItems(item->GetDefaultLocaleName());
     if (!items.empty())
     {
         for (list<Item*>::iterator i = items.begin(); i != items.end(); ++i)
@@ -107,7 +107,7 @@ void QueryItemUsageAction::QueryItemPrice(ItemTemplate const *item)
         }
     }
 
-    ostringstream out; out << item->ItemId;
+    ostringstream out; out << item->GetId();
     ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", out.str());
     if (usage == ITEM_USAGE_NONE)
         return;
@@ -155,16 +155,16 @@ void QueryItemUsageAction::QueryQuestItem(uint32 itemId)
 
 void QueryItemUsageAction::QueryQuestItem(uint32 itemId, const Quest *questTemplate, const QuestStatusData *questStatus)
 {
-    for (int i = 0; i < QUEST_OBJECTIVES_COUNT; i++)
+    for (QuestObjective const& objective : questTemplate->GetObjectives())
     {
-        if (questTemplate->RequiredItemId[i] != itemId)
+        if (objective.Type != QUEST_OBJECTIVE_ITEM || uint32(objective.ObjectID) != itemId)
             continue;
 
-        int required = questTemplate->RequiredItemCount[i];
-        int available = questStatus->ItemCount[i];
-
+        int32 required = objective.Amount;
         if (!required)
             continue;
+
+        int32 available = bot->GetQuestObjectiveData(objective);
 
         ai->TellMaster(chat->formatQuestObjective(chat->formatQuest(questTemplate), available, required));
     }

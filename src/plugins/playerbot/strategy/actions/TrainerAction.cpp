@@ -4,16 +4,17 @@
 
 using namespace ai;
 
-void TrainerAction::Learn(uint32 cost, TrainerSpell const* tSpell, ostringstream& msg)
+void TrainerAction::Learn(uint32 cost, Trainer::Spell const& tSpell, ostringstream& msg)
 {
     if (bot->GetMoney() < cost)
         return;
 
-    bot->ModifyMoney(-int32(cost));
-    if (tSpell->IsCastable())
-        bot->CastSpell(bot, tSpell->spell, true);
+    bot->ModifyMoney(-int64(cost));
+
+    if (tSpell.IsCastable())
+        bot->CastSpell(bot, tSpell.SpellId, true);
     else
-        bot->LearnSpell(tSpell->learnedSpell[0], false, false);
+        bot->LearnSpell(tSpell.SpellId, false);
 
     msg << " - learned";
 }
@@ -22,36 +23,35 @@ void TrainerAction::List(Creature* creature, TrainerSpellAction action, SpellIds
 {
     TellHeader(creature);
 
-    TrainerSpellData const* trainer_spells = creature->GetTrainerSpells();
-    float fDiscountMod =  bot->GetReputationPriceDiscount(creature);
+    Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(creature->GetEntry());
+    if (!trainer)
+        return;
+
+    float fDiscountMod = bot->GetReputationPriceDiscount(creature);
     uint32 totalCost = 0;
 
-    for (TrainerSpellMap::const_iterator itr =  trainer_spells->spellList.begin(); itr !=  trainer_spells->spellList.end(); ++itr)
+    for (Trainer::Spell const& tSpell : trainer->GetSpells())
     {
-        TrainerSpell const* tSpell = &itr->second;
-
-        if (!tSpell)
+        if (!tSpell.SpellId)
             continue;
 
-        if (!tSpell->learnedSpell && !bot->IsSpellFitByClassAndRace(tSpell->learnedSpell[0]))
+        if (!bot->IsSpellFitByClassAndRace(tSpell.SpellId))
             continue;
 
-        TrainerSpellState state = bot->GetTrainerSpellState(tSpell);
-        if (state != TRAINER_SPELL_GREEN)
+        if (trainer->GetSpellStateForPlayer(bot, tSpell) != Trainer::SpellState::Available)
             continue;
 
-        uint32 spellId = tSpell->spell;
-        const SpellInfo *const pSpellInfo =  sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(tSpell.SpellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 
-        uint32 cost = uint32(floor(tSpell->spellCost *  fDiscountMod));
+        uint32 cost = uint32(floor(tSpell.MoneyCost * fDiscountMod));
         totalCost += cost;
 
         ostringstream out;
         out << chat->formatSpell(pSpellInfo) << chat->formatMoney(cost);
 
-        if (action && (spells.empty() || spells.find(tSpell->spell) != spells.end() || spells.find(tSpell->learnedSpell[0]) != spells.end()))
+        if (action && (spells.empty() || spells.find(tSpell.SpellId) != spells.end()))
             (this->*action)(cost, tSpell, out);
 
         ai->TellMaster(out);
@@ -78,7 +78,7 @@ bool TrainerAction::Execute(Event event)
         return false;
 
     // check present spell in trainer spell list
-    TrainerSpellData const* cSpells = creature->GetTrainerSpells();
+    Trainer::Trainer const* cSpells = sObjectMgr->GetTrainer(creature->GetEntry());
     if (!cSpells)
     {
         ai->TellMaster("No spells can be learned from this trainer");

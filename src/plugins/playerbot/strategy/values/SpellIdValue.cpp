@@ -32,17 +32,17 @@ uint32 SpellIdValue::Calculate()
     {
         uint32 spellId = itr->first;
 
-        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 
-        if (itr->second->state == PLAYERSPELL_REMOVED || itr->second->disabled || pSpellInfo->IsPassive())
+        if (itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || pSpellInfo->IsPassive())
             continue;
 
-        if (pSpellInfo->Effects[0].Effect == SPELL_EFFECT_LEARN_SPELL)
+        if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)
             continue;
 
-        char* spellName = pSpellInfo->SpellName[loc];
+        char const* spellName = pSpellInfo->SpellName->Str[loc];
         if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
             continue;
 
@@ -71,14 +71,14 @@ uint32 SpellIdValue::Calculate()
                 continue;
 
             uint32 spellId = itr->first;
-            const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+            const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
             if (!pSpellInfo)
                 continue;
 
-            if (pSpellInfo->Effects[0].Effect == SPELL_EFFECT_LEARN_SPELL)
+            if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)
                 continue;
 
-            char* spellName = pSpellInfo->SpellName[loc];
+            char const* spellName = pSpellInfo->SpellName->Str[loc];
             if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
                 continue;
 

@@ -94,6 +94,7 @@
 #include "PartyPackets.h"
 #include "Pet.h"
 #include "PetPackets.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "PoolMgr.h"
 #include "PetitionMgr.h"
 #include "PhasingHandler.h"
@@ -364,6 +365,9 @@ Player::~Player()
         delete ItemSetEff[x];
 
     sWorld->DecreasePlayerCount();
+
+    // playerbot mod: release the AI/manager owned by this player
+    Playerbot::OnPlayerDelete(this);
 }
 
 void Player::CleanupsBeforeDelete(bool finalCleanup)
@@ -909,6 +913,10 @@ void Player::Update(uint32 p_time)
 {
     if (!IsInWorld())
         return;
+
+    // playerbot mod: drive the bot AI attached to this player (and the bots it owns)
+    if (_playerbotAI || _playerbotMgr)
+        Playerbot::OnPlayerUpdate(this, p_time);
 
     // undelivered mail
     if (m_nextMailDelivereTime && m_nextMailDelivereTime <= GameTime::GetGameTime())

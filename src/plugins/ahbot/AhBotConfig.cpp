@@ -1,3 +1,4 @@
+#include <sstream>
 #include "AhBotConfig.h"
 
 bool AhBotConfig::Initialize()

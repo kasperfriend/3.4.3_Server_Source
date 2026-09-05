@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Action.h"
+#include "Server/Packets/PartyPackets.h"
 
 namespace ai
 {
@@ -13,9 +14,9 @@ namespace ai
             Player* master = GetMaster();
             if (master && bot->GetGroup() && bot->GetGroup()->IsMember(master->GetGUID()))
             {
-                WorldPacket p(SMSG_GROUP_NEW_LEADER, 8);
-                p << master->GetGUID();
-                bot->GetSession()->HandleGroupSetLeaderOpcode(p);
+                WorldPackets::Party::SetPartyLeader setLeader{WorldPacket(CMSG_SET_PARTY_LEADER)};
+                setLeader.TargetGUID = master->GetGUID();
+                bot->GetSession()->HandleSetPartyLeaderOpcode(setLeader);
                 return true;
             }
 

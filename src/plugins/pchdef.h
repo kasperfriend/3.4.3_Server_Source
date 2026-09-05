@@ -23,6 +23,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstdarg>
 #include <cstdint>
+#include <memory>
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
 
 #endif /* PCHDEF_H_ */

@@ -1,9 +1,15 @@
-##########################################
-# MANGOS Ai Playerbot Configuration file #
-##########################################
+###############################################################################
+# TrinityCore 3.4.3 AI Playerbot configuration
+#
+# Ported from ike3/mangosbot (https://github.com/ike3/mangosbot).
+#
+# Install this file as <config dir>/worldserver.conf.d/aiplayerbot.conf - the
+# worldserver loads every *.conf in that directory automatically. All settings
+# may also be placed directly into worldserver.conf.
+###############################################################################
 
 [AiPlayerbotConf]
-ConfVersion=2010102201
+ConfVersion=2024010100
 
 # Enable or disable AI Playerbot
 AiPlayerbot.Enabled = 1
@@ -98,8 +104,9 @@ AiPlayerbot.CommandPrefix =
 #AiPlayerbot.RandomBotCombatStrategies = +dps,+attack weak
 #AiPlayerbot.RandomBotNonCombatStrategies = +grind,+move random,+loot
 
-# Create random bot characters automatically
-#AiPlayerbot.RandomBotAutoCreate = 1
+# Time (in seconds) before a dead random bot is revived
+#AiPlayerbot.MinRandomBotReviveTime = 60
+#AiPlayerbot.MaxRandomReviveTime = 300
 
 # Random bot count
 #AiPlayerbot.MinRandomBots = 50
@@ -173,8 +180,11 @@ AiPlayerbot.RandomBotTeleLevel = 3
 # How far random bots are teleported after death
 #AiPlayerbot.RandomBotTeleportDistance = 1000
 
+# Strategies applied to every bot on top of the class defaults
+#AiPlayerbot.CombatStrategies = +custom::say
+#AiPlayerbot.NonCombatStrategies = +custom::say
+
 # Debug switches
-#AiPlayerbot.SpellDump = 0
 #AiPlayerbot.LogInGroupOnly = 1
 #AiPlayerbot.LogValuesPerTick = 0
 #AiPlayerbot.RandomChangeMultiplier = 1

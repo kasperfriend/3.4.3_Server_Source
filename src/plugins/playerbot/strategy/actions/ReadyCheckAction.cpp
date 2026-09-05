@@ -14,7 +14,7 @@ bool ReadyCheckAction::Execute(Event event)
     if (!p.empty())
         p >> player;
 
-	if (player.GetRawValue() == bot->GetGUID())
+	if (player == bot->GetGUID())
         return false;
 
 	return ReadyCheck();
@@ -47,13 +47,9 @@ bool ReadyCheckAction::ReadyCheck()
         }
     }
 
-    if (bot->getClass() == CLASS_HUNTER)
+    if (bot->GetClass() == CLASS_HUNTER)
     {
-        if (!bot->GetUInt32Value(PLAYER_AMMO_ID))
-        {
-            ai->TellMaster("Out of ammo!");
-            return false;
-        }
+
 
         if (!bot->GetPet())
         {

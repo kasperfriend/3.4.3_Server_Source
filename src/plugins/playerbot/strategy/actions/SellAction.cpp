@@ -30,7 +30,7 @@ public:
 
     virtual bool Visit(Item* item)
     {
-        if (item->GetTemplate()->Quality != ITEM_QUALITY_POOR)
+        if (item->GetTemplate()->GetQuality() != ITEM_QUALITY_POOR)
             return true;
 
         return SellItemsVisitor::Visit(item);
@@ -86,9 +86,11 @@ void SellAction::Sell(Item* item)
     ObjectGuid itemguid = item->GetGUID();
     uint32 count = item->GetCount();
 
-    WorldPacket p;
-    p << vendor->GetGUID() << itemguid << count;
-    bot->GetSession()->HandleSellItemOpcode(p);
+    WorldPackets::Item::SellItem sell{WorldPacket(CMSG_SELL_ITEM)};
+    sell.VendorGUID = vendor->GetGUID();
+    sell.ItemGUID = itemguid;
+    sell.Amount = count;
+    bot->GetSession()->HandleSellItemOpcode(sell);
 
     ostringstream out; out << chat->formatItem(item->GetTemplate()) << " sold";
     ai->TellMaster(out);

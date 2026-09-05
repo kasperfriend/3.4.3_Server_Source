@@ -40,17 +40,17 @@ uint8 ThreatValue::Calculate(Unit* target)
     if (!group)
         return 0;
 
-    float botThreat = target->getThreatManager().getThreat(bot);
+    float botThreat = target->GetThreatManager().GetThreat(bot);
     float maxThreat = 0;
 
     Group::MemberSlotList const& groupSlot = group->GetMemberSlots();
     for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
     {
-        Player *player = sObjectMgr->GetPlayerByLowGUID(itr->guid);
+        Player *player = ObjectAccessor::FindPlayer(itr->guid);
         if( !player || !player->IsAlive() || player == bot)
             continue;
 
-        float threat = target->getThreatManager().getThreat(player);
+        float threat = target->GetThreatManager().GetThreat(player);
         if (maxThreat < threat)
             maxThreat = threat;
     }

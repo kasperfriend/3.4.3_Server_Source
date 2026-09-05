@@ -43,14 +43,14 @@ bool EmoteAction::Execute(Event event)
         {
             Unit* oldSelection = bot->GetSelectedUnit();
             bot->SetSelection(masterSelection->GetGUID());
-            bot->HandleEmoteCommand(emote);
+            bot->HandleEmoteCommand(Emote(emote));
             if (oldSelection)
                 bot->SetSelection(oldSelection->GetGUID());
             return true;
         }
 	}
 
-    bot->HandleEmoteCommand(emote);
+    bot->HandleEmoteCommand(Emote(emote));
     return true;
 }
 

@@ -58,13 +58,15 @@ float SaveManaMultiplier::GetValue(Action* action)
 
     string spell = spellAction->getName();
     uint32 spellId = AI_VALUE2(uint32, "spell id", spell);
-    const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(spellId);
-    if (!spellInfo || spellInfo->PowerType != POWER_MANA)
+    const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
+    if (!spellInfo)
         return 1.0f;
 
-    int32 cost = spellInfo->ManaCost;
-    if (spellInfo->ManaCostPercentage)
-        cost += spellInfo->ManaCostPercentage * bot->GetCreateMana() / 100;
+    Optional<SpellPowerCost> manaCost = spellInfo->CalcPowerCost(POWER_MANA, bot, spellInfo->GetSchoolMask());
+    if (!manaCost)
+        return 1.0f;
+
+    int32 cost = manaCost->Amount;
 
     uint32 mana = bot->GetMaxPower(POWER_MANA);
     double percent = (double)cost / (double)mana * 100.0f;

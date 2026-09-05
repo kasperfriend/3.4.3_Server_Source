@@ -56,12 +56,12 @@ bool RewardAction::Reward(uint32 itemId, Object* questGiver)
             for (uint8 rewardIdx=0; rewardIdx < pQuest->GetRewChoiceItemsCount(); ++rewardIdx)
             {
                 ItemTemplate const * const pRewardItem = sObjectMgr->GetItemTemplate(pQuest->RewardChoiceItemId[rewardIdx]);
-                if (itemId == pRewardItem->ItemId)
+                if (itemId == pRewardItem->GetId())
                 {
-                    bot->RewardQuest(pQuest, rewardIdx, questGiver, false);
+                    bot->RewardQuest(pQuest, LootItemType::Item, rewardIdx, questGiver, false);
 
-                    string questTitle  = pQuest->GetTitle();
-                    string itemName = pRewardItem->Name1;
+                    string questTitle  = pQuest->GetLogTitle();
+                    string itemName = pRewardItem->GetDefaultLocaleName();
 
                     ostringstream out; out << chat->formatItem(pRewardItem) << " rewarded";
                     ai->TellMaster(out);

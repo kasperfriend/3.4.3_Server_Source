@@ -34,20 +34,16 @@ bool TellAttackersAction::Execute(Event event)
     }
 
     ai->TellMaster("--- Threat ---");
-    HostileReference *ref = bot->getHostileRefManager().getFirst();
-    if (!ref)
-        return true;
-
-    while( ref )
+    for (auto const& pair : bot->GetThreatManager().GetThreatenedByMeList())
     {
-        ThreatManager *threatManager = ref->GetSource();
-        Unit *unit = threatManager->GetOwner();
-        float threat = ref->getThreat();
+        Unit* unit = pair.second->GetOwner();
+        if (!unit)
+            continue;
+
+        float threat = pair.second->GetThreat();
 
         ostringstream out; out << unit->GetName() << " (" << threat << ")";
         ai->TellMaster(out);
-
-        ref = ref->next();
     }
     return true;
 }

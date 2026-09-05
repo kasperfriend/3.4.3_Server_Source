@@ -2272,6 +2272,7 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         void SendEquipmentSetList();
         void SetEquipmentSet(EquipmentSetInfo::EquipmentSetData const& newEqSet);
         void DeleteEquipmentSet(uint64 id);
+        EquipmentSetContainer const& GetEquipmentSets() const { return _equipmentSets; }  // playerbot
 
         void SendInitWorldStates(uint32 zoneId, uint32 areaId);
         void SendUpdateWorldState(uint32 variable, uint32 value, bool hidden = false) const;

@@ -14,9 +14,9 @@ bool TaxiAction::Execute(Event event)
     WorldPacket& p = event.getPacket();
 	if (!p.empty() && p.GetOpcode() == CMSG_MOVE_SPLINE_DONE)
     {
-        WorldPacket p1(p);
-        p1.rpos(0);
-        bot->GetSession()->HandleMoveSplineDoneOpcode(p1);
+        WorldPackets::Movement::MoveSplineDone splineDone{WorldPacket(p)};
+        splineDone.Read();
+        bot->GetSession()->HandleMoveSplineDoneOpcode(splineDone);
         movement.taxiNodes.clear();
         movement.Set(NULL);
         return true;
@@ -25,7 +25,7 @@ bool TaxiAction::Execute(Event event)
     list<ObjectGuid> units = *context->GetValue<list<ObjectGuid> >("nearest npcs");
     for (list<ObjectGuid>::iterator i = units.begin(); i != units.end(); i++)
     {
-        Creature *npc = bot->GetNPCIfCanInteractWith(*i, UNIT_NPC_FLAG_FLIGHTMASTER);
+        Creature *npc = bot->GetNPCIfCanInteractWith(*i, UNIT_NPC_FLAG_FLIGHTMASTER, UNIT_NPC_FLAG_2_NONE);
         if (!npc)
             continue;
 

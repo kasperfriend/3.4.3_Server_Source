@@ -43,3 +43,11 @@ set_target_properties(plugins
   PROPERTIES
     FOLDER
       "server")
+
+# Install the playerbot configuration next to worldserver.conf so that the
+# worldserver picks it up automatically from worldserver.conf.d.
+if(UNIX)
+  install(FILES playerbot/aiplayerbot.conf.dist DESTINATION ${CONF_DIR}/worldserver.conf.d)
+elseif(WIN32)
+  install(FILES playerbot/aiplayerbot.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}/worldserver.conf.d")
+endif()

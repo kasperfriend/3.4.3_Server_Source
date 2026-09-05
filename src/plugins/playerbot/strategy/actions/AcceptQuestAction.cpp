@@ -17,8 +17,8 @@ bool AcceptQuestAction::Execute(Event event)
         return false;
 
     Player *bot = ai->GetBot();
-    uint64 guid;
-    uint32 quest;
+    ObjectGuid guid;
+    uint32 quest = 0;
 
     string text = event.getParam();
     PlayerbotChatHandler ch(master);
@@ -31,12 +31,15 @@ bool AcceptQuestAction::Execute(Event event)
             ai->TellMaster("Please select quest giver NPC");
             return false;
         }
+
+        guid = npc->GetGUID();
     }
     else if (!event.getPacket().empty())
     {
-        WorldPacket& p = event.getPacket();
-        p.rpos(0);
-        p >> guid >> quest;
+        WorldPackets::Quest::QuestGiverAcceptQuest packet(WorldPacket(event.getPacket()));
+        packet.Read();
+        guid = packet.QuestGiverGUID;
+        quest = uint32(packet.QuestID);
     }
     else if (text == "*")
     {
@@ -57,28 +60,27 @@ bool AcceptQuestShareAction::Execute(Event event)
     Player* master = GetMaster();
     Player *bot = ai->GetBot();
 
-    WorldPacket& p = event.getPacket();
-    p.rpos(0);
-    uint32 quest;
-    p >> quest;
+    WorldPackets::Quest::QuestPushResult packet(WorldPacket(event.getPacket()));
+    packet.Read();
+    uint32 quest = bot->GetSharedQuestID();
     Quest const* qInfo = sObjectMgr->GetQuestTemplate(quest);
 
-    if (!qInfo || !bot->GetDivider())
+    if (!qInfo || bot->GetPlayerSharingQuest().IsEmpty())
         return false;
 
     quest = qInfo->GetQuestId();
     if( !bot->CanTakeQuest( qInfo, false ) )
     {
         // can't take quest
-        bot->SetDivider( ObjectGuid() );
+        bot->ClearQuestSharingInfo();
         ai->TellMaster("I can't take this quest");
 
         return false;
     }
 
     // send msg to quest giving player
-    master->SendPushToPartyResponse( bot, QUEST_PARTY_MSG_ACCEPT_QUEST );
-    bot->SetDivider( ObjectGuid() );
+    master->SendPushToPartyResponse( bot, QuestPushReason::Accepted );
+    bot->ClearQuestSharingInfo();
 
     if( bot->CanAddQuest( qInfo, false ) )
     {

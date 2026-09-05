@@ -31,9 +31,9 @@ bool SayAction::Execute(Event event)
             do
             {
                 Field* fields = results->Fetch();
-                string name = fields[0].GetCString();
-                string text = fields[1].GetCString();
-                string type = fields[2].GetCString();
+                string name = fields[0].GetString();
+                string text = fields[1].GetString();
+                string type = fields[2].GetString();
 
                 if (type == "yell") text = "/y " + text;
                 stringTable[name].push_back(text);
@@ -48,7 +48,7 @@ bool SayAction::Execute(Event event)
             do
             {
                 Field* fields = results->Fetch();
-                string name = fields[0].GetCString();
+                string name = fields[0].GetString();
                 uint32 probability = fields[1].GetUInt32();
 
                 probabilityTable[name] = probability;
@@ -73,17 +73,17 @@ bool SayAction::Execute(Event event)
     if (!target) target = AI_VALUE(Unit*, "current target");
     if (target) replaceAll(text, "<target>", target->GetName());
 
-    replaceAll(text, "<randomfaction>", IsAlliance(bot->getRace()) ? "Alliance" : "Horde");
+    replaceAll(text, "<randomfaction>", IsAlliance(bot->GetRace()) ? "Alliance" : "Horde");
 
     if (bot->GetMap())
     {
-        uint32 areaId = bot->GetMap()->GetAreaId(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
+        uint32 areaId = bot->GetMap()->GetAreaId(bot->GetPhaseShift(), bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
         if (areaId)
         {
 			AreaTableEntry const* area = sAreaTableStore.LookupEntry(areaId);
             if (area)
             {
-                replaceAll(text, "<subzone>", area->area_name[0]);
+                replaceAll(text, "<subzone>", area->AreaName[LOCALE_enUS]);
             }
         }
     }

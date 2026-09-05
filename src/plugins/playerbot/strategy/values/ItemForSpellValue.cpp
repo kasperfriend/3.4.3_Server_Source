@@ -18,7 +18,7 @@ Item* ItemForSpellValue::Calculate()
     if (!spellid)
         return NULL;
 
-    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid);
+    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid, DIFFICULTY_NONE);
     if (!spellInfo)
         return NULL;
 
@@ -32,18 +32,18 @@ Item* ItemForSpellValue::Calculate()
     }
 
     // Workaround as some spells have no item mask (e.g. shaman weapon enhancements)
-    if (!strcmpi(spellInfo->SpellName[0], "rockbiter weapon") ||
-            !strcmpi(spellInfo->SpellName[0], "flametongue weapon") ||
-            !strcmpi(spellInfo->SpellName[0], "earthliving weapon") ||
-            !strcmpi(spellInfo->SpellName[0], "frostbrand weapon") ||
-            !strcmpi(spellInfo->SpellName[0], "windfury weapon"))
+    if (!strcmpi(spellInfo->SpellName->Str[LOCALE_enUS], "rockbiter weapon") ||
+            !strcmpi(spellInfo->SpellName->Str[LOCALE_enUS], "flametongue weapon") ||
+            !strcmpi(spellInfo->SpellName->Str[LOCALE_enUS], "earthliving weapon") ||
+            !strcmpi(spellInfo->SpellName->Str[LOCALE_enUS], "frostbrand weapon") ||
+            !strcmpi(spellInfo->SpellName->Str[LOCALE_enUS], "windfury weapon"))
     {
         itemForSpell = GetItemFitsToSpellRequirements(EQUIPMENT_SLOT_MAINHAND, spellInfo);
-        if (itemForSpell && itemForSpell->GetTemplate()->Class == ITEM_CLASS_WEAPON)
+        if (itemForSpell && itemForSpell->GetTemplate()->GetClass() == ITEM_CLASS_WEAPON)
             return itemForSpell;
 
         itemForSpell = GetItemFitsToSpellRequirements(EQUIPMENT_SLOT_OFFHAND, spellInfo);
-        if (itemForSpell && itemForSpell->GetTemplate()->Class == ITEM_CLASS_WEAPON)
+        if (itemForSpell && itemForSpell->GetTemplate()->GetClass() == ITEM_CLASS_WEAPON)
             return itemForSpell;
 
         return NULL;

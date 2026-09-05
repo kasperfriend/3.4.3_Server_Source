@@ -1,6 +1,6 @@
 #include "../pchdef.h"
-#include "LootObjectStack.h"
 #include "playerbot.h"
+#include "LootObjectStack.h"
 
 using namespace ai;
 using namespace std;
@@ -61,13 +61,14 @@ void LootObject::Refresh(Player* bot, ObjectGuid guid)
     Creature *creature = ai->GetCreature(guid);
     if (creature && creature->getDeathState() == CORPSE)
     {
-        if (creature->HasFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE))
+        if (creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE))
             this->guid = guid;
 
-        if (creature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_SKINNABLE))
+        if (creature->HasUnitFlag(UNIT_FLAG_SKINNABLE))
         {
-            skillId = creature->GetCreatureTemplate()->GetRequiredLootSkill();
-            uint32 targetLevel = creature->getLevel();
+            if (CreatureDifficulty const* creatureDifficulty = creature->GetCreatureTemplate()->GetDifficulty(DIFFICULTY_NONE))
+                skillId = creatureDifficulty->GetRequiredLootSkill();
+            uint32 targetLevel = creature->GetLevel();
             reqSkillValue = targetLevel < 10 ? 0 : targetLevel < 20 ? (targetLevel - 10) * 10 : targetLevel * 5;
             if (bot->HasSkill(skillId) && bot->GetSkillValue(skillId) >= reqSkillValue)
                 this->guid = guid;

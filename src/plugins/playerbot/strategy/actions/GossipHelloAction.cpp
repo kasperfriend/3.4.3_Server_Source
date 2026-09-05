@@ -22,46 +22,48 @@ bool GossipHelloAction::Execute(Event event)
         p >> guid;
     }
 
-    if (!guid)
+    if (guid.IsEmpty())
         return false;
 
-    Creature *pCreature = bot->GetNPCIfCanInteractWith(guid, UNIT_NPC_FLAG_NONE);
+    Creature *pCreature = bot->GetNPCIfCanInteractWith(guid, UNIT_NPC_FLAG_NONE, UNIT_NPC_FLAG_2_NONE);
     if (!pCreature)
     {
-        TC_LOG_DEBUG("playerbot",  "[PlayerbotMgr]: HandleMasterIncomingPacket - Received  CMSG_TALK_TO_GOSSIP %d not found or you can't interact with him.", guid.GetRawValue());;
+        TC_LOG_DEBUG("playerbot", "[PlayerbotMgr]: HandleMasterIncomingPacket - Received CMSG_TALK_TO_GOSSIP {} not found or you can't interact with him.", guid.ToString());
         return false;
     }
 
-    GossipMenuItemsMapBounds pMenuItemBounds = sObjectMgr->GetGossipMenuItemsMapBounds(pCreature->GetCreatureTemplate()->GossipMenuId);
-    if (pMenuItemBounds.first == pMenuItemBounds.second)
+    if (pCreature->GetCreatureTemplate()->GossipMenuIds.empty())
         return false;
 
-    WorldPacket p1;
-    p1 << guid;
-    bot->GetSession()->HandleGossipHelloOpcode(p1);
+    WorldPackets::NPC::Hello hello{WorldPacket(CMSG_TALK_TO_GOSSIP)};
+    hello.Unit = guid;
+    bot->GetSession()->HandleGossipHelloOpcode(hello);
     bot->SetFacingToObject(pCreature);
 
     ostringstream out; out << "--- " << pCreature->GetName() << " ---";
     ai->TellMasterNoFacing(out.str());
 
     GossipMenu& menu = bot->PlayerTalkClass->GetGossipMenu();
-    int i = 0, loops = 0;
-    set<uint32> alreadyTalked;
+    uint32 i = 0, loops = 0;
     while (i < menu.GetMenuItemCount() && loops++ < 100)
     {
-        GossipMenuItem const* item = menu.GetItem(i);
-        ai->TellMasterNoFacing(item->Message);
+        GossipMenuItem const* item = menu.GetItemByIndex(i);
+        if (!item)
+            break;
 
-        if (item->OptionType < 1000 && item->OptionType != GOSSIP_OPTION_GOSSIP)
+        ai->TellMasterNoFacing(item->OptionText);
+
+        if (item->OptionNpc != GossipOptionNpc::None)
         {
             i++;
             continue;
         }
 
-        WorldPacket p1;
-        std::string code;
-        p1 << guid << menu.GetMenuId() << i << code;
-        bot->GetSession()->HandleGossipSelectOptionOpcode(p1);
+        WorldPackets::NPC::GossipSelectOption selectOption{WorldPacket(CMSG_GOSSIP_SELECT_OPTION)};
+        selectOption.GossipUnit = guid;
+        selectOption.GossipID = int32(menu.GetMenuId());
+        selectOption.GossipOptionID = item->GossipOptionID;
+        bot->GetSession()->HandleGossipSelectOptionOpcode(selectOption);
 
         i = 0;
     }

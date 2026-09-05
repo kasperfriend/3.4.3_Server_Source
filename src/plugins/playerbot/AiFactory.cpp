@@ -19,7 +19,7 @@
 
 AiObjectContext* AiFactory::createAiObjectContext(Player* player, PlayerbotAI* ai)
 {
-    switch (player->getClass())
+    switch (player->GetClass())
     {
     case CLASS_PRIEST:
         return new PriestAiObjectContext(ai);
@@ -55,22 +55,20 @@ AiObjectContext* AiFactory::createAiObjectContext(Player* player, PlayerbotAI* a
 int AiFactory::GetPlayerSpecTab(Player* player)
 {
     int c0 = 0, c1 = 0, c2 = 0;
-    PlayerTalentMap& talentMap = player->GetTalentMap(0);
-    for (PlayerTalentMap::iterator i = talentMap.begin(); i != talentMap.end(); ++i)
+    PlayerTalentMap const& talentMap = player->GetPlayerTalentMap(player->GetActiveTalentGroup());
+    for (PlayerTalentMap::const_iterator i = talentMap.begin(); i != talentMap.end(); ++i)
     {
-        uint32 spellId = i->first;
-        TalentSpellPos const* talentPos = GetTalentSpellPos(spellId);
-        if(!talentPos)
+        if (i->second.State == PLAYERSPELL_REMOVED)
             continue;
 
-        TalentEntry const* talentInfo = sTalentStore.LookupEntry(talentPos->talent_id);
+        TalentEntry const* talentInfo = sTalentStore.LookupEntry(i->first);
         if (!talentInfo)
             continue;
 
-        uint32 const* talentTabIds = GetTalentTabPages(player->getClass());
-        if (talentInfo->TalentTab == talentTabIds[0]) c0++;
-        if (talentInfo->TalentTab == talentTabIds[1]) c1++;
-        if (talentInfo->TalentTab == talentTabIds[2]) c2++;
+        uint32 const* talentTabIds = sDB2Manager.GetTalentTabPages(player->GetClass());
+        if (talentInfo->TabID == talentTabIds[0]) c0++;
+        if (talentInfo->TabID == talentTabIds[1]) c1++;
+        if (talentInfo->TabID == talentTabIds[2]) c2++;
     }
 
     if (c0 >= c1 && c0 >= c2)
@@ -88,13 +86,13 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
 
     engine->addStrategies("racials", "chat", "default", "aoe", "potions", "cast time", "conserve mana", "duel", "pvp", NULL);
 
-    switch (player->getClass())
+    switch (player->GetClass())
     {
         case CLASS_PRIEST:
             if (tab == 2)
             {
                 engine->addStrategies("dps", "threat", NULL);
-                if (player->getLevel() > 19)
+                if (player->GetLevel() > 19)
                     engine->addStrategy("dps debuff");
             }
             else
@@ -138,7 +136,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             if (tab == 0)
             {
                 engine->addStrategies("caster", "caster aoe", "threat", "flee", "dps assist", NULL);
-                if (player->getLevel() > 19)
+                if (player->GetLevel() > 19)
                     engine->addStrategy("caster debuff");
             }
             else if (tab == 2)
@@ -148,7 +146,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             break;
         case CLASS_HUNTER:
             engine->addStrategies("dps", "bdps", "threat", "dps assist", NULL);
-            if (player->getLevel() > 19)
+            if (player->GetLevel() > 19)
                 engine->addStrategy("dps debuff");
             break;
         case CLASS_ROGUE:
@@ -160,7 +158,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             else
                 engine->addStrategies("dps", "threat", NULL);
 
-            if (player->getLevel() > 19)
+            if (player->GetLevel() > 19)
                 engine->addStrategy("dps debuff");
 
             engine->addStrategies("dps assist", "flee", NULL);
@@ -172,7 +170,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
         if (!player->GetGroup())
         {
             engine->ChangeStrategy(sPlayerbotAIConfig.randomBotCombatStrategies);
-            if (player->getClass() == CLASS_DRUID && player->getLevel() < 20)
+            if (player->GetClass() == CLASS_DRUID && player->GetLevel() < 20)
             {
                 engine->addStrategies("bear", NULL);
             }
@@ -194,7 +192,7 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
 {
     int tab = GetPlayerSpecTab(player);
 
-    switch (player->getClass()){
+    switch (player->GetClass()){
         case CLASS_PALADIN:
             if (tab == 1)
                 nonCombatEngine->addStrategies("bthreat", "tank aoe", NULL);

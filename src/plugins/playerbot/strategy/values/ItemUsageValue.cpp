@@ -18,7 +18,7 @@ ItemUsage ItemUsageValue::Calculate()
     if (IsItemUsefulForSkill(proto))
         return ITEM_USAGE_SKILL;
 
-    switch (proto->Class)
+    switch (proto->GetClass())
     {
     case ITEM_CLASS_KEY:
     case ITEM_CLASS_CONSUMABLE:
@@ -36,16 +36,16 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const * item)
     if (bot->CanUseItem(item) != EQUIP_ERR_OK)
         return ITEM_USAGE_NONE;
 
-    if (item->InventoryType == INVTYPE_NON_EQUIP)
+    if (item->GetInventoryType() == INVTYPE_NON_EQUIP)
         return ITEM_USAGE_NONE;
 
-    Item *pItem = Item::CreateItem(item->ItemId, 1, bot);
+    Item *pItem = Item::CreateItem(item->GetId(), 1, ItemContext::NONE, bot);
     if (!pItem)
         return ITEM_USAGE_NONE;
 
     uint16 dest;
     InventoryResult result = bot->CanEquipItem(NULL_SLOT, dest, pItem, true, false);
-    pItem->RemoveFromUpdateQueueOf(bot);
+    RemoveItemFromUpdateQueueOf(pItem, bot);
     delete pItem;
 
     if( result != EQUIP_ERR_OK )
@@ -56,12 +56,12 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const * item)
         return ITEM_USAGE_EQUIP;
 
     const ItemTemplate* oldItem = existingItem->GetTemplate();
-    if (oldItem->ItemLevel < item->ItemLevel && oldItem->ItemId != item->ItemId)
+    if (oldItem->GetItemLevel() < item->GetItemLevel() && oldItem->GetId() != item->GetId())
     {
-        switch (item->Class)
+        switch (item->GetClass())
         {
         case ITEM_CLASS_ARMOR:
-            if (oldItem->SubClass <= item->SubClass) {
+            if (oldItem->GetSubClass() <= item->GetSubClass()) {
                 return ITEM_USAGE_REPLACE;
             }
             break;
@@ -75,16 +75,16 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const * item)
 
 bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const * proto)
 {
-    switch (proto->Class)
+    switch (proto->GetClass())
     {
     case ITEM_CLASS_GEM:
-        if (proto->SubClass == ITEM_SUBCLASS_GEM_SIMPLE && bot->HasSkill(SKILL_JEWELCRAFTING))
+        if (proto->GetSubClass() == ITEM_SUBCLASS_GEM_OTHER && bot->HasSkill(SKILL_JEWELCRAFTING))
             return true;
-        if (proto->SubClass != ITEM_SUBCLASS_GEM_SIMPLE)
+        if (proto->GetSubClass() != ITEM_SUBCLASS_GEM_OTHER)
             return true;
         break;
     case ITEM_CLASS_TRADE_GOODS:
-        switch (proto->SubClass)
+        switch (proto->GetSubClass())
         {
         case ITEM_SUBCLASS_PARTS:
         case ITEM_SUBCLASS_EXPLOSIVES:
@@ -114,10 +114,10 @@ bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const * proto)
         break;
     case ITEM_CLASS_RECIPE:
         {
-            if (bot->HasSpell(proto->Spells[2].SpellId))
+            if (bot->HasSpell(ItemSpellId(proto, 2)))
                 break;
 
-            switch (proto->SubClass)
+            switch (proto->GetSubClass())
             {
             case ITEM_SUBCLASS_LEATHERWORKING_PATTERN:
                 return bot->HasSkill(SKILL_LEATHERWORKING);

@@ -23,7 +23,7 @@ bool BuyAction::Execute(Event event)
     if (!vendor)
         return false;
 
-    Creature *pCreature = bot->GetNPCIfCanInteractWith(vendor->GetGUID(), UNIT_NPC_FLAG_VENDOR);
+    Creature *pCreature = bot->GetNPCIfCanInteractWith(vendor->GetGUID(), UNIT_NPC_FLAG_VENDOR, UNIT_NPC_FLAG_2_NONE);
     if (!pCreature)
     {
         ai->TellMaster("Cannot talk to vendor");

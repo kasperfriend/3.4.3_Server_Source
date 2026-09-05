@@ -2,6 +2,10 @@
 
 #include "AhBotConfig.h"
 
+#include "Define.h"
+
+struct ItemTemplate;
+
 // Minimal subset of ike3's AhBot used by the playerbot plugin: item pricing
 // heuristics only. The actual auction-house bot is handled by the built-in
 // AuctionHouseBot module.

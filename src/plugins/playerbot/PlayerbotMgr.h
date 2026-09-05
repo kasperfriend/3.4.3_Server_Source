@@ -14,7 +14,7 @@ class Unit;
 class Object;
 class Item;
 
-typedef map<uint64, Player*> PlayerBotMap;
+typedef std::map<ObjectGuid, Player*> PlayerBotMap;
 
 class PlayerbotHolder : public PlayerbotAIBase
 {
@@ -22,9 +22,9 @@ public:
     PlayerbotHolder();
     virtual ~PlayerbotHolder();
 
-    void AddPlayerBot(uint64 guid, uint32 masterAccountId);
-    void LogoutPlayerBot(uint64 guid);
-    Player* GetPlayerBot (uint64 guid) const;
+    void AddPlayerBot(ObjectGuid guid, uint32 masterAccountId);
+    void LogoutPlayerBot(ObjectGuid guid);
+    Player* GetPlayerBot(ObjectGuid guid) const;
     PlayerBotMap::const_iterator GetPlayerBotsBegin() const { return playerBots.begin(); }
     PlayerBotMap::const_iterator GetPlayerBotsEnd()   const { return playerBots.end();   }
 
@@ -44,6 +44,8 @@ protected:
 
 protected:
     PlayerBotMap playerBots;
+    // bot sessions whose character is still being loaded from the database
+    std::map<ObjectGuid, WorldSession*> pendingBots;
 };
 
 class PlayerbotMgr : public PlayerbotHolder

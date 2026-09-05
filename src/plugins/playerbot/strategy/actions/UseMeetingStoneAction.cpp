@@ -38,7 +38,7 @@ bool UseMeetingStoneAction::Execute(Event event)
         return false;
 
     const GameObjectTemplate* goInfo = gameObject->GetGOInfo();
-    if (!goInfo || goInfo->type != GAMEOBJECT_TYPE_SUMMONING_RITUAL)
+    if (!goInfo || goInfo->type != GAMEOBJECT_TYPE_RITUAL)
         return false;
 
     return Teleport();

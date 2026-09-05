@@ -21,7 +21,7 @@ bool MovementAction::MoveNear(WorldObject* target, float distance)
     if (!target)
         return false;
 
-    distance += target->GetObjectSize() / 2.0f;
+    distance += target->GetCombatReach() / 2.0f;
 
     float followAngle = GetFollowAngle();
     for (float angle = followAngle; angle <= followAngle + 2 * M_PI; angle += M_PI / 4)
@@ -91,7 +91,7 @@ bool MovementAction::MoveTo(Unit* target, float distance)
     float tz = target->GetPositionZ();
 
     float distanceToTarget = bot->GetDistance2d(target);
-    float angle = bot->GetAngle(target);
+    float angle = bot->GetAbsoluteAngle(target);
     float needToGo = distanceToTarget - distance;
 
     float maxDistance = sPlayerbotAIConfig.spellDistance;
@@ -153,10 +153,10 @@ bool MovementAction::IsMovingAllowed(uint32 mapId, float x, float y, float z)
 
 bool MovementAction::IsMovingAllowed()
 {
-    if (bot->isFrozen() || bot->IsPolymorphed() ||
-			(bot->isDead() && !bot->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_GHOST)) ||
+    if (bot->IsFrozen() || bot->IsPolymorphed() ||
+			(bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) ||
             bot->IsBeingTeleported() ||
-            bot->isInRoots() ||
+            bot->HasUnitState(UNIT_STATE_ROOT) ||
             bot->HasAuraType(SPELL_AURA_MOD_CONFUSE) || bot->IsCharmed() ||
             bot->HasAuraType(SPELL_AURA_MOD_STUN) || bot->IsFlying())
         return false;
@@ -248,7 +248,7 @@ bool MovementAction::Flee(Unit *target)
     if (!IsMovingAllowed())
         return false;
 
-    FleeManager manager(bot, sPlayerbotAIConfig.fleeDistance, bot->GetAngle(target) + M_PI);
+    FleeManager manager(bot, sPlayerbotAIConfig.fleeDistance, bot->GetAbsoluteAngle(target) + M_PI);
 
     float rx, ry, rz;
     if (!manager.CalculateDestination(&rx, &ry, &rz))
@@ -310,7 +310,7 @@ bool MoveRandomAction::Execute(Event event)
         float x = target->GetPositionX();
         float y = target->GetPositionY();
         float z = target->GetPositionZ();
-        if (!map->IsInWater(x, y, z))
+        if (!map->IsInWater(bot->GetPhaseShift(), x, y, z))
         {
             return MoveNear(target);
         }
@@ -325,7 +325,7 @@ bool MoveRandomAction::Execute(Event event)
         y += urand(0, distance) - distance / 2;
         bot->UpdateGroundPositionZ(x, y, z);
 
-        if (map->IsInWater(x, y, z))
+        if (map->IsInWater(bot->GetPhaseShift(), x, y, z))
             continue;
 
         bool moved = MoveNear(bot->GetMapId(), x, y, z);
@@ -365,7 +365,7 @@ bool SetFacingTargetAction::Execute(Event event)
     if (!target)
         return false;
 
-    bot->SetFacingTo(bot->GetAngle(target));
+    bot->SetFacingTo(bot->GetAbsoluteAngle(target));
     ai->SetNextCheckDelay(sPlayerbotAIConfig.globalCoolDown);
     return true;
 }

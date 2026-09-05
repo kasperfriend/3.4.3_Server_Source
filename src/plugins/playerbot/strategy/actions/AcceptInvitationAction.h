@@ -2,6 +2,7 @@
 
 #include "../Action.h"
 #include "Globals/ObjectMgr.h"
+#include "Server/Packets/PartyPackets.h"
 
 namespace ai
 {
@@ -17,23 +18,21 @@ namespace ai
             if (!grp)
                 return false;
 
-            Player* inviter = sObjectMgr->GetPlayerByLowGUID(grp->GetLeaderGUID());
+            Player* inviter = ObjectAccessor::FindPlayer(grp->GetLeaderGUID());
             if (!inviter)
                 return false;
 
-			if (!ai->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, false, inviter))
+            if (!ai->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, false, inviter))
             {
-                WorldPacket data(SMSG_GROUP_DECLINE, 10);
-                data << bot->GetName();
-                inviter->GetSession()->SendPacket(&data);
-                bot->UninviteFromGroup();
+                WorldPackets::Party::PartyInviteResponse decline{WorldPacket(CMSG_PARTY_INVITE_RESPONSE)};
+                decline.Accept = false;
+                bot->GetSession()->HandlePartyInviteResponseOpcode(decline);
                 return false;
             }
 
-            WorldPacket p;
-            uint32 roles_mask = 0;
-            p << roles_mask;
-            bot->GetSession()->HandleGroupAcceptOpcode(p);
+            WorldPackets::Party::PartyInviteResponse response{WorldPacket(CMSG_PARTY_INVITE_RESPONSE)};
+            response.Accept = true;
+            bot->GetSession()->HandlePartyInviteResponseOpcode(response);
 
             if (sRandomPlayerbotMgr.IsRandomBot(bot))
                 bot->GetPlayerbotAI()->SetMaster(inviter);

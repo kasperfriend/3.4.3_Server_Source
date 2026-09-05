@@ -31,7 +31,7 @@ bool SendMailAction::Execute(Event event)
 
     string text = event.getParam();
 
-    SQLTransaction trans = CharacterDatabase.BeginTransaction();
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
     ostringstream body;
     body << "Hello, " << master->GetName() << ",\n";
     body << "\n";

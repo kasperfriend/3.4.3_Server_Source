@@ -77,6 +77,7 @@
 #include "OutdoorPvPMgr.h"
 #include "PetitionMgr.h"
 #include "Player.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "PlayerDump.h"
 #include "PoolMgr.h"
 #include "QuestPools.h"
@@ -2549,6 +2550,9 @@ void World::LoadAutobroadcasts()
 void World::Update(uint32 diff)
 {
     TC_METRIC_TIMER("world_update_time_total");
+
+    // playerbot mod: keep the random bot manager ticking
+    Playerbot::OnWorldUpdate(diff);
     ///- Update the game time and check for shutdown time
     _UpdateGameTime();
     time_t currentGameTime = GameTime::GetGameTime();

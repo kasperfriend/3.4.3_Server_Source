@@ -38,11 +38,11 @@ namespace ai
             if (index == -1)
                 return NULL;
 
-            uint64 guid = group->GetTargetIcon(index);
-            if (!guid)
+            ObjectGuid guid = group->GetTargetIcon(index);
+            if (guid.IsEmpty())
                 return NULL;
 
-            Unit* unit = ai->GetUnit(ObjectGuid(guid));
+            Unit* unit = ai->GetUnit(guid);
             if (!unit || unit->isDead())
                 return NULL;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Configuration/Config.h"
+#include "SharedDefines.h"
 
 class Player;
 class PlayerbotMgr;
@@ -77,7 +78,7 @@ public:
     void SetValue(std::string name, std::string value);
 
 private:
-    ConfigMgr& config;
+    ConfigMgr* config;
 };
 
 #define sPlayerbotAIConfig PlayerbotAIConfig::instance()

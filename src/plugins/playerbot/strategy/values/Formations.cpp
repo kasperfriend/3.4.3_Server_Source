@@ -38,7 +38,7 @@ namespace ai
             float x = master->GetPositionX() + cos(angle) * range;
             float y = master->GetPositionY() + sin(angle) * range;
             float z = master->GetPositionZ();
-            float ground = master->GetMap()->GetHeight(x, y, z + 0.5f);
+            float ground = master->GetMap()->GetHeight(bot->GetPhaseShift(), x, y, z + 0.5f);
             if (ground <= INVALID_HEIGHT)
                 return Formation::NullLocation;
 
@@ -64,7 +64,7 @@ namespace ai
             float x = master->GetPositionX() + cos(angle) * range;
             float y = master->GetPositionY() + sin(angle) * range;
             float z = master->GetPositionZ();
-            float ground = master->GetMap()->GetHeight(x, y, z + 0.5f);
+            float ground = master->GetMap()->GetHeight(bot->GetPhaseShift(), x, y, z + 0.5f);
             if (ground <= INVALID_HEIGHT)
                 return Formation::NullLocation;
 
@@ -90,7 +90,7 @@ namespace ai
             if (!target)
 				return Formation::NullLocation;
 
-            switch (bot->getClass())
+            switch (bot->GetClass())
             {
             case CLASS_HUNTER:
             case CLASS_MAGE:
@@ -111,7 +111,7 @@ namespace ai
             float x = target->GetPositionX();
             float y = target->GetPositionY();
             float z = target->GetPositionZ();
-            float ground = target->GetMap()->GetHeight(x, y, z + 0.5f);
+            float ground = target->GetMap()->GetHeight(bot->GetPhaseShift(), x, y, z + 0.5f);
             if (ground <= INVALID_HEIGHT)
                 return Formation::NullLocation;
 
@@ -363,7 +363,7 @@ WorldLocation MoveFormation::MoveSingleLine(vector<Player*> line, float diff, fl
             float lx = x + cos(angle) * radius;
             float ly = y + sin(angle) * radius;
             float lz = cz;
-            float ground = bot->GetMap()->GetHeight(lx, ly, lz + 0.5f);
+            float ground = bot->GetMap()->GetHeight(bot->GetPhaseShift(), lx, ly, lz + 0.5f);
             if (ground <= INVALID_HEIGHT)
                 return Formation::NullLocation;
 

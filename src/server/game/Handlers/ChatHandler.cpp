@@ -34,6 +34,7 @@
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "Opcodes.h"
 #include "Player.h"
 #include "ScriptMgr.h"
@@ -336,6 +337,7 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
                 sender->AddWhisperWhiteList(receiver->GetGUID());
 
             GetPlayer()->Whisper(msg, lang, receiver);
+            Playerbot::OnPlayerChat(sender, CHAT_MSG_WHISPER, lang, msg, receiver);
             break;
         }
         case CHAT_MSG_PARTY:
@@ -357,6 +359,7 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false, group->GetMemberGroup(GetPlayer()->GetGUID()));
+            Playerbot::OnPlayerChat(sender, type, lang, msg, nullptr);
             break;
         }
         case CHAT_MSG_GUILD:
@@ -399,6 +402,7 @@ void WorldSession::HandleChatMessage(ChatMsg type, Language lang, std::string ms
             WorldPackets::Chat::Chat packet;
             packet.Initialize(ChatMsg(type), lang, sender, nullptr, msg);
             group->BroadcastPacket(packet.Write(), false);
+            Playerbot::OnPlayerChat(sender, type, lang, msg, nullptr);
             break;
         }
         case CHAT_MSG_RAID_WARNING:
