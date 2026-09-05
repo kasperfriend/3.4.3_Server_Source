@@ -32,6 +32,13 @@ on:
         type: boolean
         default: true
 
+# Lets a failing job post its extracted compiler errors back to the commit that
+# was built (see .github/actions/report-build-failure).  Jobs that need more
+# (e.g. publish-release) declare their own permissions block below.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   # ==================================================================
   #  Linux release build
@@ -93,7 +100,10 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build -j$(nproc)
+          # `-k` keeps going past the first failing target so one run reports
+          # every compile error; tee keeps a copy for the failure report below.
+          set -o pipefail
+          cmake --build build -j"$(nproc)" -- -k 2>&1 | tee build.log
 
       - name: Install
         run: |
@@ -170,6 +180,13 @@ jobs:
           path: ${{ steps.package.outputs.artifact_name }}
           retention-days: 7
 
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          label: Release (Linux x86_64)
+
   # ==================================================================
   #  Windows release build
   # ==================================================================
@@ -239,7 +256,23 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config ${{ inputs.build_type }} -- /m /p:CL_MPCount=2
+          # Capture stdout+stderr into build.log so the failure report can extract
+          # the MSVC compiler/linker errors, and retry: MSBuild stops scheduling
+          # work as soon as a project fails, so re-running surfaces the errors of
+          # the projects that never got compiled in the first pass.
+          $log = Join-Path $env:GITHUB_WORKSPACE "build.log"
+          if (Test-Path $log) { Remove-Item $log -Force }
+          $code = 0
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "=== build attempt $attempt ==="
+            Add-Content -Path $log -Value "=== build attempt $attempt ==="
+            cmd /c "cmake --build build --config ${{ inputs.build_type }} -- /m /p:CL_MPCount=2 >> `"$log`" 2>&1"
+            $code = $LASTEXITCODE
+            Write-Host "attempt $attempt finished with exit code $code"
+            if ($code -eq 0) { break }
+          }
+          if (Test-Path $log) { Get-Content $log -Tail 100 }
+          if ($code -ne 0) { exit $code }
 
       - name: Install
         shell: pwsh
@@ -251,6 +284,29 @@ jobs:
         run: |
           $DEST = "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3"
           $BINDIR = "$DEST\bin"
+
+          # --- Normalise the install layout -----------------------------------
+          # The Windows install rules in the CMakeLists use
+          #   install(TARGETS ... DESTINATION "${CMAKE_INSTALL_PREFIX}")
+          # so `cmake --install` drops the .exe files (and the *.conf.dist
+          # templates) straight into $DEST instead of $DEST\bin and $DEST\etc
+          # the way the Unix rules do.  Everything below - the DLL copies, the
+          # launcher (bin\worldserver.exe) and Setup-Database.bat (which reads
+          # %ROOT%etc\worldserver.conf.dist) - expects the bin\ / etc\ layout,
+          # so move the installed files into place first.
+          New-Item -ItemType Directory -Force "$BINDIR"     | Out-Null
+          New-Item -ItemType Directory -Force "$DEST\etc"   | Out-Null
+
+          $movedExe = @(Get-ChildItem "$DEST\*.exe" -ErrorAction SilentlyContinue)
+          foreach ($f in $movedExe) {
+            Move-Item $f.FullName -Destination "$BINDIR\" -Force
+            Write-Host "  moved $($f.Name) -> bin\"
+          }
+          $movedConf = @(Get-ChildItem "$DEST\*.conf.dist" -ErrorAction SilentlyContinue)
+          foreach ($f in $movedConf) {
+            Move-Item $f.FullName -Destination "$DEST\etc\" -Force
+            Write-Host "  moved $($f.Name) -> etc\"
+          }
 
           # --- SQL ---
           New-Item -ItemType Directory -Force "$DEST\sql" | Out-Null
@@ -381,9 +437,9 @@ jobs:
             docs\         - Playerbots.md documentation
 
           Client map extraction (one-time):
-            bin\map_extractor.exe -d "C:\path\to\WoW"
-            bin\vmap4_extractor.exe -d "C:\path\to\WoW"
-            bin\vmap4_assembler.exe Buildings vmaps
+            bin\mapextractor.exe -d "C:\path\to\WoW"
+            bin\vmap4extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4assembler.exe Buildings vmaps
             bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
             (then copy the dbc, maps, vmaps, mmaps folders next to the .exe files)
 
@@ -392,8 +448,21 @@ jobs:
 
           Write-Host ""
           Write-Host "=== Final package contents ==="
-          Get-ChildItem "$BINDIR\*.exe" | ForEach-Object { Write-Host "  bin\$($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)" }
-          Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  bin\$($_.Name)" }
+          $packagedExe  = @(Get-ChildItem "$BINDIR\*.exe" -ErrorAction SilentlyContinue)
+          $packagedDll  = @(Get-ChildItem "$BINDIR\*.dll" -ErrorAction SilentlyContinue)
+          foreach ($e in $packagedExe) { Write-Host "  bin\$($e.Name) ($([math]::Round($e.Length/1MB,1)) MB)" }
+          foreach ($d in $packagedDll) { Write-Host "  bin\$($d.Name)" }
+
+          # Fail the job loudly if the package is missing its core binaries -
+          # a release zip without worldserver.exe is worse than no release at all.
+          $missing = @()
+          foreach ($need in @("worldserver.exe", "bnetserver.exe")) {
+            if (-not (Test-Path (Join-Path $BINDIR $need))) { $missing += $need }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Windows package is missing: $($missing -join ', ')"
+            exit 1
+          }
           Write-Host "  sql\ (database schemas)"
           Write-Host "  etc\ (configuration)"
           Write-Host "  docs\ (documentation)"
@@ -423,6 +492,13 @@ jobs:
           name: ${{ steps.package.outputs.artifact_name }}
           path: ${{ steps.package.outputs.artifact_name }}
           retention-days: 7
+
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          label: Release (Windows x64)
 
   # ==================================================================
   #  Publish GitHub Release

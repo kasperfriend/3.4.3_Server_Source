@@ -17,6 +17,12 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Needed so a failing job can post its extracted compiler errors back to the
+# pull request / commit (see .github/actions/report-build-failure).
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   # ------------------------------------------------------------------
   #  Linux build  (primary, must pass)
@@ -84,25 +90,95 @@ jobs:
 
       - name: Build
         run: |
-          cmake --build build -j$(nproc) 2>&1 | tee build.log
+          # `-k` keeps going after the first failing target so that a single
+          # CI run reports *every* compile error instead of just the first one.
+          set -o pipefail
+          cmake --build build -j"$(nproc)" -- -k 2>&1 | tee build.log
 
       - name: Verify produced binaries
         run: |
-          echo "=== Server binaries ==="
-          ls -lh build/bin/worldserver build/bin/bnetserver
-          echo ""
-          echo "=== Extraction tools ==="
-          ls -lh build/bin/map_extractor build/bin/vmap4_extractor \
-                 build/bin/vmap4_assembler build/bin/mmaps_generator
-          echo ""
-          echo "=== Playerbot integration check ==="
-          nm build/bin/worldserver | grep -c "Playerbot" | xargs -I{} echo "  {} Playerbot symbols in worldserver"
-          nm build/bin/worldserver | grep -q "InitializePlayerbots" && \
-            echo "  ✓ InitializePlayerbots found" || \
-            { echo "::error::Playerbot symbols missing from worldserver"; exit 1; }
-          nm build/bin/worldserver | grep -q "RandomPlayerbotMgr" && \
-            echo "  ✓ RandomPlayerbotMgr found" || \
-            { echo "::error::RandomPlayerbotMgr missing from worldserver"; exit 1; }
+          # NOTE: on Unix/Makefile generators TrinityCore does not set
+          # CMAKE_RUNTIME_OUTPUT_DIRECTORY, so each executable is emitted inside
+          # its own target directory (e.g. build/src/server/worldserver/worldserver)
+          # and not into build/bin.  Only the MSVC/MinGW settings point everything
+          # at build/bin.  Locate the binaries by name so this check is correct
+          # for either layout.
+          #
+          # Target names come from src/tools/*/CMakeLists.txt: mapextractor,
+          # vmap4extractor, vmap4assembler, mmaps_generator (no underscores
+          # between "map"/"vmap4" and "extractor"/"assembler").
+          verify() {
+            local failed=0
+            local LAST_BINARY=""
+            local WORLDSERVER_BIN=""
+
+            locate() {
+              find build -type f -name "$1" -perm -u+x \
+                -not -path "*/CMakeFiles/*" 2>/dev/null | head -n 1
+            }
+
+            check_binary() {
+              local name="$1"
+              local path
+              path="$(locate "$name")"
+              if [ -n "$path" ]; then
+                printf '  OK   %-18s %s (%s)\n' "$name" "$path" "$(du -h "$path" | cut -f1)"
+              else
+                printf '  MISS %-18s not produced by the build\n' "$name"
+                echo "::error::Expected binary '$name' was not produced by the build"
+                failed=1
+              fi
+              LAST_BINARY="$path"
+            }
+
+            echo "=== Server binaries ==="
+            check_binary worldserver
+            WORLDSERVER_BIN="$LAST_BINARY"
+            check_binary bnetserver
+
+            echo ""
+            echo "=== Extraction tools ==="
+            local tool
+            for tool in mapextractor vmap4extractor vmap4assembler mmaps_generator; do
+              check_binary "$tool"
+            done
+
+            echo ""
+            echo "=== Playerbot integration check ==="
+            if [ -z "$WORLDSERVER_BIN" ]; then
+              echo "::error::worldserver binary missing - cannot verify playerbot symbols"
+              failed=1
+            else
+              local playerbot_symbols
+              playerbot_symbols="$(nm "$WORLDSERVER_BIN" | grep -c 'Playerbot' || true)"
+              echo "  ${playerbot_symbols} Playerbot symbols in worldserver"
+              if nm "$WORLDSERVER_BIN" | grep -q "InitializePlayerbots"; then
+                echo "  OK InitializePlayerbots found"
+              else
+                echo "::error::Playerbot symbols missing from worldserver"
+                failed=1
+              fi
+              if nm "$WORLDSERVER_BIN" | grep -q "RandomPlayerbotMgr"; then
+                echo "  OK RandomPlayerbotMgr found"
+              else
+                echo "::error::RandomPlayerbotMgr missing from worldserver"
+                failed=1
+              fi
+            fi
+
+            return "$failed"
+          }
+
+          verify 2>&1 | tee verify.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          extra-log: verify.log
+          label: Build (Ubuntu 22.04 / GCC 12)
 
       - name: Upload build log on failure
         if: failure()
@@ -112,6 +188,7 @@ jobs:
           path: |
             build.log
             cmake.log
+            verify.log
 
   # ------------------------------------------------------------------
   #  Windows build  (secondary, best-effort)
@@ -179,10 +256,54 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config RelWithDebInfo -- /m /p:CL_MPCount=2
+          # Capture stdout+stderr into build.log so the failure report can extract
+          # the MSVC compiler/linker errors, and retry a few times: MSBuild stops
+          # scheduling work as soon as a project fails, so re-running surfaces the
+          # errors of projects that never got compiled in the first pass.
+          $log = Join-Path $env:GITHUB_WORKSPACE "build.log"
+          if (Test-Path $log) { Remove-Item $log -Force }
+          $code = 0
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "=== build attempt $attempt ==="
+            Add-Content -Path $log -Value "=== build attempt $attempt ==="
+            cmd /c "cmake --build build --config RelWithDebInfo -- /m /p:CL_MPCount=2 >> `"$log`" 2>&1"
+            $code = $LASTEXITCODE
+            Write-Host "attempt $attempt finished with exit code $code"
+            if ($code -eq 0) { break }
+          }
+          if (Test-Path $log) { Get-Content $log -Tail 100 }
+          if ($code -ne 0) { exit $code }
 
       - name: Verify produced binaries
         shell: pwsh
         run: |
-          Write-Host "=== Server binaries ==="
-          Get-ChildItem build\bin\RelWithDebInfo\*.exe | Format-Table Name, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,1)}}
+          $out    = Join-Path $env:GITHUB_WORKSPACE "verify.log"
+          $binDir = "build\bin\RelWithDebInfo"
+          $failed = 0
+          $lines  = @("=== Server binaries ($binDir) ===")
+          if (Test-Path $binDir) {
+            foreach ($e in (Get-ChildItem "$binDir\*.exe" -ErrorAction SilentlyContinue)) {
+              $lines += ("  OK   {0} ({1} MB)" -f $e.Name, [math]::Round($e.Length / 1MB, 1))
+            }
+            foreach ($need in @("worldserver.exe", "bnetserver.exe")) {
+              if (-not (Test-Path (Join-Path $binDir $need))) {
+                $lines += "  MISS $need was not produced by the build"
+                $failed = 1
+              }
+            }
+          } else {
+            $lines += "  MISS $binDir does not exist"
+            $failed = 1
+          }
+          $lines | ForEach-Object { Write-Host $_ }
+          $lines | Set-Content -Path $out -Encoding UTF8
+          if ($failed -ne 0) { exit 1 }
+
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          extra-log: verify.log
+          label: Build (Windows 2022 / MSVC)
+

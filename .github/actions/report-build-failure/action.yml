@@ -1,0 +1,107 @@
+# Publishes the compiler/linker errors from a failed build step back to GitHub
+# (as a pull request comment, or a commit comment for push / workflow_dispatch
+# runs) so the failure is readable without downloading the raw job log or the
+# uploaded artifact.
+#
+# This exists because the Actions log/artifact endpoints
+# (results-receiver.actions.githubusercontent.com, objects.githubusercontent.com)
+# are not reachable from every environment that needs to triage a red build.
+
+name: 'Report build failure'
+description: 'Extracts errors from a build log and posts them to the PR or commit'
+
+inputs:
+  log-file:
+    description: 'Path to the captured build log'
+    required: true
+  label:
+    description: 'Human readable label for the failing job'
+    required: true
+  extra-log:
+    description: 'Optional second log (e.g. post-build verification output) to include'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract errors from build log
+      shell: bash
+      env:
+        REPORT_LOG_FILE: ${{ inputs.log-file }}
+        REPORT_EXTRA_LOG: ${{ inputs.extra-log }}
+        REPORT_LABEL: ${{ inputs.label }}
+      run: |
+        OUT="$RUNNER_TEMP/build-errors.txt"
+        [ -n "$RUNNER_TEMP" ] || OUT="${TMPDIR:-/tmp}/build-errors.txt"
+        mkdir -p "$(dirname "$OUT")"
+
+        dump_errors() {
+          local file="$1"
+          if [ ! -f "$file" ]; then
+            echo "!! log file '$file' not found - nothing was captured !!"
+            return 0
+          fi
+          echo "--- error lines from $file (last 400 matches) ---"
+          grep -nE \
+            "error:|error C[0-9]{4}|error LNK[0-9]{4}|fatal error|MSB[0-9]{4}|Error [0-9]+|undefined reference|cannot find -l|No such file or directory|::error::|not produced by the build|MISS " \
+            "$file" 2>/dev/null | tail -n 400 || true
+          echo ""
+          echo "--- tail of $file (last 60 lines) ---"
+          tail -n 60 "$file" || true
+        }
+
+        {
+          echo "Job:      $REPORT_LABEL"
+          echo "Run:      $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "Commit:   $GITHUB_SHA"
+          echo ""
+          dump_errors "$REPORT_LOG_FILE"
+          if [ -n "$REPORT_EXTRA_LOG" ]; then
+            echo ""
+            echo "=================================================="
+            echo ""
+            dump_errors "$REPORT_EXTRA_LOG"
+          fi
+        } > "$OUT"
+
+        echo "REPORT_BODY_FILE=$OUT" >> "$GITHUB_ENV"
+        echo "Extracted $(wc -l < "$OUT") report lines from $REPORT_LOG_FILE ${REPORT_EXTRA_LOG}"
+
+    - name: Post failure report
+      uses: actions/github-script@v7
+      env:
+        REPORT_LABEL: ${{ inputs.label }}
+      with:
+        script: |
+          const fs = require('fs');
+          const file = process.env.REPORT_BODY_FILE;
+          let text = '';
+          try {
+            text = fs.readFileSync(file, 'utf8');
+          } catch (e) {
+            text = 'Could not read the extracted error report: ' + e.message;
+          }
+          // GitHub comment body limit is 65536 characters - stay well under it.
+          if (text.length > 55000) {
+            text = text.slice(0, 27000) + '\n\n[... truncated ...]\n\n' + text.slice(-27000);
+          }
+          const body = '### :x: ' + process.env.REPORT_LABEL + ' build failure\n\n' +
+                       '<!-- automated build failure report -->\n\n```\n' + text + '\n```\n';
+
+          const { owner, repo } = context.repo;
+          if (context.payload.pull_request) {
+            await github.rest.issues.createComment({
+              owner, repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
+            core.info('Posted failure report to PR #' + context.payload.pull_request.number);
+          } else {
+            await github.rest.repos.createCommitComment({
+              owner, repo,
+              commit_sha: context.sha,
+              body
+            });
+            core.info('Posted failure report as commit comment on ' + context.sha);
+          }
