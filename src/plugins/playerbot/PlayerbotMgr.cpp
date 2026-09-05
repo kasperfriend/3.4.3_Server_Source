@@ -479,7 +479,7 @@ string PlayerbotHolder::ListBots(Player* master)
 
     if (master)
     {
-        QueryResult results = CharacterDatabase.PQuery("SELECT class,name FROM tc_characters_19.characters where account = '{}'",
+        QueryResult results = CharacterDatabase.PQuery("SELECT class,name FROM characters where account = '{}'",
                 master->GetSession()->GetAccountId());
         if (results != NULL)
         {
