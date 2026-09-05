@@ -22,6 +22,24 @@
 
 #include <boost/algorithm/string/join.hpp>
 #include <boost/iostreams/copy.hpp>
+#include <boost/version.hpp>
+
+// Boost 1.86 relocated Boost.Process v1 into boost/process/v1/, and Boost 1.88
+// dropped the old top-level headers entirely, so the include paths must be
+// selected by Boost version.  This file only ever uses the v1 API, and
+// dep/boost/CMakeLists.txt defines BOOST_PROCESS_VERSION=1, which turns
+// boost::process::v1 into an inline namespace - that keeps the unqualified
+// `using namespace boost::process;` below (and `boost::this_process`) working
+// on every supported Boost release, old and new.
+#if BOOST_VERSION >= 108600
+#include <boost/process/v1/args.hpp>
+#include <boost/process/v1/child.hpp>
+#include <boost/process/v1/env.hpp>
+#include <boost/process/v1/exe.hpp>
+#include <boost/process/v1/io.hpp>
+#include <boost/process/v1/pipe.hpp>
+#include <boost/process/v1/search_path.hpp>
+#else
 #include <boost/process/args.hpp>
 #include <boost/process/child.hpp>
 #include <boost/process/env.hpp>
@@ -29,6 +47,7 @@
 #include <boost/process/io.hpp>
 #include <boost/process/pipe.hpp>
 #include <boost/process/search_path.hpp>
+#endif
 
 using namespace boost::process;
 using namespace boost::iostreams;

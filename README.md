@@ -8,11 +8,14 @@ Visual Studio 2022 Community - [Download](https://aka.ms/vs/17/release/vs_commun
 
 Boost 1.83 - [Download](https://archives.boost.io/release/1.83.0/binaries/boost_1_83_0-msvc-14.3-64.exe)
 
-> **Boost version matters:** use **1.78 – 1.87**. Boost **1.88 and newer removed
-> the Boost.Process v1 headers** (`boost/process/args.hpp` and friends) that
-> `src/common/Utilities/StartProcess.cpp` needs, so the build fails with
-> `error C1083: Cannot open include file: 'boost/process/args.hpp'`. CI pins
-> Boost 1.87.0 by checking out vcpkg tag `2025.04.09`.
+> **Any Boost from 1.78 upwards works**, including current releases. Boost 1.86
+> moved the Boost.Process v1 headers under `boost/process/v1/` and Boost 1.88
+> removed the old top-level paths; `src/common/Utilities/StartProcess.cpp`
+> selects the right set via `BOOST_VERSION`, and `dep/boost/CMakeLists.txt`
+> defines `BOOST_PROCESS_VERSION=1` so the v1 API stays visible. Boost 1.87 also
+> stopped pulling `<boost/filesystem/directory.hpp>` in from
+> `<boost/filesystem/operations.hpp>` and dropped `<boost/asio/io_service.hpp>`;
+> both are handled in the source as well.
 
 
 Latest version of CMake - [Download](https://cmake.org/download/)
@@ -53,6 +56,13 @@ This repository uses GitHub Actions:
   playerbots for Windows x64, packages the binaries together with the SQL
   schemas, configuration files, documentation and every required DLL, and
   creates a GitHub Release with a downloadable `.zip`.
+* **Dependencies** are installed with the vcpkg copy that ships with the GitHub
+  runner image. It is *deliberately not pinned* to an older release: an old
+  vcpkg asks the MSYS2 mirrors for package revisions that were deleted upstream
+  (`msys2-runtime-3.5.4-2`), so every port running a pkgconfig fixup — bzip2,
+  and openssl — fails with HTTP 404 and the dependency step dies. Keeping vcpkg
+  current and supporting modern Boost in the source is the only combination that
+  stays green over time.
 
 ### Building on Linux (local)
 

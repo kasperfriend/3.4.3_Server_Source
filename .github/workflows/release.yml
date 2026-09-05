@@ -64,29 +64,29 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Bootstrap vcpkg (pinned to Boost 1.87)
+      - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          # vcpkg's ports track the latest Boost, and Boost 1.88+ breaks this
-          # build outright: the Boost.Process v1 headers are gone, so
-          # src/common/Utilities/StartProcess.cpp fails with
-          #   error C1083: Cannot open include file: 'boost/process/args.hpp'
-          # Fixing that properly means rewriting StartProcess.cpp against
-          # Process v2, which is out of scope, so the dependency set is pinned.
+          # The vcpkg copy that ships with the runner image is used as-is.
           #
-          # 2025.04.09 is the newest vcpkg release train that still ships Boost
-          # 1.87.0 - the last Boost with Process v1 - while being recent enough
-          # to work with the CMake and MSVC versions on the runner image.
-          #
-          # Two other Boost-version breakages are fixed in the source instead of
-          # by pinning, so the tree no longer depends on them:
+          # It is deliberately NOT pinned to an older release: an old vcpkg asks
+          # the MSYS2 mirrors for package revisions they dropped long ago
+          # (msys2-runtime-3.5.4-2), so every port that runs a pkgconfig fixup
+          # fails - bzip2 first, then openssl - and the dependency step dies:
+          #   error: https://repo.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst: 404
+          # Modern Boost is handled in the source instead:
+          #   * Boost 1.86 moved the Boost.Process v1 headers under
+          #     boost/process/v1/, and Boost 1.88 removed the old top-level
+          #     paths.  src/common/Utilities/StartProcess.cpp picks the right set
+          #     by BOOST_VERSION, and dep/boost/CMakeLists.txt defines
+          #     BOOST_PROCESS_VERSION=1 so the v1 names stay visible to
+          #     `using namespace boost::process;` on every Boost release.
           #   * Boost 1.87 stopped pulling <boost/filesystem/directory.hpp> in
           #     from <boost/filesystem/operations.hpp>; the six core files that
           #     use directory iterators now include it explicitly.
           #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
           #     command server now uses boost::asio::io_context.
-          $vcpkgTag = "2025.04.09"
-
+          #
           # Everything printed here and by the vcpkg install step is tee'd into
           # deps.log, because the Actions job log is not always retrievable when
           # triaging a red run.
@@ -95,25 +95,10 @@ jobs:
           Start-Transcript -Path $depsLog -Append | Out-Null
           Push-Location $env:VCPKG_ROOT
           try {
-            Write-Host "Pinning vcpkg to $vcpkgTag (Boost 1.87.0) ..."
-            git fetch --quiet --depth 1 --force origin "refs/tags/${vcpkgTag}:refs/tags/${vcpkgTag}"
-            if ($LASTEXITCODE -ne 0) { throw "could not fetch vcpkg tag $vcpkgTag" }
-            git checkout --quiet --force "tags/$vcpkgTag"
-            if ($LASTEXITCODE -ne 0) { throw "could not check out vcpkg tag $vcpkgTag" }
-            Write-Host "vcpkg is now at $(git describe --tags)"
-
-            # Remove anything the runner image pre-installed so headers from a
-            # different Boost version cannot leak into this build.
-            foreach ($d in @("installed", "buildtrees", "packages")) {
-              $p = Join-Path $env:VCPKG_ROOT $d
-              if (Test-Path $p) {
-                Write-Host "clearing stale vcpkg $d/"
-                Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
-              }
-            }
-
             .\bootstrap-vcpkg.bat -disableMetrics
             if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed" }
+            Write-Host "vcpkg in use:"
+            .\vcpkg.exe version
           } finally {
             Pop-Location
             Stop-Transcript | Out-Null
@@ -122,8 +107,8 @@ jobs:
       - name: Install dependencies via vcpkg
         shell: pwsh
         env:
-          # The pinned ports predate CMake 4, which removed compatibility with
-          # cmake_minimum_required(VERSION <3.5).  This is CMake's documented
+          # Some ports still carry cmake_minimum_required(VERSION <3.5), which
+          # the runner's CMake 4.x rejects outright.  This is CMake's documented
           # escape hatch for old projects and a no-op on CMake 3.x.
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
@@ -144,13 +129,14 @@ jobs:
           # boost-iostreams is installed as [core], i.e. without its bzip2 / lzma /
           # zlib / zstd default features.  src/ only ever includes
           # <boost/iostreams/copy.hpp> (StartProcess.cpp) and never instantiates a
-          # compression filter, while the pinned vcpkg builds those four ports with
-          # MSYS2 tooling whose package URLs have since been deleted upstream:
-          #   error: https://repo.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst: 404
+          # compression filter, and those four ports are all built with MSYS2
+          # tooling - the same tooling whose deleted package revisions made a
+          # pinned vcpkg unusable:
           #   error: building bzip2:x64-windows failed with: BUILD_FAILED
-          # Dropping the features removes the MSYS2 dependency altogether.  Nothing
-          # is lost: TrinityCore compiles its own zlib from dep/zlib, and every
-          # other port below has no default features of its own.
+          # openssl below needs MSYS2 anyway, so there is no reason to widen that
+          # surface for code this server never compiles.  Nothing is lost:
+          # TrinityCore builds its own zlib from dep/zlib, and every other port
+          # below has no default features of its own.
           $triplet = "x64-windows"
           $ports = @(
             # compiled components requested by find_package(Boost ...)

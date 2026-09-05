@@ -63,6 +63,12 @@ target_compile_definitions(boost
     -DBOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE
     -DBOOST_ASIO_NO_DEPRECATED
     -DBOOST_BIND_NO_PLACEHOLDERS
+    # This server uses the Boost.Process v1 API (see
+    # src/common/Utilities/StartProcess.cpp).  Boost >= 1.88 defaults to Process
+    # v2 and stops making the v1 namespace inline, which would hide every v1
+    # name from `using namespace boost::process;`.  Requesting v1 explicitly
+    # keeps old and new Boost layouts behaving identically.
+    -DBOOST_PROCESS_VERSION=1
     -DBOOST_SYSTEM_USE_UTF8)
 
 if (WITH_BOOST_STACKTRACE AND NOT WIN32)
