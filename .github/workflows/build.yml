@@ -127,11 +127,21 @@ jobs:
           # core, bind.  The root-level boost/version.hpp (included by
           # src/common/Asio/AsioHacksFwd.h) ships with boost-config,
           # which every one of these ports already depends on.
+          # boost-iostreams is installed as [core], i.e. without its bzip2 / lzma /
+          # zlib / zstd default features.  src/ only ever includes
+          # <boost/iostreams/copy.hpp> (StartProcess.cpp) and never instantiates a
+          # compression filter, while the pinned vcpkg builds those four ports with
+          # MSYS2 tooling whose package URLs have since been deleted upstream:
+          #   error: https://repo.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst: 404
+          #   error: building bzip2:x64-windows failed with: BUILD_FAILED
+          # Dropping the features removes the MSYS2 dependency altogether.  Nothing
+          # is lost: TrinityCore compiles its own zlib from dep/zlib, and every
+          # other port below has no default features of its own.
           $triplet = "x64-windows"
           $ports = @(
             # compiled components requested by find_package(Boost ...)
             "boost-system", "boost-filesystem", "boost-program-options",
-            "boost-iostreams", "boost-regex", "boost-locale", "boost-thread",
+            "boost-iostreams[core]", "boost-regex", "boost-locale", "boost-thread",
             # header-only libraries included directly by the core / scripts / plugins
             "boost-asio", "boost-beast", "boost-process",
             "boost-algorithm", "boost-dll", "boost-uuid", "boost-dynamic-bitset",
