@@ -326,6 +326,20 @@ jobs:
             }
           }
 
+          # --- Database setup scripts ---
+          if (Test-Path "Setup-Database.bat") {
+            Copy-Item "Setup-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Setup-Database.bat"
+          }
+          if (Test-Path "Start-Database.bat") {
+            Copy-Item "Start-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Start-Database.bat"
+          }
+          if (Test-Path "Stop-Database.bat") {
+            Copy-Item "Stop-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Stop-Database.bat"
+          }
+
           # --- Launcher batch file ---
           @"
           @echo off
@@ -334,18 +348,8 @@ jobs:
           echo   TrinityCore 3.4.3 + AI Playerbots
           echo ============================================================
           echo.
-          echo Before first run, make sure you have:
-          echo   1. Installed MySQL 8.0 and created databases:
-          echo        CREATE DATABASE auth;
-          echo        CREATE DATABASE characters;
-          echo        CREATE DATABASE world;
-          echo   2. Imported SQL files:
-          echo        mysql -u root -p auth ^< sql\base\auth_database.sql
-          echo        mysql -u root -p characters ^< sql\base\characters_database.sql
-          echo        mysql -u root -p world ^< sql\base\world_database.sql
-          echo        mysql -u root -p characters ^< sql\custom\playerbot\characters_playerbot.sql
-          echo   3. Copied etc\worldserver.conf.dist to etc\worldserver.conf
-          echo   4. Edited etc\worldserver.conf with your MySQL credentials
+          echo If this is your first time, run Setup-Database.bat first!
+          echo It will download and configure a portable MariaDB database.
           echo.
           echo Starting worldserver...
           echo.
@@ -359,25 +363,29 @@ jobs:
           TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
           =======================================================
 
+          QUICK START (3 steps):
+            1. Double-click Setup-Database.bat
+               (downloads portable MariaDB, creates databases, imports SQL)
+            2. Extract client maps (see below)
+            3. Double-click start-worldserver.bat
+
+          Database scripts:
+            Setup-Database.bat  - First-time setup (downloads MariaDB, imports SQL)
+            Start-Database.bat  - Start the database (run before worldserver)
+            Stop-Database.bat   - Stop the database
+
           Contents:
             bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
             sql\          - database schemas (base, create, custom, updates)
-            etc\          - configuration files
+            etc\          - configuration files (auto-configured by Setup-Database.bat)
             docs\         - Playerbots.md documentation
 
-          Prerequisites:
-            - MySQL 8.0 (https://dev.mysql.com/downloads/installer/)
-            - A 3.4.3 WoW client for map extraction
-
-          Quick start:
-            1. Run start-worldserver.bat for guided setup instructions
-            2. Or manually configure etc\worldserver.conf and import the SQL files
-            3. Extract maps: bin\map_extractor.exe -d "C:\path\to\WoW"
-            4. Extract vmaps: bin\vmap4_extractor.exe -d "C:\path\to\WoW"
-               then: bin\vmap4_assembler.exe Buildings vmaps
-            5. Extract mmaps: bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
-            6. Copy map/vmap/mmap folders into the server directory
-            7. Run start-worldserver.bat
+          Client map extraction (one-time):
+            bin\map_extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4_extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4_assembler.exe Buildings vmaps
+            bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
+            (then copy the dbc, maps, vmaps, mmaps folders next to the .exe files)
 
           For AI Playerbot documentation, see docs\Playerbots.md
           "@ | Set-Content "$DEST\WINDOWS-README.txt" -Encoding ASCII
@@ -389,7 +397,10 @@ jobs:
           Write-Host "  sql\ (database schemas)"
           Write-Host "  etc\ (configuration)"
           Write-Host "  docs\ (documentation)"
-          Write-Host "  start-worldserver.bat (launcher)"
+          Write-Host "  Setup-Database.bat (database installer)"
+          Write-Host "  Start-Database.bat (database launcher)"
+          Write-Host "  Stop-Database.bat (database stopper)"
+          Write-Host "  start-worldserver.bat (server launcher)"
 
       - name: Create release archive
         id: package
@@ -509,7 +520,7 @@ jobs:
 
           if [ "$HAS_WINDOWS" = "yes" ]; then
             cat >> release_body.md << WINEOF
-          | **Windows** x64 | \`.zip\` | MySQL 8.0 (MSVC runtime + all DLLs included) |
+          | **Windows** x64 | \`.zip\` | None — portable DB, MSVC runtime, all DLLs included |
           WINEOF
           fi
 
@@ -545,12 +556,12 @@ jobs:
           ### Quick start (Windows)
 
           1. Extract the \`.zip\`
-          2. Install [MySQL 8.0](https://dev.mysql.com/downloads/installer/)
-          3. Create databases and import SQL (same as Linux above)
-          4. Edit \`etc\\worldserver.conf\` with your MySQL credentials
-          5. Double-click \`start-worldserver.bat\`
+          2. Double-click **\`Setup-Database.bat\`** — downloads portable MariaDB, creates databases, imports all SQL, and configures the server automatically
+          3. Extract client maps (map_extractor, vmap4_extractor, vmap4_assembler, mmaps_generator)
+          4. Double-click **\`start-worldserver.bat\`**
 
-          The zip includes all required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime).
+          No MySQL/MariaDB installation needed — the setup script downloads a fully portable database.
+          All required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime) are included in the zip.
           WINQSEOF
           fi
 
