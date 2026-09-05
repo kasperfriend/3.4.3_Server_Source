@@ -1,8 +1,9 @@
 # Release build – triggered manually from the Actions tab.
 #
 # Builds the server (worldserver + bnetserver) with AI Playerbots on
-# Ubuntu 22.04 and optionally on Windows, packages the binaries with
-# SQL, config, and docs, and publishes a GitHub Release.
+# Ubuntu 22.04 and Windows Server 2022, packages the binaries with
+# SQL, config, docs and all required DLLs, and publishes a GitHub
+# Release with downloadable archives.
 #
 # Usage:  Actions → Release → Run workflow → fill in the tag name.
 
@@ -29,7 +30,7 @@ on:
       build_windows:
         description: "Also build Windows binaries (adds ~45 min)"
         type: boolean
-        default: false
+        default: true
 
 jobs:
   # ==================================================================
@@ -115,7 +116,7 @@ jobs:
           cp docs/Playerbots.md "$DEST/docs/" 2>/dev/null || true
           cp README.md "$DEST/" 2>/dev/null || true
           # Quick-start script
-          cat > "$DEST/start-worldserver.sh" << 'EOF'
+          cat > "$DEST/start-worldserver.sh" << 'STARTEOF'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
           echo "Starting worldserver from $DIR ..."
@@ -127,7 +128,7 @@ jobs:
           echo ""
           cd "$DIR"
           exec ./bin/worldserver
-          EOF
+          STARTEOF
           chmod +x "$DEST/start-worldserver.sh"
 
       - name: Strip debug symbols
@@ -170,7 +171,7 @@ jobs:
           retention-days: 7
 
   # ==================================================================
-  #  Windows release build  (optional, triggered by workflow input)
+  #  Windows release build
   # ==================================================================
   release-windows:
     name: Release (Windows x64)
@@ -245,25 +246,150 @@ jobs:
         run: |
           cmake --install build --config ${{ inputs.build_type }}
 
-      - name: Bundle extras
+      - name: Bundle SQL, config, docs, DLLs, and launcher
         shell: pwsh
         run: |
           $DEST = "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3"
+          $BINDIR = "$DEST\bin"
+
+          # --- SQL ---
           New-Item -ItemType Directory -Force "$DEST\sql" | Out-Null
-          Copy-Item -Recurse -Force "sql\base" "$DEST\sql\" -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force "sql\create" "$DEST\sql\" -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force "sql\custom" "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\base"   "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\create"  "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\custom"  "$DEST\sql\" -ErrorAction SilentlyContinue
           Copy-Item -Recurse -Force "sql\updates" "$DEST\sql\" -ErrorAction SilentlyContinue
+
+          # --- Config ---
           New-Item -ItemType Directory -Force "$DEST\etc\worldserver.conf.d" | Out-Null
           Copy-Item "src\plugins\playerbot\aiplayerbot.conf.dist" "$DEST\etc\worldserver.conf.d\" -ErrorAction SilentlyContinue
+
+          # --- Docs ---
           New-Item -ItemType Directory -Force "$DEST\docs" | Out-Null
           Copy-Item "docs\Playerbots.md" "$DEST\docs\" -ErrorAction SilentlyContinue
           Copy-Item "README.md" "$DEST\" -ErrorAction SilentlyContinue
-          # Copy required DLLs from vcpkg
+
+          # --- vcpkg DLLs (OpenSSL, Boost, zlib, etc.) ---
           $VCINST = "$env:VCPKG_ROOT\installed\x64-windows\bin"
           if (Test-Path $VCINST) {
-            Copy-Item "$VCINST\*.dll" "$DEST\bin\" -ErrorAction SilentlyContinue
+            Write-Host "Copying vcpkg DLLs from $VCINST ..."
+            Copy-Item "$VCINST\*.dll" "$BINDIR\" -ErrorAction SilentlyContinue
+            Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
           }
+
+          # --- MySQL client DLL ---
+          # The pre-installed MySQL Server on the runner provides libmysql.dll.
+          $MYSQL_PATHS = @(
+            "C:\Program Files\MySQL\MySQL Server 8.0\lib",
+            "C:\Program Files\MySQL\MySQL Server 8.4\lib",
+            "C:\Program Files (x86)\MySQL\MySQL Server 8.0\lib"
+          )
+          foreach ($mp in $MYSQL_PATHS) {
+            $dll = Join-Path $mp "libmysql.dll"
+            if (Test-Path $dll) {
+              Write-Host "Copying MySQL DLL: $dll"
+              Copy-Item $dll "$BINDIR\" -Force
+              break
+            }
+          }
+          # Fallback: search vcpkg if we installed libmysql there
+          $vcpkg_mysql = "$env:VCPKG_ROOT\installed\x64-windows\bin\libmysql.dll"
+          if ((-not (Test-Path "$BINDIR\libmysql.dll")) -and (Test-Path $vcpkg_mysql)) {
+            Write-Host "Copying MySQL DLL from vcpkg"
+            Copy-Item $vcpkg_mysql "$BINDIR\" -Force
+          }
+
+          # --- MSVC Runtime DLLs ---
+          # Deploy the VC++ redistributable DLLs next to the executables
+          # so the server runs on any Windows 10/11 machine without a
+          # separate VC++ Redist install.
+          $VCREDIST = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT"
+          $found = Get-ChildItem -Path $VCREDIST -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            # Try the Enterprise path specifically
+            $VCREDIST2 = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT"
+            $found = Get-ChildItem -Path $VCREDIST2 -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($found) {
+            Write-Host "Copying MSVC runtime DLLs from $($found.FullName) ..."
+            Copy-Item "$($found.FullName)\*.dll" "$BINDIR\" -ErrorAction SilentlyContinue
+          } else {
+            # Last resort: use vcpkg's MSVC merge module or just warn
+            Write-Warning "Could not find MSVC redistributable DLLs. Users may need to install the VC++ Redistributable."
+            # Try to find the DLLs in the system
+            $sys32 = "$env:SystemRoot\System32"
+            foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "concrt140.dll")) {
+              $src = Join-Path $sys32 $dll
+              if (Test-Path $src) {
+                Write-Host "  Copying $dll from System32"
+                Copy-Item $src "$BINDIR\" -Force
+              }
+            }
+          }
+
+          # --- Launcher batch file ---
+          @"
+          @echo off
+          title TrinityCore 3.4.3 World Server
+          echo ============================================================
+          echo   TrinityCore 3.4.3 + AI Playerbots
+          echo ============================================================
+          echo.
+          echo Before first run, make sure you have:
+          echo   1. Installed MySQL 8.0 and created databases:
+          echo        CREATE DATABASE auth;
+          echo        CREATE DATABASE characters;
+          echo        CREATE DATABASE world;
+          echo   2. Imported SQL files:
+          echo        mysql -u root -p auth ^< sql\base\auth_database.sql
+          echo        mysql -u root -p characters ^< sql\base\characters_database.sql
+          echo        mysql -u root -p world ^< sql\base\world_database.sql
+          echo        mysql -u root -p characters ^< sql\custom\playerbot\characters_playerbot.sql
+          echo   3. Copied etc\worldserver.conf.dist to etc\worldserver.conf
+          echo   4. Edited etc\worldserver.conf with your MySQL credentials
+          echo.
+          echo Starting worldserver...
+          echo.
+          cd /d "%~dp0"
+          bin\worldserver.exe
+          pause
+          "@ | Set-Content "$DEST\start-worldserver.bat" -Encoding ASCII
+
+          # --- README for the zip ---
+          @"
+          TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
+          =======================================================
+
+          Contents:
+            bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
+            sql\          - database schemas (base, create, custom, updates)
+            etc\          - configuration files
+            docs\         - Playerbots.md documentation
+
+          Prerequisites:
+            - MySQL 8.0 (https://dev.mysql.com/downloads/installer/)
+            - A 3.4.3 WoW client for map extraction
+
+          Quick start:
+            1. Run start-worldserver.bat for guided setup instructions
+            2. Or manually configure etc\worldserver.conf and import the SQL files
+            3. Extract maps: bin\map_extractor.exe -d "C:\path\to\WoW"
+            4. Extract vmaps: bin\vmap4_extractor.exe -d "C:\path\to\WoW"
+               then: bin\vmap4_assembler.exe Buildings vmaps
+            5. Extract mmaps: bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
+            6. Copy map/vmap/mmap folders into the server directory
+            7. Run start-worldserver.bat
+
+          For AI Playerbot documentation, see docs\Playerbots.md
+          "@ | Set-Content "$DEST\WINDOWS-README.txt" -Encoding ASCII
+
+          Write-Host ""
+          Write-Host "=== Final package contents ==="
+          Get-ChildItem "$BINDIR\*.exe" | ForEach-Object { Write-Host "  bin\$($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)" }
+          Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  bin\$($_.Name)" }
+          Write-Host "  sql\ (database schemas)"
+          Write-Host "  etc\ (configuration)"
+          Write-Host "  docs\ (documentation)"
+          Write-Host "  start-worldserver.bat (launcher)"
 
       - name: Create release archive
         id: package
@@ -277,7 +403,8 @@ jobs:
           Compress-Archive -Path "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3" `
             -DestinationPath "$env:GITHUB_WORKSPACE\$ARCHIVE" -Force
           "artifact_name=$ARCHIVE" >> $env:GITHUB_OUTPUT
-          Write-Host "Archive: $ARCHIVE"
+          $size = [math]::Round((Get-Item "$env:GITHUB_WORKSPACE\$ARCHIVE").Length / 1MB, 1)
+          Write-Host "Archive: $ARCHIVE ($size MB)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -291,7 +418,8 @@ jobs:
   # ==================================================================
   publish-release:
     name: Publish GitHub Release
-    needs: [release-linux]
+    needs: [release-linux, release-windows]
+    # Run when linux succeeds, regardless of windows (windows is optional)
     if: always() && needs.release-linux.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
@@ -345,58 +473,102 @@ jobs:
             echo "since=initial" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build release body
+        id: body
+        run: |
+          HAS_WINDOWS="no"
+          if ls artifacts/*.zip 1>/dev/null 2>&1; then
+            HAS_WINDOWS="yes"
+          fi
+
+          cat > release_body.md << BODYEOF
+          ## TrinityCore 3.4.3 Server with AI Playerbots
+
+          Built from commit \`${{ github.sha }}\` on branch \`${{ github.ref_name }}\`.
+          ${{ steps.commits.outputs.count }} commits since ${{ steps.commits.outputs.since }}.
+
+          ### What's included
+
+          | Component | Description |
+          | --- | --- |
+          | **worldserver** | Game server with integrated AI playerbots ([ike3/mangosbot](https://github.com/ike3/mangosbot) port) |
+          | **bnetserver** | Authentication / Battle.net login server |
+          | **map_extractor** | Client DBC/DB2 data extraction |
+          | **vmap4_extractor / vmap4_assembler** | Visibility map generation |
+          | **mmaps_generator** | Movement map (navmesh) generation |
+          | **sql/** | Database schemas: base, create, custom (playerbot tables), updates |
+          | **etc/** | Server configuration including \`aiplayerbot.conf.dist\` |
+          | **docs/Playerbots.md** | Full AI playerbot documentation |
+
+          ### Downloads
+
+          | Platform | Archive | Prerequisites |
+          | --- | --- | --- |
+          | **Linux** x86_64 | \`.tar.gz\` | MySQL 8.0, OpenSSL 1.1+ |
+          BODYEOF
+
+          if [ "$HAS_WINDOWS" = "yes" ]; then
+            cat >> release_body.md << WINEOF
+          | **Windows** x64 | \`.zip\` | MySQL 8.0 (MSVC runtime + all DLLs included) |
+          WINEOF
+          fi
+
+          cat >> release_body.md << QSEOF
+
+          ### Quick start (Linux)
+
+          \`\`\`bash
+          tar xzf trinitycore-3.4.3-linux-x86_64-*.tar.gz
+          cd trinitycore-3.4.3
+
+          # Create databases
+          mysql -u root -e "CREATE DATABASE auth; CREATE DATABASE characters; CREATE DATABASE world;"
+
+          # Import SQL
+          mysql -u root auth < sql/base/auth_database.sql
+          mysql -u root characters < sql/base/characters_database.sql
+          mysql -u root world < sql/base/world_database.sql
+          mysql -u root characters < sql/custom/playerbot/characters_playerbot.sql
+
+          # Configure
+          cp etc/worldserver.conf.dist etc/worldserver.conf
+          # Edit etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf
+
+          # Run
+          ./bin/worldserver
+          \`\`\`
+          QSEOF
+
+          if [ "$HAS_WINDOWS" = "yes" ]; then
+            cat >> release_body.md << WINQSEOF
+
+          ### Quick start (Windows)
+
+          1. Extract the \`.zip\`
+          2. Install [MySQL 8.0](https://dev.mysql.com/downloads/installer/)
+          3. Create databases and import SQL (same as Linux above)
+          4. Edit \`etc\\worldserver.conf\` with your MySQL credentials
+          5. Double-click \`start-worldserver.bat\`
+
+          The zip includes all required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime).
+          WINQSEOF
+          fi
+
+          cat >> release_body.md << FOOTEOF
+
+          ### Build information
+
+          - Build type: \`${{ inputs.build_type }}\`
+          - Static linking: \`WITH_DYNAMIC_LINKING=0\`
+          - Scripts: \`static\` (all scripts linked into worldserver)
+          FOOTEOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "TrinityCore 3.4.3 + AI Playerbots — ${{ steps.tag.outputs.tag }}"
-          body: |
-            ## TrinityCore 3.4.3 Server with AI Playerbots
-
-            Built from commit \`${{ github.sha }}\` on branch \`${{ github.ref_name }}\`.
-            ${{ steps.commits.outputs.count }} commits since ${{ steps.commits.outputs.since }}.
-
-            ### What's included
-
-            | Component | Description |
-            | --- | --- |
-            | **worldserver** | Game server with integrated AI playerbots ([ike3/mangosbot](https://github.com/ike3/mangosbot) port) |
-            | **bnetserver** | Authentication / Battle.net login server |
-            | **map_extractor** | Client DBC/DB2 data extraction |
-            | **vmap4_extractor / vmap4_assembler** | Visibility map generation |
-            | **mmaps_generator** | Movement map (navmesh) generation |
-            | **sql/** | Database schemas: base, create, custom (playerbot tables), updates |
-            | **etc/** | Server configuration including `aiplayerbot.conf.dist` |
-            | **docs/Playerbots.md** | Full AI playerbot documentation |
-
-            ### Quick start (Linux)
-
-            ```bash
-            tar xzf trinitycore-3.4.3-linux-x86_64-*.tar.gz
-            cd trinitycore-3.4.3
-
-            # Create databases
-            mysql -u root -e "CREATE DATABASE auth; CREATE DATABASE characters; CREATE DATABASE world;"
-
-            # Import SQL
-            mysql -u root auth < sql/base/auth_database.sql
-            mysql -u root characters < sql/base/characters_database.sql
-            mysql -u root world < sql/base/world_database.sql
-            mysql -u root characters < sql/custom/playerbot/characters_playerbot.sql
-
-            # Configure
-            cp etc/worldserver.conf.dist etc/worldserver.conf
-            # Edit etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf
-
-            # Run
-            ./bin/worldserver
-            ```
-
-            ### Build information
-
-            - Build type: `${{ inputs.build_type }}`
-            - Static linking: `WITH_DYNAMIC_LINKING=0`
-            - Scripts: `static` (all scripts linked into worldserver)
+          body_path: release_body.md
           draft: false
           prerelease: ${{ inputs.prerelease }}
           files: artifacts/*
