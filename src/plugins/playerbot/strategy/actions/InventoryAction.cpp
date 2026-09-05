@@ -167,9 +167,6 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
             case ITEM_CLASS_TRADE_GOODS:
                 ai->TellMaster("--- trade goods ---");
                 break;
-            case ITEM_CLASS_CONSUMABLE:
-                ai->TellMaster("--- generic ---");
-                break;
             case ITEM_CLASS_RECIPE:
                 ai->TellMaster("--- recipe ---");
                 break;
@@ -184,9 +181,6 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
                 break;
             case ITEM_CLASS_KEY:
                 ai->TellMaster("--- keys ---");
-                break;
-            case ITEM_CLASS_PERMANENT:
-                ai->TellMaster("--- permanent ---");
                 break;
             case ITEM_CLASS_MISCELLANEOUS:
                 ai->TellMaster("--- other ---");

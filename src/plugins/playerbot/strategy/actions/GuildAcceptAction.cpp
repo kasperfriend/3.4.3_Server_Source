@@ -28,15 +28,16 @@ bool GuildAcceptAction::Execute(Event event)
         accept = false;
     }
 
-    WorldPacket packet;
     if (accept)
     {
         bot->SetGuildIdInvited(guildId);
-        bot->GetSession()->HandleGuildAcceptOpcode(packet);
+        WorldPackets::Guild::AcceptGuildInvite acceptInvite{WorldPacket(CMSG_ACCEPT_GUILD_INVITE)};
+        bot->GetSession()->HandleGuildAcceptInvite(acceptInvite);
     }
     else
     {
-        bot->GetSession()->HandleGuildDeclineOpcode(packet);
+        WorldPackets::Guild::GuildDeclineInvitation decline{WorldPacket(CMSG_GUILD_DECLINE_INVITATION)};
+        bot->GetSession()->HandleGuildDeclineInvitation(decline);
     }
     return true;
 }

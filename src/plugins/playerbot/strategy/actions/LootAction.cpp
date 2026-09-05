@@ -59,7 +59,7 @@ bool OpenLootAction::DoLoot(LootObject& lootObject)
     if (creature && bot->GetDistance(creature) > INTERACTION_DISTANCE)
         return false;
 
-    if (creature && creature->HasFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE))
+    if (creature && creature->HasDynamicFlag(UNIT_DYNFLAG_LOOTABLE))
     {
         bot->GetMotionMaster()->Clear();
         WorldPacket* const packet = new WorldPacket(CMSG_LOOT_UNIT, 8);
@@ -70,7 +70,7 @@ bool OpenLootAction::DoLoot(LootObject& lootObject)
 
     if (creature)
     {
-        SkillType skill = creature->GetCreatureTemplate()->GetRequiredLootSkill();
+        SkillType skill = SkillType(creature->GetCreatureTemplate()->GetDifficulty(DIFFICULTY_NONE)->GetRequiredLootSkill());
         if (!CanOpenLock(skill, lootObject.reqSkillValue))
             return false;
 
@@ -135,7 +135,7 @@ uint32 OpenLootAction::GetOpeningSpell(LootObject& lootObject, GameObject* go)
             return spellId;
     }
 
-    for (uint32 spellId = 0; spellId < sSpellStore.GetNumRows(); spellId++)
+    for (uint32 spellId = 0; spellId < sSpellNameStore.GetNumRows(); spellId++)
     {
         if (spellId == MINING || spellId == HERB_GATHERING)
             continue;
@@ -310,7 +310,6 @@ bool StoreLootAction::IsLootAllowed(uint32 itemid)
 
     if (proto->GetStartQuest() ||
         proto->GetBonding() == BIND_QUEST ||
-        proto->GetBonding() == BIND_QUEST_ITEM1 ||
         proto->GetClass() == ITEM_CLASS_QUEST)
         return true;
 

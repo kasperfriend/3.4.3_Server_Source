@@ -42,7 +42,7 @@ uint32 SpellIdValue::Calculate()
         if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)
             continue;
 
-        char* spellName = pSpellInfo->SpellName[loc];
+        char const* spellName = pSpellInfo->SpellName->Str[loc];
         if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
             continue;
 
@@ -78,7 +78,7 @@ uint32 SpellIdValue::Calculate()
             if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)
                 continue;
 
-            char* spellName = pSpellInfo->SpellName[loc];
+            char const* spellName = pSpellInfo->SpellName->Str[loc];
             if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
                 continue;
 

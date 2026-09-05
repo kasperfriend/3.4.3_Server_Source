@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Configuration/Config.h"
+#include "SharedDefines.h"
 
 class Player;
 class PlayerbotMgr;

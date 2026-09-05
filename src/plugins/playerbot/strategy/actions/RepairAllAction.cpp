@@ -16,10 +16,10 @@ bool RepairAllAction::Execute(Event event)
 
         bot->SetFacingToObject(unit);
         float discountMod = bot->GetReputationPriceDiscount(unit);
-        uint32 bot->DurabilityRepairAll(true, discountMod, false);
+        bot->DurabilityRepairAll(true, discountMod, false);
 
         ostringstream out;
-        out << "Repair: " << chat->formatMoney(totalCost) << " (" << unit->GetName() << ")";
+        out << "Repair: " << unit->GetName();
         ai->TellMasterNoFacing(out.str());
 
         return true;

@@ -75,6 +75,7 @@ int strcmpi(std::string s1, std::string s2);
 #include "Server/Packets/ItemPackets.h"
 #include "Server/Packets/LootPackets.h"
 #include "Server/Packets/MailPackets.h"
+#include "Server/Packets/TaxiPackets.h"
 #include "Server/Packets/MiscPackets.h"
 #include "Server/Packets/MovementPackets.h"
 #include "Server/Packets/NPCPackets.h"

@@ -45,7 +45,7 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const * item)
 
     uint16 dest;
     InventoryResult result = bot->CanEquipItem(NULL_SLOT, dest, pItem, true, false);
-    pItem->RemoveFromUpdateQueueOf(bot);
+    RemoveItemFromUpdateQueueOf(pItem, bot);
     delete pItem;
 
     if( result != EQUIP_ERR_OK )
@@ -78,9 +78,9 @@ bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const * proto)
     switch (proto->GetClass())
     {
     case ITEM_CLASS_GEM:
-        if (proto->GetSubClass() == ITEM_SUBCLASS_GEM_SIMPLE && bot->HasSkill(SKILL_JEWELCRAFTING))
+        if (proto->GetSubClass() == ITEM_SUBCLASS_GEM_OTHER && bot->HasSkill(SKILL_JEWELCRAFTING))
             return true;
-        if (proto->GetSubClass() != ITEM_SUBCLASS_GEM_SIMPLE)
+        if (proto->GetSubClass() != ITEM_SUBCLASS_GEM_OTHER)
             return true;
         break;
     case ITEM_CLASS_TRADE_GOODS:
@@ -114,7 +114,7 @@ bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const * proto)
         break;
     case ITEM_CLASS_RECIPE:
         {
-            if ItemSpellId((bot->HasSpell(proto, 2)))
+            if (bot->HasSpell(ItemSpellId(proto, 2)))
                 break;
 
             switch (proto->GetSubClass())

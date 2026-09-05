@@ -174,10 +174,8 @@ void PlayerbotHolder::OnBotLogin(Player * const bot)
 
         if (!groupValid)
         {
-            WorldPacket p;
-            string member = bot->GetName();
-            p << uint32(PARTY_OP_LEAVE) << member << uint32(0);
-            bot->GetSession()->HandleGroupDisbandOpcode(p);
+            WorldPackets::Party::LeaveGroup leaveGroup{WorldPacket(CMSG_LEAVE_GROUP)};
+            bot->GetSession()->HandleLeaveGroupOpcode(leaveGroup);
         }
     }
 
@@ -192,7 +190,7 @@ string PlayerbotHolder::ProcessBotCommand(string cmd, ObjectGuid guid, bool admi
         return "bot system is disabled";
 
     uint32 botAccount = sCharacterCache->GetCharacterAccountIdByGuid(guid);
-    bool isRandomBot = sRandomPlayerbotMgr.IsRandomBot(guid);
+    bool isRandomBot = sRandomPlayerbotMgr.IsRandomBot(guid.GetCounter());
     bool isRandomAccount = sPlayerbotAIConfig.IsInRandomAccountList(botAccount);
     bool isMasterAccount = (masterAccountId == botAccount);
 

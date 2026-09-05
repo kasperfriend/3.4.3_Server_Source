@@ -155,16 +155,16 @@ void QueryItemUsageAction::QueryQuestItem(uint32 itemId)
 
 void QueryItemUsageAction::QueryQuestItem(uint32 itemId, const Quest *questTemplate, const QuestStatusData *questStatus)
 {
-    for (int i = 0; i < QUEST_OBJECTIVES_COUNT; i++)
+    for (QuestObjective const& objective : questTemplate->GetObjectives())
     {
-        if (questTemplate->RequiredItemId[i] != itemId)
+        if (objective.Type != QUEST_OBJECTIVE_ITEM || uint32(objective.ObjectID) != itemId)
             continue;
 
-        int required = questTemplate->RequiredItemCount[i];
-        int available = questStatus->ItemCount[i];
-
+        int32 required = objective.Amount;
         if (!required)
             continue;
+
+        int32 available = bot->GetQuestObjectiveData(objective);
 
         ai->TellMaster(chat->formatQuestObjective(chat->formatQuest(questTemplate), available, required));
     }
