@@ -69,7 +69,7 @@ bool QuestAction::ProcessQuests(WorldObject* questGiver)
     return true;
 }
 
-bool QuestAction::AcceptQuest(Quest const* quest, uint64 questGiver)
+bool QuestAction::AcceptQuest(Quest const* quest, ObjectGuid questGiver)
 {
     std::ostringstream out;
 

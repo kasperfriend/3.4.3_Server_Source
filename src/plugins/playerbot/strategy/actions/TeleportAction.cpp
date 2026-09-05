@@ -18,7 +18,7 @@ bool TeleportAction::Execute(Event event)
         if (goInfo->type != GAMEOBJECT_TYPE_SPELLCASTER)
             continue;
 
-        uint32 spellId = goInfo->spellcaster.spellId;
+        uint32 spellId = goInfo->spellCaster.spell;
         const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->GetEffect(SpellEffIndex(1)).Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->GetEffect(SpellEffIndex(2)).Effect != SPELL_EFFECT_TELEPORT_UNITS)
             continue;
@@ -31,7 +31,7 @@ bool TeleportAction::Execute(Event event)
         Spell *spell = new Spell(bot, pSpellInfo, TRIGGERED_NONE);
         SpellCastTargets targets;
         targets.SetUnitTarget(bot);
-        spell->prepare(&targets);
+        spell->prepare(targets);
         spell->cast(true);
         return true;
     }
@@ -40,11 +40,12 @@ bool TeleportAction::Execute(Event event)
     LastMovement& movement = context->GetValue<LastMovement&>("last movement")->Get();
     if (movement.lastAreaTrigger)
     {
-        WorldPacket p(CMSG_AREA_TRIGGER);
-        p << movement.lastAreaTrigger;
-        p.rpos(0);
+        WorldPackets::AreaTrigger::AreaTrigger areaTrigger{WorldPacket(CMSG_AREA_TRIGGER)};
+        areaTrigger.AreaTriggerID = int32(movement.lastAreaTrigger);
+        areaTrigger.Entered = true;
+        areaTrigger.FromClient = true;
 
-        bot->GetSession()->HandleAreaTriggerOpcode(p);
+        bot->GetSession()->HandleAreaTriggerOpcode(areaTrigger);
         movement.lastAreaTrigger = 0;
         return true;
     }
