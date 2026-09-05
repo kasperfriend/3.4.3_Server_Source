@@ -224,14 +224,38 @@ jobs:
       - name: Install dependencies via vcpkg
         shell: pwsh
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            boost-system:x64-windows `
-            boost-filesystem:x64-windows `
-            boost-program-options:x64-windows `
-            boost-iostreams:x64-windows `
-            boost-regex:x64-windows `
-            boost-locale:x64-windows `
-            openssl:x64-windows
+          # dep/boost/CMakeLists.txt only asks find_package(Boost ...) for the
+          # *compiled* components, so installing just those leaves out every
+          # header-only Boost library the core actually includes.  The build then
+          # dies in src/common with
+          #   error C1083: Cannot open include file: 'boost/asio/ip/address.hpp'
+          # (and boost/property_tree/ini_parser.hpp, boost/process/args.hpp, ...).
+          #
+          # The header-only list below is derived from every `#include <boost/...>`
+          # in src/ : asio, beast, process, algorithm, dll, uuid, dynamic_bitset,
+          # preprocessor, multi_index, graph, accumulators, heap, container,
+          # circular_buffer, stacktrace, smart_ptr, property_tree, property_map,
+          # core, bind (+ boost-headers for boost/version.hpp).
+          $triplet = "x64-windows"
+          $ports = @(
+            # compiled components requested by find_package(Boost ...)
+            "boost-system", "boost-filesystem", "boost-program-options",
+            "boost-iostreams", "boost-regex", "boost-locale", "boost-thread",
+            # header-only libraries included directly by the core / scripts / plugins
+            "boost-headers", "boost-asio", "boost-beast", "boost-process",
+            "boost-algorithm", "boost-dll", "boost-uuid", "boost-dynamic-bitset",
+            "boost-preprocessor", "boost-multi-index", "boost-graph",
+            "boost-accumulators", "boost-heap", "boost-container",
+            "boost-circular-buffer", "boost-stacktrace", "boost-smart-ptr",
+            "boost-property-tree", "boost-property-map", "boost-core",
+            "boost-bind", "boost-foreach", "boost-optional",
+            # TLS / crypto
+            "openssl"
+          ) | ForEach-Object { "$($_)`:$triplet" }
+
+          Write-Host "Installing $($ports.Count) vcpkg ports ($triplet)"
+          & "$env:VCPKG_ROOT\vcpkg.exe" install @ports
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         timeout-minutes: 300
 
       - name: Configure (CMake)

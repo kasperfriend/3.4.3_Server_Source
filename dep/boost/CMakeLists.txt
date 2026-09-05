@@ -29,7 +29,13 @@ else()
   set(BOOST_REQUIRED_VERSION 1.71)
 endif()
 
-find_package(Boost ${BOOST_REQUIRED_VERSION} REQUIRED system filesystem program_options iostreams regex locale)
+# NOTE: `thread` is not part of the upstream TrinityCore component list, but the
+# AI playerbot plugin needs it - src/plugins/playerbot/PlayerbotCommandServer.cpp
+# spawns a boost::thread per remote command connection.  Boost is compiled with
+# BOOST_ALL_NO_LIB (see below), which disables MSVC's auto-link pragma, so the
+# library has to be requested explicitly or worldserver fails to link with
+# unresolved boost::thread symbols.
+find_package(Boost ${BOOST_REQUIRED_VERSION} REQUIRED system filesystem program_options iostreams regex locale thread)
 
 if(NOT Boost_FOUND)
   if(NOT DEFINED ENV{BOOST_ROOT} AND NOT DEFINED Boost_DIR AND NOT DEFINED BOOST_ROOT AND NOT DEFINED BOOSTROOT)
