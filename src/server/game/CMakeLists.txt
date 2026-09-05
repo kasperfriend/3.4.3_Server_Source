@@ -61,15 +61,9 @@ set_target_properties(game
         "server")
 
 if(BUILD_SHARED_LIBS)
-  if(UNIX)
-    install(TARGETS game
-      LIBRARY
-        DESTINATION lib)
-  elseif(WIN32)
-    install(TARGETS game
-      RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  endif()
+  install(TARGETS game
+    RUNTIME
+      DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
 # Generate precompiled header

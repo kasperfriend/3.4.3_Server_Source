@@ -53,15 +53,9 @@ set_target_properties(shared
         "server")
 
 if(BUILD_SHARED_LIBS)
-  if(UNIX)
-    install(TARGETS shared
-      LIBRARY
-        DESTINATION lib)
-  elseif(WIN32)
-    install(TARGETS shared
-      RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  endif()
+  install(TARGETS shared
+    RUNTIME
+      DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
 # Generate precompiled header

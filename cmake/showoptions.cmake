@@ -1,20 +1,13 @@
 # output generic information about the core and buildtype chosen
 message("")
 message("* TrinityCore revision   : ${rev_hash} ${rev_date} (${rev_branch} branch)")
-if(UNIX)
-  message("* TrinityCore buildtype  : ${CMAKE_BUILD_TYPE}")
-endif()
 message("")
 
 # output information about installation-directories and locations
 
 message("* Install core to        : ${CMAKE_INSTALL_PREFIX}")
 if(COPY_CONF)
-  if(UNIX)
-    message("* Install configs to     : ${CONF_DIR}")
-  else()
-    message("* Install configs to     : ${CMAKE_INSTALL_PREFIX}")
-  endif()
+  message("* Install configs to     : ${CMAKE_INSTALL_PREFIX}")
 endif()
 
 message("")
