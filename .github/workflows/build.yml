@@ -1,9 +1,10 @@
 # Continuous-integration build for TrinityCore 3.4.3 + AI Playerbots.
 #
-# Runs on every push to main and on every pull request.  The Linux build
-# is the primary verification target.  A Windows build job runs as well
-# but is non-blocking (continue-on-error) because the Windows dependency
-# chain (Boost / OpenSSL / MySQL via vcpkg) is significantly more fragile.
+# Runs on every push to main and on every pull request.  Windows / MSVC is the
+# only build target: the Linux job was removed because this project ships
+# Windows binaries, and a failing job that nothing consumes is just noise.
+# The Windows job is blocking - the run is green only when worldserver.exe and
+# bnetserver.exe are actually produced.
 
 name: Build
 
@@ -17,110 +18,20 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Needed so a failing job can post its extracted compiler errors back to the
+# pull request / commit (see .github/actions/report-build-failure).
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   # ------------------------------------------------------------------
-  #  Linux build  (primary, must pass)
-  # ------------------------------------------------------------------
-  build-linux:
-    name: Build (Ubuntu 22.04 / GCC 12)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Free disk space
-        run: |
-          # Remove large unused packages to free up ~10 GB on the runner
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                       /opt/hostedtoolcache/CodeQL 2>/dev/null || true
-          sudo apt-get purge -y --auto-remove \
-            '^temurin-.*-jdk' '^openjdk-.*' '^dotnet-.*' \
-            '^llvm-.*' '^google-chrome-.*' '^microsoft-edge-.*' 2>/dev/null || true
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            gcc-12 g++-12 \
-            cmake \
-            git \
-            libssl-dev \
-            libmysqlclient-dev \
-            libboost-all-dev \
-            libreadline-dev \
-            zlib1g-dev \
-            libbz2-dev \
-            libncurses-dev
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
-
-      - name: Show toolchain versions
-        run: |
-          gcc --version | head -1
-          g++ --version | head -1
-          cmake --version | head -1
-          dpkg -l | grep -E "libssl-dev|libmysqlclient|libboost.*dev|libreadline" | awk '{print $2, $3}'
-
-      - name: Configure (CMake)
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install \
-            -DSERVERS=1 \
-            -DTOOLS=1 \
-            -DSCRIPTS=static \
-            -DWITH_DYNAMIC_LINKING=0 \
-            -DUSE_COREPCH=1 \
-            -DUSE_SCRIPTPCH=1 \
-            -DWITH_WARNINGS=0 \
-            -DWITHOUT_GIT=1 \
-            -DCOPY_CONF=1 \
-            2>&1 | tee cmake.log
-
-      - name: Build
-        run: |
-          cmake --build build -j$(nproc) 2>&1 | tee build.log
-
-      - name: Verify produced binaries
-        run: |
-          echo "=== Server binaries ==="
-          ls -lh build/bin/worldserver build/bin/bnetserver
-          echo ""
-          echo "=== Extraction tools ==="
-          ls -lh build/bin/map_extractor build/bin/vmap4_extractor \
-                 build/bin/vmap4_assembler build/bin/mmaps_generator
-          echo ""
-          echo "=== Playerbot integration check ==="
-          nm build/bin/worldserver | grep -c "Playerbot" | xargs -I{} echo "  {} Playerbot symbols in worldserver"
-          nm build/bin/worldserver | grep -q "InitializePlayerbots" && \
-            echo "  ✓ InitializePlayerbots found" || \
-            { echo "::error::Playerbot symbols missing from worldserver"; exit 1; }
-          nm build/bin/worldserver | grep -q "RandomPlayerbotMgr" && \
-            echo "  ✓ RandomPlayerbotMgr found" || \
-            { echo "::error::RandomPlayerbotMgr missing from worldserver"; exit 1; }
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-linux
-          path: |
-            build.log
-            cmake.log
-
-  # ------------------------------------------------------------------
-  #  Windows build  (secondary, best-effort)
+  #  Windows build  (the only target - must pass)
   # ------------------------------------------------------------------
   build-windows:
     name: Build (Windows 2022 / MSVC)
     runs-on: windows-2022
     timeout-minutes: 360
-    continue-on-error: true   # non-blocking
 
     env:
       VCPKG_ROOT: C:\vcpkg
@@ -142,20 +53,104 @@ jobs:
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          cd $env:VCPKG_ROOT
-          .\bootstrap-vcpkg.bat -disableMetrics
+          # The vcpkg copy that ships with the runner image is used as-is.
+          #
+          # It is deliberately NOT pinned to an older release: an old vcpkg asks
+          # the MSYS2 mirrors for package revisions they dropped long ago
+          # (msys2-runtime-3.5.4-2), so every port that runs a pkgconfig fixup
+          # fails - bzip2 first, then openssl - and the dependency step dies:
+          #   error: https://repo.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst: 404
+          # Modern Boost is handled in the source instead:
+          #   * Boost 1.86 moved the Boost.Process v1 headers under
+          #     boost/process/v1/, and Boost 1.88 removed the old top-level
+          #     paths.  src/common/Utilities/StartProcess.cpp picks the right set
+          #     by BOOST_VERSION, and dep/boost/CMakeLists.txt defines
+          #     BOOST_PROCESS_VERSION=1 so the v1 names stay visible to
+          #     `using namespace boost::process;` on every Boost release.
+          #   * Boost 1.87 stopped pulling <boost/filesystem/directory.hpp> in
+          #     from <boost/filesystem/operations.hpp>; the six core files that
+          #     use directory iterators now include it explicitly.
+          #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
+          #     command server now uses boost::asio::io_context.
+          #
+          # Everything printed here and by the vcpkg install step is tee'd into
+          # deps.log, because the Actions job log is not always retrievable when
+          # triaging a red run.
+          $depsLog = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          if (Test-Path $depsLog) { Remove-Item $depsLog -Force }
+          Start-Transcript -Path $depsLog -Append | Out-Null
+          Push-Location $env:VCPKG_ROOT
+          try {
+            .\bootstrap-vcpkg.bat -disableMetrics
+            if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed" }
+            Write-Host "vcpkg in use:"
+            .\vcpkg.exe version
+          } finally {
+            Pop-Location
+            Stop-Transcript | Out-Null
+          }
 
       - name: Install dependencies via vcpkg
         shell: pwsh
+        env:
+          # Some ports still carry cmake_minimum_required(VERSION <3.5), which
+          # the runner's CMake 4.x rejects outright.  This is CMake's documented
+          # escape hatch for old projects and a no-op on CMake 3.x.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            boost-system:x64-windows `
-            boost-filesystem:x64-windows `
-            boost-program-options:x64-windows `
-            boost-iostreams:x64-windows `
-            boost-regex:x64-windows `
-            boost-locale:x64-windows `
-            openssl:x64-windows
+          # dep/boost/CMakeLists.txt only asks find_package(Boost ...) for the
+          # *compiled* components, so installing just those leaves out every
+          # header-only Boost library the core actually includes.  The build then
+          # dies in src/common with
+          #   error C1083: Cannot open include file: 'boost/asio/ip/address.hpp'
+          # (and boost/property_tree/ini_parser.hpp, boost/process/args.hpp, ...).
+          #
+          # The header-only list below is derived from every `#include <boost/...>`
+          # in src/ : asio, beast, process, algorithm, dll, uuid, dynamic_bitset,
+          # preprocessor, multi_index, graph, accumulators, heap, container,
+          # circular_buffer, stacktrace, smart_ptr, property_tree, property_map,
+          # core, bind.  The root-level boost/version.hpp (included by
+          # src/common/Asio/AsioHacksFwd.h) ships with boost-config,
+          # which every one of these ports already depends on.
+          # boost-iostreams is installed as [core], i.e. without its bzip2 / lzma /
+          # zlib / zstd default features.  src/ only ever includes
+          # <boost/iostreams/copy.hpp> (StartProcess.cpp) and never instantiates a
+          # compression filter, and those four ports are all built with MSYS2
+          # tooling - the same tooling whose deleted package revisions made a
+          # pinned vcpkg unusable:
+          #   error: building bzip2:x64-windows failed with: BUILD_FAILED
+          # openssl below needs MSYS2 anyway, so there is no reason to widen that
+          # surface for code this server never compiles.  Nothing is lost:
+          # TrinityCore builds its own zlib from dep/zlib, and every other port
+          # below has no default features of its own.
+          $triplet = "x64-windows"
+          $ports = @(
+            # compiled components requested by find_package(Boost ...)
+            "boost-system", "boost-filesystem", "boost-program-options",
+            "boost-iostreams[core]", "boost-regex", "boost-locale", "boost-thread",
+            # header-only libraries included directly by the core / scripts / plugins
+            "boost-asio", "boost-beast", "boost-process",
+            "boost-algorithm", "boost-dll", "boost-uuid", "boost-dynamic-bitset",
+            "boost-preprocessor", "boost-multi-index", "boost-graph",
+            "boost-accumulators", "boost-heap", "boost-container",
+            "boost-circular-buffer", "boost-stacktrace", "boost-smart-ptr",
+            "boost-property-tree", "boost-property-map", "boost-core",
+            "boost-bind", "boost-foreach", "boost-optional",
+            # TLS / crypto
+            "openssl"
+          ) | ForEach-Object { "$($_)`:$triplet" }
+
+          $depsLog  = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          $portList = $ports -join " "
+
+          Write-Host "Installing $($ports.Count) vcpkg ports ($triplet)"
+          Add-Content -Path $depsLog -Value "`n=== vcpkg install $portList ==="
+          cmd /c "`"$vcpkgExe`" install $portList >> `"$depsLog`" 2>&1"
+          $code = $LASTEXITCODE
+          Write-Host "vcpkg install exit code: $code"
+          if (Test-Path $depsLog) { Get-Content $depsLog -Tail 150 }
+          if ($code -ne 0) { exit $code }
         timeout-minutes: 300
 
       - name: Configure (CMake)
@@ -179,10 +174,54 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config RelWithDebInfo -- /m /p:CL_MPCount=2
+          # Capture stdout+stderr into build.log so the failure report can extract
+          # the MSVC compiler/linker errors, and retry a few times: MSBuild stops
+          # scheduling work as soon as a project fails, so re-running surfaces the
+          # errors of projects that never got compiled in the first pass.
+          $log = Join-Path $env:GITHUB_WORKSPACE "build.log"
+          if (Test-Path $log) { Remove-Item $log -Force }
+          $code = 0
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "=== build attempt $attempt ==="
+            Add-Content -Path $log -Value "=== build attempt $attempt ==="
+            cmd /c "cmake --build build --config RelWithDebInfo -- /m /p:CL_MPCount=2 >> `"$log`" 2>&1"
+            $code = $LASTEXITCODE
+            Write-Host "attempt $attempt finished with exit code $code"
+            if ($code -eq 0) { break }
+          }
+          if (Test-Path $log) { Get-Content $log -Tail 100 }
+          if ($code -ne 0) { exit $code }
 
       - name: Verify produced binaries
         shell: pwsh
         run: |
-          Write-Host "=== Server binaries ==="
-          Get-ChildItem build\bin\RelWithDebInfo\*.exe | Format-Table Name, @{N='Size(MB)';E={[math]::Round($_.Length/1MB,1)}}
+          $out    = Join-Path $env:GITHUB_WORKSPACE "verify.log"
+          $binDir = "build\bin\RelWithDebInfo"
+          $failed = 0
+          $lines  = @("=== Server binaries ($binDir) ===")
+          if (Test-Path $binDir) {
+            foreach ($e in (Get-ChildItem "$binDir\*.exe" -ErrorAction SilentlyContinue)) {
+              $lines += ("  OK   {0} ({1} MB)" -f $e.Name, [math]::Round($e.Length / 1MB, 1))
+            }
+            foreach ($need in @("worldserver.exe", "bnetserver.exe")) {
+              if (-not (Test-Path (Join-Path $binDir $need))) {
+                $lines += "  MISS $need was not produced by the build"
+                $failed = 1
+              }
+            }
+          } else {
+            $lines += "  MISS $binDir does not exist"
+            $failed = 1
+          }
+          $lines | ForEach-Object { Write-Host $_ }
+          $lines | Set-Content -Path $out -Encoding UTF8
+          if ($failed -ne 0) { exit 1 }
+
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          extra-log: deps.log verify.log
+          label: Build (Windows 2022 / MSVC)
+

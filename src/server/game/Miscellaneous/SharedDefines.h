@@ -21,6 +21,7 @@
 #include "Define.h"
 #include "EnumFlag.h"
 #include <compare>
+#include <unordered_map>
 
  // alistar: is there a better way to handle this?
 const std::unordered_map<uint32, uint32> g_ItemToCurrencyStore =

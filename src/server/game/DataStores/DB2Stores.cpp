@@ -29,6 +29,7 @@
 #include "Util.h"
 #include "World.h"
 #include <algorithm>
+#include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <array>
 #include <bitset>

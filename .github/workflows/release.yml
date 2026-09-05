@@ -1,9 +1,11 @@
 # Release build – triggered manually from the Actions tab.
 #
 # Builds the server (worldserver + bnetserver) with AI Playerbots on
-# Ubuntu 22.04 and Windows Server 2022, packages the binaries with
-# SQL, config, docs and all required DLLs, and publishes a GitHub
-# Release with downloadable archives.
+# Windows Server 2022, packages the binaries with SQL, config, docs and
+# all required DLLs, and publishes a GitHub Release with a downloadable
+# archive.  Windows is the only build target - the Linux job was removed.
+# (The publish job still runs on an Ubuntu runner; it only assembles the
+# release notes and calls the GitHub Release API, it does not build.)
 #
 # Usage:  Actions → Release → Run workflow → fill in the tag name.
 
@@ -27,149 +29,14 @@ on:
           - RelWithDebInfo
           - Release
         default: RelWithDebInfo
-      build_windows:
-        description: "Also build Windows binaries (adds ~45 min)"
-        type: boolean
-        default: true
+# Lets a failing job post its extracted compiler errors back to the commit that
+# was built (see .github/actions/report-build-failure).  Jobs that need more
+# (e.g. publish-release) declare their own permissions block below.
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  # ==================================================================
-  #  Linux release build
-  # ==================================================================
-  release-linux:
-    name: Release (Linux x86_64)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
-    outputs:
-      artifact-name: ${{ steps.package.outputs.artifact_name }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                       /opt/hostedtoolcache/CodeQL 2>/dev/null || true
-          sudo apt-get purge -y --auto-remove \
-            '^temurin-.*-jdk' '^openjdk-.*' '^dotnet-.*' \
-            '^llvm-.*' '^google-chrome-.*' '^microsoft-edge-.*' 2>/dev/null || true
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            gcc-12 g++-12 \
-            cmake \
-            git \
-            libssl-dev \
-            libmysqlclient-dev \
-            libboost-all-dev \
-            libreadline-dev \
-            zlib1g-dev \
-            libbz2-dev \
-            libncurses-dev \
-            patchelf
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
-
-      - name: Configure (CMake)
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
-            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/release/trinitycore-3.4.3 \
-            -DSERVERS=1 \
-            -DTOOLS=1 \
-            -DSCRIPTS=static \
-            -DWITH_DYNAMIC_LINKING=0 \
-            -DUSE_COREPCH=1 \
-            -DUSE_SCRIPTPCH=1 \
-            -DWITH_WARNINGS=0 \
-            -DWITHOUT_GIT=1 \
-            -DCOPY_CONF=1
-
-      - name: Build
-        run: |
-          cmake --build build -j$(nproc)
-
-      - name: Install
-        run: |
-          cmake --install build
-
-      - name: Bundle SQL, config, docs
-        run: |
-          DEST=$GITHUB_WORKSPACE/release/trinitycore-3.4.3
-          # SQL files
-          mkdir -p "$DEST/sql"
-          cp -r sql/base "$DEST/sql/" 2>/dev/null || true
-          cp -r sql/create "$DEST/sql/" 2>/dev/null || true
-          cp -r sql/custom "$DEST/sql/" 2>/dev/null || true
-          cp -r sql/updates "$DEST/sql/" 2>/dev/null || true
-          # Playerbot config
-          mkdir -p "$DEST/etc/worldserver.conf.d"
-          cp src/plugins/playerbot/aiplayerbot.conf.dist "$DEST/etc/worldserver.conf.d/" 2>/dev/null || true
-          # Documentation
-          mkdir -p "$DEST/docs"
-          cp docs/Playerbots.md "$DEST/docs/" 2>/dev/null || true
-          cp README.md "$DEST/" 2>/dev/null || true
-          # Quick-start script
-          cat > "$DEST/start-worldserver.sh" << 'STARTEOF'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          echo "Starting worldserver from $DIR ..."
-          echo "Make sure you have:"
-          echo "  1. Created auth, characters, world databases"
-          echo "  2. Imported sql/base/*.sql, sql/updates/*.sql"
-          echo "  3. Imported sql/custom/playerbot/characters_playerbot.sql"
-          echo "  4. Configured etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf"
-          echo ""
-          cd "$DIR"
-          exec ./bin/worldserver
-          STARTEOF
-          chmod +x "$DEST/start-worldserver.sh"
-
-      - name: Strip debug symbols
-        run: |
-          DEST=$GITHUB_WORKSPACE/release/trinitycore-3.4.3
-          for bin in "$DEST/bin/worldserver" "$DEST/bin/bnetserver" \
-                     "$DEST/bin/map_extractor" "$DEST/bin/vmap4_extractor" \
-                     "$DEST/bin/vmap4_assembler" "$DEST/bin/mmaps_generator"; do
-            if [ -f "$bin" ]; then
-              if [ "${{ inputs.build_type }}" = "RelWithDebInfo" ]; then
-                objcopy --only-keep-debug "$bin" "$bin.debug" 2>/dev/null || true
-              fi
-              strip --strip-unneeded "$bin" 2>/dev/null || true
-              echo "  $(basename $bin): $(du -h "$bin" | cut -f1)"
-            fi
-          done
-
-      - name: Create release archive
-        id: package
-        run: |
-          TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="build-$(date +%Y%m%d)"
-          fi
-          ARCHIVE="trinitycore-3.4.3-linux-x86_64-${TAG}.tar.gz"
-          cd $GITHUB_WORKSPACE/release
-          tar czf "$GITHUB_WORKSPACE/$ARCHIVE" trinitycore-3.4.3/
-          echo "artifact_name=$ARCHIVE" >> $GITHUB_OUTPUT
-          echo ""
-          echo "Archive contents:"
-          tar tzf "$GITHUB_WORKSPACE/$ARCHIVE" | head -30
-          echo "  ... ($(tar tzf "$GITHUB_WORKSPACE/$ARCHIVE" | wc -l) entries)"
-          echo "Archive size: $(du -h "$GITHUB_WORKSPACE/$ARCHIVE" | cut -f1)"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.package.outputs.artifact_name }}
-          path: ${{ steps.package.outputs.artifact_name }}
-          retention-days: 7
-
   # ==================================================================
   #  Windows release build
   # ==================================================================
@@ -177,7 +44,6 @@ jobs:
     name: Release (Windows x64)
     runs-on: windows-2022
     timeout-minutes: 360
-    if: ${{ inputs.build_windows }}
     outputs:
       artifact-name: ${{ steps.package.outputs.artifact_name }}
 
@@ -201,20 +67,104 @@ jobs:
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          cd $env:VCPKG_ROOT
-          .\bootstrap-vcpkg.bat -disableMetrics
+          # The vcpkg copy that ships with the runner image is used as-is.
+          #
+          # It is deliberately NOT pinned to an older release: an old vcpkg asks
+          # the MSYS2 mirrors for package revisions they dropped long ago
+          # (msys2-runtime-3.5.4-2), so every port that runs a pkgconfig fixup
+          # fails - bzip2 first, then openssl - and the dependency step dies:
+          #   error: https://repo.msys2.org/msys/x86_64/msys2-runtime-3.5.4-2-x86_64.pkg.tar.zst: 404
+          # Modern Boost is handled in the source instead:
+          #   * Boost 1.86 moved the Boost.Process v1 headers under
+          #     boost/process/v1/, and Boost 1.88 removed the old top-level
+          #     paths.  src/common/Utilities/StartProcess.cpp picks the right set
+          #     by BOOST_VERSION, and dep/boost/CMakeLists.txt defines
+          #     BOOST_PROCESS_VERSION=1 so the v1 names stay visible to
+          #     `using namespace boost::process;` on every Boost release.
+          #   * Boost 1.87 stopped pulling <boost/filesystem/directory.hpp> in
+          #     from <boost/filesystem/operations.hpp>; the six core files that
+          #     use directory iterators now include it explicitly.
+          #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
+          #     command server now uses boost::asio::io_context.
+          #
+          # Everything printed here and by the vcpkg install step is tee'd into
+          # deps.log, because the Actions job log is not always retrievable when
+          # triaging a red run.
+          $depsLog = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          if (Test-Path $depsLog) { Remove-Item $depsLog -Force }
+          Start-Transcript -Path $depsLog -Append | Out-Null
+          Push-Location $env:VCPKG_ROOT
+          try {
+            .\bootstrap-vcpkg.bat -disableMetrics
+            if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed" }
+            Write-Host "vcpkg in use:"
+            .\vcpkg.exe version
+          } finally {
+            Pop-Location
+            Stop-Transcript | Out-Null
+          }
 
       - name: Install dependencies via vcpkg
         shell: pwsh
+        env:
+          # Some ports still carry cmake_minimum_required(VERSION <3.5), which
+          # the runner's CMake 4.x rejects outright.  This is CMake's documented
+          # escape hatch for old projects and a no-op on CMake 3.x.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install `
-            boost-system:x64-windows `
-            boost-filesystem:x64-windows `
-            boost-program-options:x64-windows `
-            boost-iostreams:x64-windows `
-            boost-regex:x64-windows `
-            boost-locale:x64-windows `
-            openssl:x64-windows
+          # dep/boost/CMakeLists.txt only asks find_package(Boost ...) for the
+          # *compiled* components, so installing just those leaves out every
+          # header-only Boost library the core actually includes.  The build then
+          # dies in src/common with
+          #   error C1083: Cannot open include file: 'boost/asio/ip/address.hpp'
+          # (and boost/property_tree/ini_parser.hpp, boost/process/args.hpp, ...).
+          #
+          # The header-only list below is derived from every `#include <boost/...>`
+          # in src/ : asio, beast, process, algorithm, dll, uuid, dynamic_bitset,
+          # preprocessor, multi_index, graph, accumulators, heap, container,
+          # circular_buffer, stacktrace, smart_ptr, property_tree, property_map,
+          # core, bind.  The root-level boost/version.hpp (included by
+          # src/common/Asio/AsioHacksFwd.h) ships with boost-config,
+          # which every one of these ports already depends on.
+          # boost-iostreams is installed as [core], i.e. without its bzip2 / lzma /
+          # zlib / zstd default features.  src/ only ever includes
+          # <boost/iostreams/copy.hpp> (StartProcess.cpp) and never instantiates a
+          # compression filter, and those four ports are all built with MSYS2
+          # tooling - the same tooling whose deleted package revisions made a
+          # pinned vcpkg unusable:
+          #   error: building bzip2:x64-windows failed with: BUILD_FAILED
+          # openssl below needs MSYS2 anyway, so there is no reason to widen that
+          # surface for code this server never compiles.  Nothing is lost:
+          # TrinityCore builds its own zlib from dep/zlib, and every other port
+          # below has no default features of its own.
+          $triplet = "x64-windows"
+          $ports = @(
+            # compiled components requested by find_package(Boost ...)
+            "boost-system", "boost-filesystem", "boost-program-options",
+            "boost-iostreams[core]", "boost-regex", "boost-locale", "boost-thread",
+            # header-only libraries included directly by the core / scripts / plugins
+            "boost-asio", "boost-beast", "boost-process",
+            "boost-algorithm", "boost-dll", "boost-uuid", "boost-dynamic-bitset",
+            "boost-preprocessor", "boost-multi-index", "boost-graph",
+            "boost-accumulators", "boost-heap", "boost-container",
+            "boost-circular-buffer", "boost-stacktrace", "boost-smart-ptr",
+            "boost-property-tree", "boost-property-map", "boost-core",
+            "boost-bind", "boost-foreach", "boost-optional",
+            # TLS / crypto
+            "openssl"
+          ) | ForEach-Object { "$($_)`:$triplet" }
+
+          $depsLog  = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          $portList = $ports -join " "
+
+          Write-Host "Installing $($ports.Count) vcpkg ports ($triplet)"
+          Add-Content -Path $depsLog -Value "`n=== vcpkg install $portList ==="
+          cmd /c "`"$vcpkgExe`" install $portList >> `"$depsLog`" 2>&1"
+          $code = $LASTEXITCODE
+          Write-Host "vcpkg install exit code: $code"
+          if (Test-Path $depsLog) { Get-Content $depsLog -Tail 150 }
+          if ($code -ne 0) { exit $code }
         timeout-minutes: 300
 
       - name: Configure (CMake)
@@ -239,7 +189,23 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config ${{ inputs.build_type }} -- /m /p:CL_MPCount=2
+          # Capture stdout+stderr into build.log so the failure report can extract
+          # the MSVC compiler/linker errors, and retry: MSBuild stops scheduling
+          # work as soon as a project fails, so re-running surfaces the errors of
+          # the projects that never got compiled in the first pass.
+          $log = Join-Path $env:GITHUB_WORKSPACE "build.log"
+          if (Test-Path $log) { Remove-Item $log -Force }
+          $code = 0
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-Host "=== build attempt $attempt ==="
+            Add-Content -Path $log -Value "=== build attempt $attempt ==="
+            cmd /c "cmake --build build --config ${{ inputs.build_type }} -- /m /p:CL_MPCount=2 >> `"$log`" 2>&1"
+            $code = $LASTEXITCODE
+            Write-Host "attempt $attempt finished with exit code $code"
+            if ($code -eq 0) { break }
+          }
+          if (Test-Path $log) { Get-Content $log -Tail 100 }
+          if ($code -ne 0) { exit $code }
 
       - name: Install
         shell: pwsh
@@ -251,6 +217,29 @@ jobs:
         run: |
           $DEST = "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3"
           $BINDIR = "$DEST\bin"
+
+          # --- Normalise the install layout -----------------------------------
+          # The Windows install rules in the CMakeLists use
+          #   install(TARGETS ... DESTINATION "${CMAKE_INSTALL_PREFIX}")
+          # so `cmake --install` drops the .exe files (and the *.conf.dist
+          # templates) straight into $DEST instead of $DEST\bin and $DEST\etc
+          # the way the Unix rules do.  Everything below - the DLL copies, the
+          # launcher (bin\worldserver.exe) and Setup-Database.bat (which reads
+          # %ROOT%etc\worldserver.conf.dist) - expects the bin\ / etc\ layout,
+          # so move the installed files into place first.
+          New-Item -ItemType Directory -Force "$BINDIR"     | Out-Null
+          New-Item -ItemType Directory -Force "$DEST\etc"   | Out-Null
+
+          $movedExe = @(Get-ChildItem "$DEST\*.exe" -ErrorAction SilentlyContinue)
+          foreach ($f in $movedExe) {
+            Move-Item $f.FullName -Destination "$BINDIR\" -Force
+            Write-Host "  moved $($f.Name) -> bin\"
+          }
+          $movedConf = @(Get-ChildItem "$DEST\*.conf.dist" -ErrorAction SilentlyContinue)
+          foreach ($f in $movedConf) {
+            Move-Item $f.FullName -Destination "$DEST\etc\" -Force
+            Write-Host "  moved $($f.Name) -> etc\"
+          }
 
           # --- SQL ---
           New-Item -ItemType Directory -Force "$DEST\sql" | Out-Null
@@ -381,9 +370,9 @@ jobs:
             docs\         - Playerbots.md documentation
 
           Client map extraction (one-time):
-            bin\map_extractor.exe -d "C:\path\to\WoW"
-            bin\vmap4_extractor.exe -d "C:\path\to\WoW"
-            bin\vmap4_assembler.exe Buildings vmaps
+            bin\mapextractor.exe -d "C:\path\to\WoW"
+            bin\vmap4extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4assembler.exe Buildings vmaps
             bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
             (then copy the dbc, maps, vmaps, mmaps folders next to the .exe files)
 
@@ -392,8 +381,21 @@ jobs:
 
           Write-Host ""
           Write-Host "=== Final package contents ==="
-          Get-ChildItem "$BINDIR\*.exe" | ForEach-Object { Write-Host "  bin\$($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)" }
-          Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  bin\$($_.Name)" }
+          $packagedExe  = @(Get-ChildItem "$BINDIR\*.exe" -ErrorAction SilentlyContinue)
+          $packagedDll  = @(Get-ChildItem "$BINDIR\*.dll" -ErrorAction SilentlyContinue)
+          foreach ($e in $packagedExe) { Write-Host "  bin\$($e.Name) ($([math]::Round($e.Length/1MB,1)) MB)" }
+          foreach ($d in $packagedDll) { Write-Host "  bin\$($d.Name)" }
+
+          # Fail the job loudly if the package is missing its core binaries -
+          # a release zip without worldserver.exe is worse than no release at all.
+          $missing = @()
+          foreach ($need in @("worldserver.exe", "bnetserver.exe")) {
+            if (-not (Test-Path (Join-Path $BINDIR $need))) { $missing += $need }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Windows package is missing: $($missing -join ', ')"
+            exit 1
+          }
           Write-Host "  sql\ (database schemas)"
           Write-Host "  etc\ (configuration)"
           Write-Host "  docs\ (documentation)"
@@ -424,14 +426,22 @@ jobs:
           path: ${{ steps.package.outputs.artifact_name }}
           retention-days: 7
 
+      - name: Report build failure
+        if: failure()
+        uses: ./.github/actions/report-build-failure
+        with:
+          log-file: build.log
+          extra-log: deps.log
+          label: Release (Windows x64)
+
   # ==================================================================
   #  Publish GitHub Release
   # ==================================================================
   publish-release:
     name: Publish GitHub Release
-    needs: [release-linux, release-windows]
-    # Run when linux succeeds, regardless of windows (windows is optional)
-    if: always() && needs.release-linux.result == 'success'
+    needs: [release-windows]
+    # Only publish when the Windows build actually produced an archive.
+    if: always() && needs.release-windows.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -487,13 +497,8 @@ jobs:
       - name: Build release body
         id: body
         run: |
-          HAS_WINDOWS="no"
-          if ls artifacts/*.zip 1>/dev/null 2>&1; then
-            HAS_WINDOWS="yes"
-          fi
-
           cat > release_body.md << BODYEOF
-          ## TrinityCore 3.4.3 Server with AI Playerbots
+          ## TrinityCore 3.4.3 Server with AI Playerbots (Windows x64)
 
           Built from commit \`${{ github.sha }}\` on branch \`${{ github.ref_name }}\`.
           ${{ steps.commits.outputs.count }} commits since ${{ steps.commits.outputs.since }}.
@@ -502,11 +507,11 @@ jobs:
 
           | Component | Description |
           | --- | --- |
-          | **worldserver** | Game server with integrated AI playerbots ([ike3/mangosbot](https://github.com/ike3/mangosbot) port) |
-          | **bnetserver** | Authentication / Battle.net login server |
-          | **map_extractor** | Client DBC/DB2 data extraction |
-          | **vmap4_extractor / vmap4_assembler** | Visibility map generation |
-          | **mmaps_generator** | Movement map (navmesh) generation |
+          | **worldserver.exe** | Game server with integrated AI playerbots ([ike3/mangosbot](https://github.com/ike3/mangosbot) port) |
+          | **bnetserver.exe** | Authentication / Battle.net login server |
+          | **mapextractor.exe** | Client DBC/DB2 data extraction |
+          | **vmap4extractor.exe / vmap4assembler.exe** | Visibility map generation |
+          | **mmaps_generator.exe** | Movement map (navmesh) generation |
           | **sql/** | Database schemas: base, create, custom (playerbot tables), updates |
           | **etc/** | Server configuration including \`aiplayerbot.conf.dist\` |
           | **docs/Playerbots.md** | Full AI playerbot documentation |
@@ -515,64 +520,24 @@ jobs:
 
           | Platform | Archive | Prerequisites |
           | --- | --- | --- |
-          | **Linux** x86_64 | \`.tar.gz\` | MySQL 8.0, OpenSSL 1.1+ |
-          BODYEOF
+          | **Windows** x64 | \`.zip\` | None — portable DB, MSVC runtime and all DLLs included |
 
-          if [ "$HAS_WINDOWS" = "yes" ]; then
-            cat >> release_body.md << WINEOF
-          | **Windows** x64 | \`.zip\` | None — portable DB, MSVC runtime, all DLLs included |
-          WINEOF
-          fi
-
-          cat >> release_body.md << QSEOF
-
-          ### Quick start (Linux)
-
-          \`\`\`bash
-          tar xzf trinitycore-3.4.3-linux-x86_64-*.tar.gz
-          cd trinitycore-3.4.3
-
-          # Create databases
-          mysql -u root -e "CREATE DATABASE auth; CREATE DATABASE characters; CREATE DATABASE world;"
-
-          # Import SQL
-          mysql -u root auth < sql/base/auth_database.sql
-          mysql -u root characters < sql/base/characters_database.sql
-          mysql -u root world < sql/base/world_database.sql
-          mysql -u root characters < sql/custom/playerbot/characters_playerbot.sql
-
-          # Configure
-          cp etc/worldserver.conf.dist etc/worldserver.conf
-          # Edit etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf
-
-          # Run
-          ./bin/worldserver
-          \`\`\`
-          QSEOF
-
-          if [ "$HAS_WINDOWS" = "yes" ]; then
-            cat >> release_body.md << WINQSEOF
-
-          ### Quick start (Windows)
+          ### Quick start
 
           1. Extract the \`.zip\`
           2. Double-click **\`Setup-Database.bat\`** — downloads portable MariaDB, creates databases, imports all SQL, and configures the server automatically
-          3. Extract client maps (map_extractor, vmap4_extractor, vmap4_assembler, mmaps_generator)
+          3. Extract client maps with the tools in \`bin\` (mapextractor, vmap4extractor, vmap4assembler, mmaps_generator)
           4. Double-click **\`start-worldserver.bat\`**
 
           No MySQL/MariaDB installation needed — the setup script downloads a fully portable database.
           All required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime) are included in the zip.
-          WINQSEOF
-          fi
-
-          cat >> release_body.md << FOOTEOF
 
           ### Build information
 
           - Build type: \`${{ inputs.build_type }}\`
           - Static linking: \`WITH_DYNAMIC_LINKING=0\`
           - Scripts: \`static\` (all scripts linked into worldserver)
-          FOOTEOF
+          BODYEOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

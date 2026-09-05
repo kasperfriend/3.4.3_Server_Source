@@ -22,6 +22,7 @@
 #include "DBCEnums.h"
 #include "Duration.h"
 #include "ObjectGuid.h"
+#include <span>
 #include <unordered_map>
 #include <vector>
 #include <ctime>

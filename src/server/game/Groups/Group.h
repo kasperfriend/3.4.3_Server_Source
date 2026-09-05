@@ -32,6 +32,7 @@
 class Battlefield;
 class Battleground;
 class Creature;
+struct ItemTemplate;
 class Map;
 class Player;
 class Unit;

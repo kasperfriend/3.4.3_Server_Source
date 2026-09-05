@@ -22,6 +22,7 @@
 #include "MMapDefines.h"
 #include "MoveSplineInitArgs.h"
 #include "Nav/DetourFilters.h"
+#include "Position.h"
 #include <G3D/Vector3.h>
 
 class WorldObject;

@@ -26,10 +26,20 @@ if (WIN32)
   # On windows the requirements are higher according to the wiki.
   set(BOOST_REQUIRED_VERSION 1.78)
 else()
-  set(BOOST_REQUIRED_VERSION 1.71)
+  # 1.74 is the first release that split <boost/filesystem/directory.hpp> out of
+  # <boost/filesystem/operations.hpp>; the core includes it explicitly now, so
+  # anything older would fail to find the header.  (Matches upstream TrinityCore,
+  # and the Boost shipped by Ubuntu 22.04 / Debian 12.)
+  set(BOOST_REQUIRED_VERSION 1.74)
 endif()
 
-find_package(Boost ${BOOST_REQUIRED_VERSION} REQUIRED system filesystem program_options iostreams regex locale)
+# NOTE: `thread` is not part of the upstream TrinityCore component list, but the
+# AI playerbot plugin needs it - src/plugins/playerbot/PlayerbotCommandServer.cpp
+# spawns a boost::thread per remote command connection.  Boost is compiled with
+# BOOST_ALL_NO_LIB (see below), which disables MSVC's auto-link pragma, so the
+# library has to be requested explicitly or worldserver fails to link with
+# unresolved boost::thread symbols.
+find_package(Boost ${BOOST_REQUIRED_VERSION} REQUIRED system filesystem program_options iostreams regex locale thread)
 
 if(NOT Boost_FOUND)
   if(NOT DEFINED ENV{BOOST_ROOT} AND NOT DEFINED Boost_DIR AND NOT DEFINED BOOST_ROOT AND NOT DEFINED BOOSTROOT)
@@ -53,6 +63,12 @@ target_compile_definitions(boost
     -DBOOST_CONFIG_SUPPRESS_OUTDATED_MESSAGE
     -DBOOST_ASIO_NO_DEPRECATED
     -DBOOST_BIND_NO_PLACEHOLDERS
+    # This server uses the Boost.Process v1 API (see
+    # src/common/Utilities/StartProcess.cpp).  Boost >= 1.88 defaults to Process
+    # v2 and stops making the v1 namespace inline, which would hide every v1
+    # name from `using namespace boost::process;`.  Requesting v1 explicitly
+    # keeps old and new Boost layouts behaving identically.
+    -DBOOST_PROCESS_VERSION=1
     -DBOOST_SYSTEM_USE_UTF8)
 
 if (WITH_BOOST_STACKTRACE AND NOT WIN32)
