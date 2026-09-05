@@ -26,7 +26,11 @@ if (WIN32)
   # On windows the requirements are higher according to the wiki.
   set(BOOST_REQUIRED_VERSION 1.78)
 else()
-  set(BOOST_REQUIRED_VERSION 1.71)
+  # 1.74 is the first release that split <boost/filesystem/directory.hpp> out of
+  # <boost/filesystem/operations.hpp>; the core includes it explicitly now, so
+  # anything older would fail to find the header.  (Matches upstream TrinityCore,
+  # and the Boost shipped by Ubuntu 22.04 / Debian 12.)
+  set(BOOST_REQUIRED_VERSION 1.74)
 endif()
 
 # NOTE: `thread` is not part of the upstream TrinityCore component list, but the

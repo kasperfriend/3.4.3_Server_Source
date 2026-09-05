@@ -30,6 +30,7 @@
 #include "wmo.h"
 #include <algorithm>
 #include <CascLib.h>
+#include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <fstream>
 #include <list>

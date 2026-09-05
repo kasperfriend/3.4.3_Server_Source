@@ -50,11 +50,52 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Bootstrap vcpkg
+      - name: Bootstrap vcpkg (pinned to Boost 1.87)
         shell: pwsh
         run: |
-          cd $env:VCPKG_ROOT
-          .\bootstrap-vcpkg.bat -disableMetrics
+          # vcpkg's ports track the latest Boost, and Boost 1.88+ breaks this
+          # build outright: the Boost.Process v1 headers are gone, so
+          # src/common/Utilities/StartProcess.cpp fails with
+          #   error C1083: Cannot open include file: 'boost/process/args.hpp'
+          # Fixing that properly means rewriting StartProcess.cpp against
+          # Process v2, which is out of scope, so the dependency set is pinned.
+          #
+          # 2025.04.09 is the newest vcpkg release train that still ships Boost
+          # 1.87.0 - the last Boost with Process v1 - while being recent enough
+          # to work with the CMake and MSVC versions on the runner image.
+          #
+          # Two other Boost-version breakages are fixed in the source instead of
+          # by pinning, so the tree no longer depends on them:
+          #   * Boost 1.87 stopped pulling <boost/filesystem/directory.hpp> in
+          #     from <boost/filesystem/operations.hpp>; the six core files that
+          #     use directory iterators now include it explicitly.
+          #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
+          #     command server now uses boost::asio::io_context.
+          $vcpkgTag = "2025.04.09"
+          Push-Location $env:VCPKG_ROOT
+          try {
+            Write-Host "Pinning vcpkg to $vcpkgTag (Boost 1.87.0) ..."
+            git fetch --quiet --depth 1 --force origin "refs/tags/${vcpkgTag}:refs/tags/${vcpkgTag}"
+            if ($LASTEXITCODE -ne 0) { throw "could not fetch vcpkg tag $vcpkgTag" }
+            git checkout --quiet --force "tags/$vcpkgTag"
+            if ($LASTEXITCODE -ne 0) { throw "could not check out vcpkg tag $vcpkgTag" }
+            Write-Host "vcpkg is now at $(git describe --tags)"
+
+            # Remove anything the runner image pre-installed so headers from a
+            # different Boost version cannot leak into this build.
+            foreach ($d in @("installed", "buildtrees", "packages")) {
+              $p = Join-Path $env:VCPKG_ROOT $d
+              if (Test-Path $p) {
+                Write-Host "clearing stale vcpkg $d/"
+                Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+              }
+            }
+
+            .\bootstrap-vcpkg.bat -disableMetrics
+            if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed" }
+          } finally {
+            Pop-Location
+          }
 
       - name: Install dependencies via vcpkg
         shell: pwsh
@@ -70,14 +111,16 @@ jobs:
           # in src/ : asio, beast, process, algorithm, dll, uuid, dynamic_bitset,
           # preprocessor, multi_index, graph, accumulators, heap, container,
           # circular_buffer, stacktrace, smart_ptr, property_tree, property_map,
-          # core, bind (+ boost-headers for boost/version.hpp).
+          # core, bind.  The root-level boost/version.hpp (included by
+          # src/common/Asio/AsioHacksFwd.h) ships with boost-config,
+          # which every one of these ports already depends on.
           $triplet = "x64-windows"
           $ports = @(
             # compiled components requested by find_package(Boost ...)
             "boost-system", "boost-filesystem", "boost-program-options",
             "boost-iostreams", "boost-regex", "boost-locale", "boost-thread",
             # header-only libraries included directly by the core / scripts / plugins
-            "boost-headers", "boost-asio", "boost-beast", "boost-process",
+            "boost-asio", "boost-beast", "boost-process",
             "boost-algorithm", "boost-dll", "boost-uuid", "boost-dynamic-bitset",
             "boost-preprocessor", "boost-multi-index", "boost-graph",
             "boost-accumulators", "boost-heap", "boost-container",

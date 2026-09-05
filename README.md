@@ -8,6 +8,13 @@ Visual Studio 2022 Community - [Download](https://aka.ms/vs/17/release/vs_commun
 
 Boost 1.83 - [Download](https://archives.boost.io/release/1.83.0/binaries/boost_1_83_0-msvc-14.3-64.exe)
 
+> **Boost version matters:** use **1.78 – 1.87**. Boost **1.88 and newer removed
+> the Boost.Process v1 headers** (`boost/process/args.hpp` and friends) that
+> `src/common/Utilities/StartProcess.cpp` needs, so the build fails with
+> `error C1083: Cannot open include file: 'boost/process/args.hpp'`. CI pins
+> Boost 1.87.0 by checking out vcpkg tag `2025.04.09`.
+
+
 Latest version of CMake - [Download](https://cmake.org/download/)
 
 MySQL 8.0 - [Download](https://dev.mysql.com/downloads/windows/installer/8.0.html)
