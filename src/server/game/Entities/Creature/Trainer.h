@@ -74,6 +74,8 @@ namespace Trainer
         Type GetTrainerType() const { return _type; }
         uint32 GetTrainerRequirement() const { return _requirement; }
         bool IsTrainerValidForPlayer(Player const* player) const;
+        std::vector<Spell> const& GetSpells() const { return _spells; }  // playerbot
+        SpellState GetSpellStateForPlayer(Player const* player, Spell const& trainerSpell) const { return GetSpellState(player, &trainerSpell); }  // playerbot
 
     private:
         Spell const* GetSpell(uint32 spellId) const;

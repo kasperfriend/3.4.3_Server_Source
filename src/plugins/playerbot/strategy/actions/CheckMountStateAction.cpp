@@ -52,7 +52,7 @@ bool CheckMountStateAction::Mount()
         if (!spellInfo || spellInfo->GetEffect(SpellEffIndex(0)).ApplyAuraName != SPELL_AURA_MOUNTED)
             continue;
 
-        if(itr->second->state == PLAYERSPELL_REMOVED || itr->second->disabled || spellInfo->IsPassive())
+        if(itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || spellInfo->IsPassive())
             continue;
 
         int32 effect = max(spellInfo->GetEffect(SpellEffIndex(1)).BasePoints, spellInfo->GetEffect(SpellEffIndex(2)).BasePoints);

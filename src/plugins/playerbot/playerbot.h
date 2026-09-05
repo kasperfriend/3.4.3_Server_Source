@@ -116,6 +116,13 @@ inline int32 ItemSpellCharges(ItemTemplate const* proto, uint32 index)
     return effect ? int32(effect->Charges) : 0;
 }
 
+inline uint32 BotFreeTalentPoints(Player const* player)
+{
+    uint32 total = player->CalculateTalentsPoints();
+    uint32 spent = player->GetSpentTalentPointsCount();
+    return total > spent ? total - spent : 0u;
+}
+
 #include "playerbotDefs.h"
 #include "PlayerbotAIAware.h"
 #include "PlayerbotMgr.h"

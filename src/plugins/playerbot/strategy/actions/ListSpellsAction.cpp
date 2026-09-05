@@ -28,7 +28,7 @@ bool ListSpellsAction::Execute(Event event)
         if (!pSpellInfo)
             continue;
 
-        if (itr->second->state == PLAYERSPELL_REMOVED || itr->second->disabled || pSpellInfo->IsPassive())
+        if (itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || pSpellInfo->IsPassive())
             continue;
 
         //|| name.find("Teleport") != -1

@@ -119,7 +119,7 @@ RandomItemList RandomItemMgr::Query(RandomItemType type)
     RandomItemList items;
 
     ItemTemplateContainer const& itemTemplates = sObjectMgr->GetItemTemplateStore();
-    for (ItemTemplateContainer::const_iterator i = itemTemplates->begin(); i != itemTemplates->end(); ++i)
+    for (ItemTemplateContainer::const_iterator i = itemTemplates.begin(); i != itemTemplates.end(); ++i)
     {
         uint32 itemId = i->first;
         ItemTemplate const* proto = &i->second;

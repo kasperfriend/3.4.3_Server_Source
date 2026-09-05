@@ -36,7 +36,7 @@ uint32 SpellIdValue::Calculate()
         if (!pSpellInfo)
             continue;
 
-        if (itr->second->state == PLAYERSPELL_REMOVED || itr->second->disabled || pSpellInfo->IsPassive())
+        if (itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || pSpellInfo->IsPassive())
             continue;
 
         if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)

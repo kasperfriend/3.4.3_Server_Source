@@ -20,7 +20,7 @@ public:
         {
             for (int j = 0; j < MAX_ITEM_PROTO_EFFECTS; j++)
             {
-                const SpellInfo* const spellInfo = ItemSpellId(sSpellMgr->GetSpellInfo(proto, j), DIFFICULTY_NONE);
+                const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(ItemSpellId(proto, j), DIFFICULTY_NONE);
                 if (!spellInfo)
                     return false;
 
