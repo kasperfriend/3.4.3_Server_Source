@@ -38,12 +38,14 @@ This repository uses GitHub Actions:
 
 * **Build workflow** (`.github/workflows/build.yml`) — automatically builds the
   project on every push to `main` and on every pull request, verifying that the
-  server and the playerbot plugin compile and link correctly on Ubuntu 22.04.
+  server and the playerbot plugin compile and link correctly with MSVC on
+  Windows Server 2022.  Windows is the only CI target and the job is blocking;
+  a failure posts the extracted compiler errors back to the pull request.
 * **Release workflow** (`.github/workflows/release.yml`) — triggered manually
   from the **Actions** tab (`Run workflow`).  Builds the full server with
-  playerbots, packages the binaries together with the SQL schemas, configuration
-  files, and documentation, and creates a GitHub Release with downloadable
-  archives for Linux (and optionally Windows).
+  playerbots for Windows x64, packages the binaries together with the SQL
+  schemas, configuration files, documentation and every required DLL, and
+  creates a GitHub Release with a downloadable `.zip`.
 
 ### Building on Linux (local)
 

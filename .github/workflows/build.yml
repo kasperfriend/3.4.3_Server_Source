@@ -1,9 +1,10 @@
 # Continuous-integration build for TrinityCore 3.4.3 + AI Playerbots.
 #
-# Runs on every push to main and on every pull request.  The Linux build
-# is the primary verification target.  A Windows build job runs as well
-# but is non-blocking (continue-on-error) because the Windows dependency
-# chain (Boost / OpenSSL / MySQL via vcpkg) is significantly more fragile.
+# Runs on every push to main and on every pull request.  Windows / MSVC is the
+# only build target: the Linux job was removed because this project ships
+# Windows binaries, and a failing job that nothing consumes is just noise.
+# The Windows job is blocking - the run is green only when worldserver.exe and
+# bnetserver.exe are actually produced.
 
 name: Build
 
@@ -25,179 +26,12 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------------
-  #  Linux build  (primary, must pass)
-  # ------------------------------------------------------------------
-  build-linux:
-    name: Build (Ubuntu 22.04 / GCC 12)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Free disk space
-        run: |
-          # Remove large unused packages to free up ~10 GB on the runner
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                       /opt/hostedtoolcache/CodeQL 2>/dev/null || true
-          sudo apt-get purge -y --auto-remove \
-            '^temurin-.*-jdk' '^openjdk-.*' '^dotnet-.*' \
-            '^llvm-.*' '^google-chrome-.*' '^microsoft-edge-.*' 2>/dev/null || true
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            gcc-12 g++-12 \
-            cmake \
-            git \
-            libssl-dev \
-            libmysqlclient-dev \
-            libboost-all-dev \
-            libreadline-dev \
-            zlib1g-dev \
-            libbz2-dev \
-            libncurses-dev
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
-
-      - name: Show toolchain versions
-        run: |
-          gcc --version | head -1
-          g++ --version | head -1
-          cmake --version | head -1
-          dpkg -l | grep -E "libssl-dev|libmysqlclient|libboost.*dev|libreadline" | awk '{print $2, $3}'
-
-      - name: Configure (CMake)
-        run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install \
-            -DSERVERS=1 \
-            -DTOOLS=1 \
-            -DSCRIPTS=static \
-            -DWITH_DYNAMIC_LINKING=0 \
-            -DUSE_COREPCH=1 \
-            -DUSE_SCRIPTPCH=1 \
-            -DWITH_WARNINGS=0 \
-            -DWITHOUT_GIT=1 \
-            -DCOPY_CONF=1 \
-            2>&1 | tee cmake.log
-
-      - name: Build
-        run: |
-          # `-k` keeps going after the first failing target so that a single
-          # CI run reports *every* compile error instead of just the first one.
-          set -o pipefail
-          cmake --build build -j"$(nproc)" -- -k 2>&1 | tee build.log
-
-      - name: Verify produced binaries
-        run: |
-          # NOTE: on Unix/Makefile generators TrinityCore does not set
-          # CMAKE_RUNTIME_OUTPUT_DIRECTORY, so each executable is emitted inside
-          # its own target directory (e.g. build/src/server/worldserver/worldserver)
-          # and not into build/bin.  Only the MSVC/MinGW settings point everything
-          # at build/bin.  Locate the binaries by name so this check is correct
-          # for either layout.
-          #
-          # Target names come from src/tools/*/CMakeLists.txt: mapextractor,
-          # vmap4extractor, vmap4assembler, mmaps_generator (no underscores
-          # between "map"/"vmap4" and "extractor"/"assembler").
-          verify() {
-            local failed=0
-            local LAST_BINARY=""
-            local WORLDSERVER_BIN=""
-
-            locate() {
-              find build -type f -name "$1" -perm -u+x \
-                -not -path "*/CMakeFiles/*" 2>/dev/null | head -n 1
-            }
-
-            check_binary() {
-              local name="$1"
-              local path
-              path="$(locate "$name")"
-              if [ -n "$path" ]; then
-                printf '  OK   %-18s %s (%s)\n' "$name" "$path" "$(du -h "$path" | cut -f1)"
-              else
-                printf '  MISS %-18s not produced by the build\n' "$name"
-                echo "::error::Expected binary '$name' was not produced by the build"
-                failed=1
-              fi
-              LAST_BINARY="$path"
-            }
-
-            echo "=== Server binaries ==="
-            check_binary worldserver
-            WORLDSERVER_BIN="$LAST_BINARY"
-            check_binary bnetserver
-
-            echo ""
-            echo "=== Extraction tools ==="
-            local tool
-            for tool in mapextractor vmap4extractor vmap4assembler mmaps_generator; do
-              check_binary "$tool"
-            done
-
-            echo ""
-            echo "=== Playerbot integration check ==="
-            if [ -z "$WORLDSERVER_BIN" ]; then
-              echo "::error::worldserver binary missing - cannot verify playerbot symbols"
-              failed=1
-            else
-              local playerbot_symbols
-              playerbot_symbols="$(nm "$WORLDSERVER_BIN" | grep -c 'Playerbot' || true)"
-              echo "  ${playerbot_symbols} Playerbot symbols in worldserver"
-              if nm "$WORLDSERVER_BIN" | grep -q "InitializePlayerbots"; then
-                echo "  OK InitializePlayerbots found"
-              else
-                echo "::error::Playerbot symbols missing from worldserver"
-                failed=1
-              fi
-              if nm "$WORLDSERVER_BIN" | grep -q "RandomPlayerbotMgr"; then
-                echo "  OK RandomPlayerbotMgr found"
-              else
-                echo "::error::RandomPlayerbotMgr missing from worldserver"
-                failed=1
-              fi
-            fi
-
-            return "$failed"
-          }
-
-          verify 2>&1 | tee verify.log
-          exit "${PIPESTATUS[0]}"
-
-      - name: Report build failure
-        if: failure()
-        uses: ./.github/actions/report-build-failure
-        with:
-          log-file: build.log
-          extra-log: verify.log
-          label: Build (Ubuntu 22.04 / GCC 12)
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-linux
-          path: |
-            build.log
-            cmake.log
-            verify.log
-
-  # ------------------------------------------------------------------
-  #  Windows build  (secondary, best-effort)
+  #  Windows build  (the only target - must pass)
   # ------------------------------------------------------------------
   build-windows:
     name: Build (Windows 2022 / MSVC)
     runs-on: windows-2022
     timeout-minutes: 360
-    continue-on-error: true   # non-blocking
 
     env:
       VCPKG_ROOT: C:\vcpkg
