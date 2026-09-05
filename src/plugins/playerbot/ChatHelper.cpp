@@ -241,7 +241,7 @@ string ChatHelper::formatQuest(Quest const* quest)
 string ChatHelper::formatGameobject(GameObject* go)
 {
     ostringstream out;
-    out << "|cFFFFFF00|Hfound:" << go->GetGUID() << ":" << go->GetEntry() << ":" <<  "|h[" << go->GetGOInfo()->name << "]|h|r";
+    out << "|cFFFFFF00|Hfound:" << go->GetGUID().GetCounter() << ":" << go->GetEntry() << ":" << go->GetMapId() << ":" << "|h[" << go->GetGOInfo()->name << "]|h|r";
     return out.str();
 }
 
@@ -304,37 +304,41 @@ list<ObjectGuid> ChatHelper::parseGameobjects(string& text)
 {
     list<ObjectGuid> gos;
     //    Link format
-    //    |cFFFFFF00|Hfound:" << guid << ':'  << entry << ':'  <<  "|h[" << gInfo->name << "]|h|r";
-    //    |cFFFFFF00|Hfound:9582:1731|h[Copper Vein]|h|r
+    //    |cFFFFFF00|Hfound:<counter>:<entry>:<mapId>:|h[Copper Vein]|h|r
 
-    uint8 pos = 0;
+    size_t pos = 0;
     while (true)
     {
-        // extract GO guid
-        int i = text.find("Hfound:", pos);     // base H = 11
-        if (i == -1)     // break if error
+        size_t i = text.find("Hfound:", pos);
+        if (i == string::npos)
             break;
 
-        pos = i + 7;     //start of window in text 11 + 7 = 18
-        int endPos = text.find(':', pos);     // end of window in text 22
-        if (endPos == -1)     //break if error
+        pos = i + 7;
+        size_t endPos = text.find(':', pos);
+        if (endPos == string::npos)
             break;
-        istringstream stream(text.substr(pos, endPos - pos));
-        uint64 guid; stream >> guid;
+
+        uint64 counter = strtoull(text.substr(pos, endPos - pos).c_str(), nullptr, 10);
 
         // extract GO entry
         pos = endPos + 1;
-        endPos = text.find(':', pos);     // end of window in text
-        if (endPos == -1)     //break if error
+        endPos = text.find(':', pos);
+        if (endPos == string::npos)
             break;
 
-        std::string entryC = text.substr(pos, endPos - pos);     // get string within window i.e entry
-        uint32 entry = atol(entryC.c_str());     // convert ascii to float
+        uint32 entry = atol(text.substr(pos, endPos - pos).c_str());
 
-        ObjectGuid lootCurrent = ObjectGuid(guid);
+        // extract map id
+        pos = endPos + 1;
+        endPos = text.find(':', pos);
+        if (endPos == string::npos)
+            break;
 
-        if (guid)
-            gos.push_back(lootCurrent);
+        uint32 mapId = atol(text.substr(pos, endPos - pos).c_str());
+        pos = endPos + 1;
+
+        if (counter && entry)
+            gos.push_back(ObjectGuid::Create<HighGuid::GameObject>(mapId, entry, counter));
     }
 
     return gos;
@@ -412,23 +416,20 @@ string ChatHelper::formatClass(Player* player, int spec)
     out << specs[cls][spec] << " (";
 
     int c0 = 0, c1 = 0, c2 = 0;
-    PlayerTalentMap& talentMap = player->GetTalentMap(0);
-    for (PlayerTalentMap::iterator i = talentMap.begin(); i != talentMap.end(); ++i)
+    PlayerTalentMap const& talentMap = player->GetPlayerTalentMap(player->GetActiveTalentGroup());
+    for (PlayerTalentMap::const_iterator i = talentMap.begin(); i != talentMap.end(); ++i)
     {
-        uint32 spellId = i->first;
-        TalentSpellPos const* talentPos = GetTalentSpellPos(spellId);
-        if(!talentPos)
+        if (i->second.State == PLAYERSPELL_REMOVED)
             continue;
 
-        TalentEntry const* talentInfo = sTalentStore.LookupEntry(talentPos->talent_id);
-
+        TalentEntry const* talentInfo = sTalentStore.LookupEntry(i->first);
         if (!talentInfo)
             continue;
 
-        uint32 const* talentTabIds = GetTalentTabPages(player->GetClass());
-        if (talentInfo->TalentTab == talentTabIds[0]) c0++;
-        if (talentInfo->TalentTab == talentTabIds[1]) c1++;
-        if (talentInfo->TalentTab == talentTabIds[2]) c2++;
+        uint32 const* talentTabIds = sDB2Manager.GetTalentTabPages(player->GetClass());
+        if (talentInfo->TabID == talentTabIds[0]) c0++;
+        if (talentInfo->TabID == talentTabIds[1]) c1++;
+        if (talentInfo->TabID == talentTabIds[2]) c2++;
     }
 
     out << (c0 ? "|h|cff00ff00" : "") << c0 << "|h|cffffffff/";

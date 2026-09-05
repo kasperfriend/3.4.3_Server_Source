@@ -76,8 +76,8 @@ void PlayerbotFactory::Prepare()
 
     bot->CombatStop(true);
     bot->SetLevel(level);
-    bot->SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_HIDE_HELM);
-    bot->SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_HIDE_CLOAK);
+    bot->SetPlayerFlagEx(PLAYER_FLAGS_EX_HIDE_HELM);
+    bot->SetPlayerFlagEx(PLAYER_FLAGS_EX_HIDE_CLOAK);
 }
 
 void PlayerbotFactory::Randomize(bool incremental)
@@ -96,7 +96,7 @@ void PlayerbotFactory::Randomize(bool incremental)
     // quest rewards boost bot level, so reduce back
     bot->SetLevel(level);
     ClearInventory();
-    bot->SetUInt32Value(PLAYER_XP, 0);
+    bot->SetXP(0);
     CancelAuras();
     bot->SaveToDB();
 
@@ -281,7 +281,7 @@ void PlayerbotFactory::InitTalents()
     uint32 specNo = (point < p1 ? 0 : (point < p2 ? 1 : 2));
     InitTalents(specNo);
 
-    if (bot->GetFreeTalentPoints())
+    if (BotFreeTalentPoints(bot))
         InitTalents(2 - specNo);
 }
 
@@ -1113,7 +1113,7 @@ void PlayerbotFactory::InitSpecialSpells()
 
 void PlayerbotFactory::InitTalents(uint32 specNo)
 {
-    uint32 classMask = bot->getClassMask();
+    uint32 classMask = bot->GetClassMask();
 
     map<uint32, vector<TalentEntry const*> > spells;
     for (uint32 i = 0; i < sTalentStore.GetNumRows(); ++i)
@@ -1122,17 +1122,17 @@ void PlayerbotFactory::InitTalents(uint32 specNo)
         if(!talentInfo)
             continue;
 
-        TalentTabEntry const *talentTabInfo = sTalentTabStore.LookupEntry( talentInfo->TalentTab );
-        if(!talentTabInfo || talentTabInfo->tabpage != specNo)
+        TalentTabEntry const *talentTabInfo = sTalentTabStore.LookupEntry( talentInfo->TabID );
+        if(!talentTabInfo || talentTabInfo->OrderIndex != specNo)
             continue;
 
         if( (classMask & talentTabInfo->ClassMask) == 0 )
             continue;
 
-        spells[talentInfo->Row].push_back(talentInfo);
+        spells[talentInfo->TierID].push_back(talentInfo);
     }
 
-    uint32 freePoints = bot->GetFreeTalentPoints();
+    uint32 freePoints = BotFreeTalentPoints(bot);
     for (map<uint32, vector<TalentEntry const*> >::iterator i = spells.begin(); i != spells.end(); ++i)
     {
         vector<TalentEntry const*> &spells = i->second;
@@ -1143,33 +1143,34 @@ void PlayerbotFactory::InitTalents(uint32 specNo)
         }
 
         int attemptCount = 0;
-        while (!spells.empty() && (int)freePoints - (int)bot->GetFreeTalentPoints() < 5 && attemptCount++ < 3 && bot->GetFreeTalentPoints())
+        while (!spells.empty() && (int)freePoints - (int)BotFreeTalentPoints(bot) < 5 && attemptCount++ < 3 && BotFreeTalentPoints(bot))
         {
             int index = urand(0, spells.size() - 1);
             TalentEntry const *talentInfo = spells[index];
             int maxRank = 0;
-            for (int rank = 0; rank < min((uint32)MAX_TALENT_RANK, bot->GetFreeTalentPoints()); ++rank)
+            for (int rank = 0; rank < min((uint32)MAX_TALENT_RANK, BotFreeTalentPoints(bot)); ++rank)
             {
-                uint32 spellId = talentInfo->RankID[rank];
+                uint32 spellId = talentInfo->SpellRank[rank];
                 if (!spellId)
                     continue;
 
                 maxRank = rank;
             }
 
-            bot->LearnTalent(talentInfo->TalentID, maxRank);
+            bot->LearnTalent(talentInfo->ID, maxRank);
 			spells.erase(spells.begin() + index);
         }
 
-        freePoints = bot->GetFreeTalentPoints();
+        freePoints = BotFreeTalentPoints(bot);
     }
 
-    for (uint32 i = 0; i < MAX_TALENT_SPECS; ++i)
+    for (uint8 i = 0; i < MAX_SPECIALIZATIONS; ++i)
     {
-        for (PlayerTalentMap::iterator itr = bot->GetTalentMap(i).begin(); itr != bot->GetTalentMap(i).end(); ++itr)
+        PlayerTalentMap& talents = bot->GetPlayerTalentMap(i);
+        for (PlayerTalentMap::iterator itr = talents.begin(); itr != talents.end(); ++itr)
         {
-            if (itr->second->state != PLAYERSPELL_REMOVED)
-                itr->second->state = PLAYERSPELL_CHANGED;
+            if (itr->second.State != PLAYERSPELL_REMOVED)
+                itr->second.State = PLAYERSPELL_CHANGED;
         }
     }
 }
@@ -1635,7 +1636,7 @@ void PlayerbotFactory::InitGlyphs()
         if (proto->GetClass() != ITEM_CLASS_GLYPH)
             continue;
 
-        if ((proto->GetAllowableClass() & bot->getClassMask()) == 0 || (proto->GetAllowableRace() & bot->getRaceMask()) == 0)
+        if ((proto->GetAllowableClass() & bot->GetClassMask()) == 0 || (proto->GetAllowableRace() & bot->getRaceMask()) == 0)
             continue;
 
         for (uint32 spell = 0; spell < MAX_ITEM_PROTO_EFFECTS; spell++)

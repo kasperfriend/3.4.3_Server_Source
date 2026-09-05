@@ -55,22 +55,20 @@ AiObjectContext* AiFactory::createAiObjectContext(Player* player, PlayerbotAI* a
 int AiFactory::GetPlayerSpecTab(Player* player)
 {
     int c0 = 0, c1 = 0, c2 = 0;
-    PlayerTalentMap& talentMap = player->GetTalentMap(0);
-    for (PlayerTalentMap::iterator i = talentMap.begin(); i != talentMap.end(); ++i)
+    PlayerTalentMap const& talentMap = player->GetPlayerTalentMap(player->GetActiveTalentGroup());
+    for (PlayerTalentMap::const_iterator i = talentMap.begin(); i != talentMap.end(); ++i)
     {
-        uint32 spellId = i->first;
-        TalentSpellPos const* talentPos = GetTalentSpellPos(spellId);
-        if(!talentPos)
+        if (i->second.State == PLAYERSPELL_REMOVED)
             continue;
 
-        TalentEntry const* talentInfo = sTalentStore.LookupEntry(talentPos->talent_id);
+        TalentEntry const* talentInfo = sTalentStore.LookupEntry(i->first);
         if (!talentInfo)
             continue;
 
-        uint32 const* talentTabIds = GetTalentTabPages(player->GetClass());
-        if (talentInfo->TalentTab == talentTabIds[0]) c0++;
-        if (talentInfo->TalentTab == talentTabIds[1]) c1++;
-        if (talentInfo->TalentTab == talentTabIds[2]) c2++;
+        uint32 const* talentTabIds = sDB2Manager.GetTalentTabPages(player->GetClass());
+        if (talentInfo->TabID == talentTabIds[0]) c0++;
+        if (talentInfo->TabID == talentTabIds[1]) c1++;
+        if (talentInfo->TabID == talentTabIds[2]) c2++;
     }
 
     if (c0 >= c1 && c0 >= c2)
