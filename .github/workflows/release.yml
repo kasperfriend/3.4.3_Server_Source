@@ -86,6 +86,13 @@ jobs:
           #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
           #     command server now uses boost::asio::io_context.
           $vcpkgTag = "2025.04.09"
+
+          # Everything printed here and by the vcpkg install step is tee'd into
+          # deps.log, because the Actions job log is not always retrievable when
+          # triaging a red run.
+          $depsLog = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          if (Test-Path $depsLog) { Remove-Item $depsLog -Force }
+          Start-Transcript -Path $depsLog -Append | Out-Null
           Push-Location $env:VCPKG_ROOT
           try {
             Write-Host "Pinning vcpkg to $vcpkgTag (Boost 1.87.0) ..."
@@ -109,10 +116,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "bootstrap-vcpkg.bat failed" }
           } finally {
             Pop-Location
+            Stop-Transcript | Out-Null
           }
 
       - name: Install dependencies via vcpkg
         shell: pwsh
+        env:
+          # The pinned ports predate CMake 4, which removed compatibility with
+          # cmake_minimum_required(VERSION <3.5).  This is CMake's documented
+          # escape hatch for old projects and a no-op on CMake 3.x.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
           # dep/boost/CMakeLists.txt only asks find_package(Boost ...) for the
           # *compiled* components, so installing just those leaves out every
@@ -145,9 +158,17 @@ jobs:
             "openssl"
           ) | ForEach-Object { "$($_)`:$triplet" }
 
+          $depsLog  = Join-Path $env:GITHUB_WORKSPACE "deps.log"
+          $vcpkgExe = Join-Path $env:VCPKG_ROOT "vcpkg.exe"
+          $portList = $ports -join " "
+
           Write-Host "Installing $($ports.Count) vcpkg ports ($triplet)"
-          & "$env:VCPKG_ROOT\vcpkg.exe" install @ports
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $depsLog -Value "`n=== vcpkg install $portList ==="
+          cmd /c "`"$vcpkgExe`" install $portList >> `"$depsLog`" 2>&1"
+          $code = $LASTEXITCODE
+          Write-Host "vcpkg install exit code: $code"
+          if (Test-Path $depsLog) { Get-Content $depsLog -Tail 150 }
+          if ($code -ne 0) { exit $code }
         timeout-minutes: 300
 
       - name: Configure (CMake)
@@ -414,6 +435,7 @@ jobs:
         uses: ./.github/actions/report-build-failure
         with:
           log-file: build.log
+          extra-log: deps.log
           label: Release (Windows x64)
 
   # ==================================================================

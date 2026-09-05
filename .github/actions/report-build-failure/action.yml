@@ -18,7 +18,7 @@ inputs:
     description: 'Human readable label for the failing job'
     required: true
   extra-log:
-    description: 'Optional second log (e.g. post-build verification output) to include'
+    description: 'Optional space-separated list of further logs to include (e.g. "deps.log verify.log")'
     required: false
     default: ''
 
@@ -39,7 +39,7 @@ runs:
         dump_errors() {
           local file="$1"
           if [ ! -f "$file" ]; then
-            echo "!! log file '$file' not found - nothing was captured !!"
+            # Not an error: a job can fail before some of its logs exist.
             return 0
           fi
           echo "--- error lines from $file (last 400 matches) ---"
@@ -56,13 +56,20 @@ runs:
           echo "Run:      $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Commit:   $GITHUB_SHA"
           echo ""
-          dump_errors "$REPORT_LOG_FILE"
-          if [ -n "$REPORT_EXTRA_LOG" ]; then
+          found=0
+          for f in $REPORT_LOG_FILE $REPORT_EXTRA_LOG; do
+            if [ -f "$f" ]; then found=$((found+1)); fi
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "!! no captured logs found (looked for: $REPORT_LOG_FILE $REPORT_EXTRA_LOG) !!"
+            echo "!! the failing step probably does not tee its output into a file  !!"
+          fi
+          for f in $REPORT_LOG_FILE $REPORT_EXTRA_LOG; do
             echo ""
             echo "=================================================="
             echo ""
-            dump_errors "$REPORT_EXTRA_LOG"
-          fi
+            dump_errors "$f"
+          done
         } > "$OUT"
 
         echo "REPORT_BODY_FILE=$OUT" >> "$GITHUB_ENV"
