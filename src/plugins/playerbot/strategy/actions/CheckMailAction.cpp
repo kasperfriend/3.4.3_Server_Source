@@ -7,24 +7,23 @@ using namespace ai;
 
 bool CheckMailAction::Execute(Event event)
 {
-    if (!bot->IsMailsLoaded())
     {
-        WorldPacket p;
-        bot->GetSession()->HandleQueryNextMailTime(p);
+        WorldPackets::Mail::MailQueryNextMailTime queryNextMailTime{WorldPacket(CMSG_QUERY_NEXT_MAIL_TIME)};
+        bot->GetSession()->HandleQueryNextMailTime(queryNextMailTime);
     }
 
     if (!bot->GetMailSize())
         return false;
 
     list<uint32> ids;
-    for (PlayerMails::iterator i = bot->GetMailBegin(); i != bot->GetMailEnd(); ++i)
+    for (PlayerMails::const_iterator i = bot->GetMails().begin(); i != bot->GetMails().end(); ++i)
     {
         Mail* mail = *i;
 
         if (!mail || mail->state == MAIL_STATE_DELETED)
             continue;
 
-        Player* owner = ObjectAccessor::FindPlayer(mail->sender);
+        Player* owner = ObjectAccessor::FindPlayerByLowGUID(mail->sender);
         if (!owner)
             continue;
 
@@ -38,8 +37,8 @@ bool CheckMailAction::Execute(Event event)
         uint32 id = *i;
         bot->SendMailResult(id, MAIL_DELETED, MAIL_OK);
         CharacterDatabaseTransaction tran = CharacterDatabase.BeginTransaction();
-        CharacterDatabase.PExecute("DELETE FROM mail WHERE id = '%u'", id);
-        CharacterDatabase.PExecute("DELETE FROM mail_items WHERE mail_id = '%u'", id);
+        CharacterDatabase.PExecute("DELETE FROM mail WHERE id = '{}'", id);
+        CharacterDatabase.PExecute("DELETE FROM mail_items WHERE mail_id = '{}'", id);
         CharacterDatabase.CommitTransaction(tran);
         bot->RemoveMail(id);
     }

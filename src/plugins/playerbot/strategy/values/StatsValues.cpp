@@ -57,7 +57,7 @@ bool HasManaValue::Calculate()
 uint8 ComboPointsValue::Calculate()
 {
     Unit *target = GetTarget();
-    if (!target || target->GetGUID() != bot->GetComboTarget())
+    if (!target || target->GetGUID() != bot->GetComboTargetGUID())
         return 0;
 
     return bot->GetComboPoints();
