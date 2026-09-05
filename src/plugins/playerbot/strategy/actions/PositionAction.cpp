@@ -15,7 +15,7 @@ bool PositionAction::Execute(Event event)
     if (!master)
         return false;
 
-	ai::Position& pos = context->GetValue<ai::Position&>("position", qualifier)->Get();
+	ai::BotPosition& pos = context->GetValue<ai::BotPosition&>("position", qualifier)->Get();
     pos.Set( master->GetPositionX(), master->GetPositionY(), master->GetPositionZ());
 
     ostringstream out; out << "Position " << qualifier << " is set";
@@ -25,7 +25,7 @@ bool PositionAction::Execute(Event event)
 
 bool MoveToPositionAction::Execute(Event event)
 {
-	ai::Position& pos = context->GetValue<ai::Position&>("position", qualifier)->Get();
+	ai::BotPosition& pos = context->GetValue<ai::BotPosition&>("position", qualifier)->Get();
     if (!pos.isSet())
     {
         ostringstream out; out << "Position " << qualifier << " is not set";

@@ -472,7 +472,13 @@ void CollectionMgr::LoadAccountItemAppearances(PreparedQueryResult knownAppearan
 
         } while (knownAppearances->NextRow());
 
-        _appearances->init_from_block_range(blocks.begin(), blocks.end());
+        // boost::dynamic_bitset::init_from_block_range() is a private
+        // implementation detail (Boost >= 1.8x rejects the call with
+        // "cannot access private member").  The public, documented way to
+        // build a bitset from a block range is the (first, last) constructor,
+        // which does exactly the same thing: num_bits becomes
+        // blocks.size() * bits_per_block.
+        *_appearances = boost::dynamic_bitset<uint32>(blocks.begin(), blocks.end());
     }
 }
 
