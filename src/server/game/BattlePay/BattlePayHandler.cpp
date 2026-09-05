@@ -49,7 +49,7 @@ void WorldSession::SendPurchaseUpdate(WorldSession* session, Battlepay::Purchase
     data.ProductID = purchase.ProductID;
     data.UnkInt = purchase.ServerToken;
     data.WalletName = session->GetBattlePayMgr()->GetDefaultWalletName();
-    packet.Purchase.emplace_back(data);
+    packet.PurchaseData.emplace_back(data);
     session->SendPacket(packet.Write());
 };
 

@@ -21,6 +21,7 @@ add_subdirectory(common)
 
 if(SERVERS)
   add_subdirectory(server)
+  add_subdirectory(plugins)
 endif(SERVERS)
 
 if(TOOLS)

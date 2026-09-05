@@ -178,12 +178,12 @@ ByteBuffer& operator<<(ByteBuffer& data, WorldPackets::BattlePay::DistributionOb
     data << object.TargetNativeRealm;
 
     data << object.PurchaseID;
-    data.WriteBit(object.Product.has_value());
+    data.WriteBit(object.ProductData.has_value());
     data.WriteBit(object.Revoked);
     data.FlushBits();
 
-    if (object.Product)
-        data << *object.Product;
+    if (object.ProductData)
+        data << *object.ProductData;
 
     return data;
 }
@@ -207,8 +207,8 @@ ByteBuffer& operator<<(ByteBuffer& data, WorldPackets::BattlePay::Purchase const
 WorldPacket const* WorldPackets::BattlePay::PurchaseListResponse::Write()
 {
     _worldPacket << Result;
-    _worldPacket << static_cast<uint32>(Purchase.size());
-    for (auto const& purchaseData : Purchase)
+    _worldPacket << static_cast<uint32>(PurchaseData.size());
+    for (auto const& purchaseData : PurchaseData)
         _worldPacket << purchaseData;
 
     return &_worldPacket;
@@ -218,10 +218,10 @@ WorldPacket const* WorldPackets::BattlePay::DistributionListResponse::Write()
 {
     _worldPacket << uint32(Result);
 
-    _worldPacket.WriteBits(DistributionObject.size(), 11);
+    _worldPacket.WriteBits(DistributionObjectData.size(), 11);
     _worldPacket.FlushBits();
 
-    for (BattlePay::DistributionObject const& objectData : DistributionObject)
+    for (BattlePay::DistributionObject const& objectData : DistributionObjectData)
         _worldPacket << objectData;
 
     return &_worldPacket;
@@ -229,7 +229,7 @@ WorldPacket const* WorldPackets::BattlePay::DistributionListResponse::Write()
 
 WorldPacket const* WorldPackets::BattlePay::DistributionUpdate::Write()
 {
-    _worldPacket << DistributionObject;
+    _worldPacket << DistributionObjectData;
 
     return &_worldPacket;
 }
@@ -278,7 +278,7 @@ WorldPacket const* WorldPackets::BattlePay::SyncWowEntitlements::Write()
 {
     TC_LOG_INFO("server.BattlePay", "SyncWowEntitlements");
     _worldPacket << uint32(purchaseCount.size());
-    _worldPacket << uint32(Product.size());
+    _worldPacket << uint32(ProductData.size());
 
     for (auto purchases : purchaseCount)
     {
@@ -290,7 +290,7 @@ WorldPacket const* WorldPackets::BattlePay::SyncWowEntitlements::Write()
         _worldPacket.WriteBit(false); // always false
     }
 
-    for (auto const& product : Product)
+    for (auto const& product : ProductData)
     {
         _worldPacket << product.ProductId;
         _worldPacket << product.Type;
@@ -368,8 +368,8 @@ WorldPacket const* WorldPackets::BattlePay::BattlePayAckFailed::Write()
 
 WorldPacket const* WorldPackets::BattlePay::PurchaseUpdate::Write()
 {
-    _worldPacket << static_cast<uint32>(Purchase.size());
-    for (auto const& purchaseData : Purchase)
+    _worldPacket << static_cast<uint32>(PurchaseData.size());
+    for (auto const& purchaseData : PurchaseData)
         _worldPacket << purchaseData;
 
     return &_worldPacket;

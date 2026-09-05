@@ -1029,6 +1029,10 @@ enum class ZonePVPTypeOverride : uint32
     Combat      = 4
 };
 
+// Playerbot mod (ported from ike3/mangosbot)
+class PlayerbotAI;
+class PlayerbotMgr;
+
 class TC_GAME_API Player final : public Unit, public GridObject<Player>
 {
     friend class WorldSession;
@@ -3097,6 +3101,17 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         void ExecutePendingSpellCastRequest();
         bool ProcessItemCast(SpellCastRequest& castRequest, SpellCastTargets const& targets);
         bool CanExecutePendingSpellCastRequest();
+
+    public:
+        // Playerbot mod (ported from ike3/mangosbot)
+        void SetPlayerbotAI(PlayerbotAI* ai) { _playerbotAI = ai; }
+        PlayerbotAI* GetPlayerbotAI() const { return _playerbotAI; }
+        void SetPlayerbotMgr(PlayerbotMgr* mgr) { _playerbotMgr = mgr; }
+        PlayerbotMgr* GetPlayerbotMgr() const { return _playerbotMgr; }
+
+    private:
+        PlayerbotAI* _playerbotAI = nullptr;
+        PlayerbotMgr* _playerbotMgr = nullptr;
 };
 
 TC_GAME_API void AddItemsSetItem(Player* player, Item const* item);
