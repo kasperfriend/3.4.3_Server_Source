@@ -34,24 +34,24 @@ bool ListSpellsAction::Execute(Event event)
         //|| name.find("Teleport") != -1
 
         std::string comp = ",";
-        comp.append(pSpellInfo->SpellName[loc]);
+        comp.append(pSpellInfo->SpellName->Str[loc]);
         comp.append(",");
 
         if (!(ignoreList.find(comp) == std::string::npos && alreadySeenList.find(comp) == std::string::npos))
             continue;
 
-        if (!filter.empty() && !strstri(pSpellInfo->SpellName[loc], filter.c_str()))
+        if (!filter.empty() && !strstri(pSpellInfo->SpellName->Str[loc], filter.c_str()))
             continue;
 
-        alreadySeenList += pSpellInfo->SpellName[loc];
+        alreadySeenList += pSpellInfo->SpellName->Str[loc];
         alreadySeenList += ",";
 
         if (pSpellInfo->IsPositive())
             posOut << " |cffffffff|Hspell:" << spellId << "|h["
-            << pSpellInfo->SpellName[loc] << "]|h|r";
+            << pSpellInfo->SpellName->Str[loc] << "]|h|r";
         else
             negOut << " |cffffffff|Hspell:" << spellId << "|h["
-            << pSpellInfo->SpellName[loc] << "]|h|r";
+            << pSpellInfo->SpellName->Str[loc] << "]|h|r";
     }
 
     ai->TellMaster("here's my non-attack spells:");

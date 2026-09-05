@@ -58,7 +58,7 @@ bool RewardAction::Reward(uint32 itemId, Object* questGiver)
                 ItemTemplate const * const pRewardItem = sObjectMgr->GetItemTemplate(pQuest->RewardChoiceItemId[rewardIdx]);
                 if (itemId == pRewardItem->GetId())
                 {
-                    bot->RewardQuest(pQuest, rewardIdx, questGiver, false);
+                    bot->RewardQuest(pQuest, LootItemType::Item, rewardIdx, questGiver, false);
 
                     string questTitle  = pQuest->GetLogTitle();
                     string itemName = pRewardItem->GetDefaultLocaleName();

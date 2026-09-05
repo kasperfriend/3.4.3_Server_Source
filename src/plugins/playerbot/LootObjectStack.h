@@ -2,6 +2,9 @@
 
 using namespace std;
 
+class Player;
+class WorldObject;
+
 namespace ai
 {
     enum LootStrategy
@@ -21,7 +24,7 @@ namespace ai
         LootObject(const LootObject& other);
 
     public:
-        bool IsEmpty() { return !guid; }
+        bool IsEmpty() { return guid.IsEmpty(); }
         bool IsLootPossible(Player* bot);
         void Refresh(Player* bot, ObjectGuid guid);
         WorldObject* GetWorldObject(Player* bot);

@@ -11,18 +11,18 @@ bool ChangeTalentsAction::Execute(Event event)
     string text = event.getParam();
     if (text == "1" || text == "primary")
     {
-        bot->ActivateSpec(0);
+        bot->ActivateTalentGroup(0);
         ai->TellMaster("Primary talents activated");
     }
     else if (text == "2" || text == "secondary")
     {
-        bot->ActivateSpec(1);
+        bot->ActivateTalentGroup(1);
         ai->TellMaster("Secondary talents activated");
     }
     else
     {
         ostringstream out; 
-        switch (bot->GetActiveSpec())
+        switch (bot->GetActiveTalentGroup())
         {
         case 0: out << "Primary";
             break;

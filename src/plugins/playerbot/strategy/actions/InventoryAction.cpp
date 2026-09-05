@@ -75,7 +75,7 @@ void InventoryAction::IterateItemsInBags(IterateItemsVisitor* visitor)
             if (!visitor->Visit(pItem))
                 return;
 
-    for(int i = KEYRING_SLOT_START; i < CURRENCYTOKEN_SLOT_END; ++i)
+    for(int i = KEYRING_SLOT_START; i < KEYRING_SLOT_END; ++i)
         if (Item *pItem = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, i))
             if (!visitor->Visit(pItem))
                 return;
@@ -167,7 +167,7 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
             case ITEM_CLASS_TRADE_GOODS:
                 ai->TellMaster("--- trade goods ---");
                 break;
-            case ITEM_CLASS_GENERIC:
+            case ITEM_CLASS_CONSUMABLE:
                 ai->TellMaster("--- generic ---");
                 break;
             case ITEM_CLASS_RECIPE:
@@ -188,7 +188,7 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
             case ITEM_CLASS_PERMANENT:
                 ai->TellMaster("--- permanent ---");
                 break;
-            case ITEM_CLASS_MISC:
+            case ITEM_CLASS_MISCELLANEOUS:
                 ai->TellMaster("--- other ---");
                 break;
             case ITEM_CLASS_GLYPH:

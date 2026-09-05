@@ -50,40 +50,46 @@ bool QueryQuestAction::Execute(Event event)
 void QueryQuestAction::TellObjectives(uint32 questId)
 {
     Quest const* questTemplate = sObjectMgr->GetQuestTemplate(questId);
-    QuestStatusMap &questMap = bot->getQuestStatusMap();
-    QuestStatusData questStatus = questMap[questId];
+    if (!questTemplate)
+        return;
 
-    for (int i = 0; i < QUEST_OBJECTIVES_COUNT; i++)
+    for (QuestObjective const& objective : questTemplate->GetObjectives())
     {
-        if (!questTemplate->ObjectiveText[i].empty())
-            ai->TellMaster(questTemplate->ObjectiveText[i]);
-
-        if (questTemplate->RequiredItemId[i])
+        if (!objective.IsStoringValue())
         {
-            int required = questTemplate->RequiredItemCount[i];
-            int available = questStatus.ItemCount[i];
-            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(questTemplate->RequiredItemId[i]);
-            TellObjective(chat->formatItem(proto), available, required);
+            if (!objective.Description.empty())
+                ai->TellMaster(objective.Description);
+            continue;
         }
 
-        if (questTemplate->RequiredNpcOrGo[i])
+        int32 required = objective.Amount;
+        int32 available = bot->GetQuestObjectiveData(objective);
+
+        switch (objective.Type)
         {
-            int required = questTemplate->RequiredNpcOrGoCount[i];
-            int available = questStatus.CreatureOrGOCount[i];
-
-            if (questTemplate->RequiredNpcOrGo[i] < 0)
+            case QUEST_OBJECTIVE_ITEM:
             {
-                GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(questTemplate->RequiredNpcOrGo[i]);
-                if (info)
+                if (ItemTemplate const* proto = sObjectMgr->GetItemTemplate(uint32(objective.ObjectID)))
+                    TellObjective(chat->formatItem(proto), available, required);
+                break;
+            }
+            case QUEST_OBJECTIVE_GAMEOBJECT:
+            {
+                if (GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(uint32(objective.ObjectID)))
                     TellObjective(info->name, available, required);
+                break;
             }
-            else
+            case QUEST_OBJECTIVE_MONSTER:
+            case QUEST_OBJECTIVE_TALKTO:
             {
-
-                CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(questTemplate->RequiredNpcOrGo[i]);
-                if (info)
+                if (CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(uint32(objective.ObjectID)))
                     TellObjective(info->Name, available, required);
+                break;
             }
+            default:
+                if (!objective.Description.empty())
+                    TellObjective(objective.Description, available, required);
+                break;
         }
     }
 }

@@ -17,7 +17,7 @@ bool TellReputationAction::Execute(Event event)
         return false;
 
     const FactionTemplateEntry *factionTemplate = unit->GetFactionTemplateEntry();
-    uint32 faction = factionTemplate->faction;
+    uint32 faction = factionTemplate->Faction;
     const FactionEntry* entry = sFactionStore.LookupEntry(faction);
     int32 reputation = bot->GetReputationMgr().GetReputation(faction);
 
@@ -57,11 +57,7 @@ bool TellReputationAction::Execute(Event event)
 
     out << "|cffffffff";
 
-    int32 base = ReputationMgr::Reputation_Cap + 1;
-    for (int i = MAX_REPUTATION_RANK - 1; i >= rank; --i)
-        base -= ReputationMgr::PointsInRank[i];
-
-    out << " (" << (reputation - base) << "/" << ReputationMgr::PointsInRank[rank] << ")";
+    out << " (" << reputation << ")";
     ai->TellMaster(out);
 
     return true;

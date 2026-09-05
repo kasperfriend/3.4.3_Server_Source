@@ -27,23 +27,20 @@ bool TradeStatusAction::Execute(Event event)
 
     if (trader != master || !ai->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_ALLOW_ALL, true, master))
     {
-        WorldPacket p;
-        uint32 status = 0;
-        p << status;
-        bot->GetSession()->HandleCancelTradeOpcode(p);
+        WorldPackets::Trade::CancelTrade cancelTrade{WorldPacket(CMSG_CANCEL_TRADE)};
+        bot->GetSession()->HandleCancelTradeOpcode(cancelTrade);
         return false;
     }
 
     WorldPacket p(event.getPacket());
     p.rpos(0);
-    uint32 status;
-    p >> status;
+    p.ResetBitPos();
+    p.ReadBit();                                    // PartnerIsSameBnetAccount
+    uint32 status = p.ReadBits(5);
 
-    if (status == TRADE_STATUS_TRADE_ACCEPT)
+    if (status == TRADE_STATUS_ACCEPTED)
     {
-        WorldPacket p;
-        uint32 status = 0;
-        p << status;
+        WorldPackets::Trade::AcceptTrade acceptTrade{WorldPacket(CMSG_ACCEPT_TRADE)};
 
         if (CheckTrade())
         {
@@ -57,7 +54,7 @@ bool TradeStatusAction::Execute(Event event)
                     itemIds[item->GetTemplate()->GetId()] += item->GetCount();
             }
 
-            bot->GetSession()->HandleAcceptTradeOpcode(p);
+            bot->GetSession()->HandleAcceptTradeOpcode(acceptTrade);
             if (bot->GetTradeData())
                 return false;
 
@@ -72,7 +69,7 @@ bool TradeStatusAction::Execute(Event event)
             return true;
         }
     }
-    else if (status == TRADE_STATUS_BEGIN_TRADE)
+    else if (status == TRADE_STATUS_PROPOSED)
     {
         if (!bot->isInFront(trader, M_PI / 2))
             bot->SetFacingToObject(trader);
@@ -86,8 +83,8 @@ bool TradeStatusAction::Execute(Event event)
 
 void TradeStatusAction::BeginTrade()
 {
-    WorldPacket p;
-    bot->GetSession()->HandleBeginTradeOpcode(p);
+    WorldPackets::Trade::BeginTrade beginTrade{WorldPacket(CMSG_BEGIN_TRADE)};
+    bot->GetSession()->HandleBeginTradeOpcode(beginTrade);
 
     ListItemsVisitor visitor;
     IterateItems(&visitor);

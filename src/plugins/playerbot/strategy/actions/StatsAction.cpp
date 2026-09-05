@@ -17,7 +17,7 @@ bool StatsAction::Execute(Event event)
     out << ", ";
     ListRepairCost(out);
 
-    if (bot->GetUInt32Value(PLAYER_NEXT_LEVEL_XP))
+    if (bot->GetXPForNextLevel())
     {
         out << ", ";
         ListXP(out);
@@ -69,8 +69,8 @@ void StatsAction::ListBagSlots(ostringstream &out)
 
 void StatsAction::ListXP( ostringstream &out )
 {
-    uint32 curXP = bot->GetUInt32Value(PLAYER_XP);
-    uint32 nextLevelXP = bot->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+    uint32 curXP = bot->GetXP();
+    uint32 nextLevelXP = bot->GetXPForNextLevel();
     uint32 xpPercent = 0;
     if (nextLevelXP)
         xpPercent = 100 * curXP / nextLevelXP;
@@ -102,44 +102,8 @@ uint32 StatsAction::EstRepairAll()
 uint32 StatsAction::EstRepair(uint16 pos)
 {
     Item* item = bot->GetItemByPos(pos);
+    if (!item)
+        return 0;
 
-    uint32 TotalCost = 0;
-    if(!item)
-        return TotalCost;
-
-    uint32 maxDurability = item->GetUInt32Value(ITEM_FIELD_MAXDURABILITY);
-    if(!maxDurability)
-        return TotalCost;
-
-    uint32 curDurability = item->GetUInt32Value(ITEM_FIELD_DURABILITY);
-
-    uint32 LostDurability = maxDurability - curDurability;
-    if(LostDurability>0)
-    {
-        ItemTemplate const *ditemProto = item->GetTemplate();
-
-        DurabilityCostsEntry const *dcost = sDurabilityCostsStore.LookupEntry(ditemProto->GetItemLevel());
-        if(!dcost)
-        {
-            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong item lvl {}", ditemProto->GetItemLevel());
-            return TotalCost;
-        }
-
-        uint32 dQualitymodEntryId = (ditemProto->GetQuality()+1)*2;
-        DurabilityQualityEntry const *dQualitymodEntry = sDurabilityQualityStore.LookupEntry(dQualitymodEntryId);
-        if(!dQualitymodEntry)
-        {
-            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong dQualityModEntry {}", dQualitymodEntryId);
-            return TotalCost;
-        }
-
-        uint32 dmultiplier = dcost->multiplier[ItemSubClassToDurabilityMultiplierId(ditemProto->GetClass(),ditemProto->GetSubClass())];
-        uint32 costs = uint32(LostDurability*dmultiplier*double(dQualitymodEntry->quality_mod));
-
-        if (costs==0)                                   //fix for ITEM_QUALITY_ARTIFACT
-            costs = 1;
-
-        TotalCost = costs;
-    }
-    return TotalCost;
+    return uint32(item->CalculateDurabilityRepairCost(1.0f));
 }

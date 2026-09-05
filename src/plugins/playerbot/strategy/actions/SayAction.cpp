@@ -77,7 +77,7 @@ bool SayAction::Execute(Event event)
 
     if (bot->GetMap())
     {
-        uint32 areaId = bot->GetMap()->GetAreaId(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
+        uint32 areaId = bot->GetMap()->GetAreaId(bot->GetPhaseShift(), bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ());
         if (areaId)
         {
 			AreaTableEntry const* area = sAreaTableStore.LookupEntry(areaId);

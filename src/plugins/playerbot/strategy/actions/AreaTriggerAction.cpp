@@ -17,18 +17,19 @@ bool ReachAreaTriggerAction::Execute(Event event)
     if(!atEntry)
         return false;
 
-    AreaTrigger const* at = sObjectMgr->GetAreaTrigger(triggerId);
+    AreaTriggerStruct const* at = sObjectMgr->GetAreaTrigger(triggerId);
     if (!at)
     {
-        WorldPacket p1(CMSG_AREA_TRIGGER);
-        p1 << triggerId;
-        p1.rpos(0);
-        bot->GetSession()->HandleAreaTriggerOpcode(p1);
+        WorldPackets::AreaTrigger::AreaTrigger packet{WorldPacket(CMSG_AREA_TRIGGER)};
+        packet.AreaTriggerID = int32(triggerId);
+        packet.Entered = true;
+        packet.FromClient = true;
+        bot->GetSession()->HandleAreaTriggerOpcode(packet);
 
         return true;
     }
 
-    if (bot->GetMapId() != atEntry->mapid || bot->GetDistance(atEntry->Pos.X, atEntry->Pos.Y, atEntry->Pos.Z) > sPlayerbotAIConfig.sightDistance)
+    if (bot->GetMapId() != uint32(atEntry->ContinentID) || bot->GetDistance(atEntry->Pos.X, atEntry->Pos.Y, atEntry->Pos.Z) > sPlayerbotAIConfig.sightDistance)
     {
         ai->TellMaster("I won't follow: too far away");
         return true;
@@ -36,7 +37,7 @@ bool ReachAreaTriggerAction::Execute(Event event)
 
     MotionMaster &mm = *bot->GetMotionMaster();
     mm.Clear();
-	mm.MovePoint(atEntry->mapid, atEntry->Pos.X, atEntry->Pos.Y, atEntry->Pos.Z);
+	mm.MovePoint(uint32(atEntry->ContinentID), atEntry->Pos.X, atEntry->Pos.Y, atEntry->Pos.Z);
     float distance = bot->GetDistance(atEntry->Pos.X, atEntry->Pos.Y, atEntry->Pos.Z);
     float delay = 1000.0f * distance / bot->GetSpeed(MOVE_RUN) + sPlayerbotAIConfig.reactDelay;
     ai->TellMaster("Wait for me");
@@ -48,7 +49,7 @@ bool ReachAreaTriggerAction::Execute(Event event)
 
 
 
-bool AreaTriggerAction::Execute(Event event)
+bool ai::AreaTriggerAction::Execute(Event event)
 {
     LastMovement& movement = context->GetValue<LastMovement&>("last movement")->Get();
 
@@ -59,14 +60,15 @@ bool AreaTriggerAction::Execute(Event event)
     if(!atEntry)
         return false;
 
-    AreaTrigger const* at = sObjectMgr->GetAreaTrigger(triggerId);
+    AreaTriggerStruct const* at = sObjectMgr->GetAreaTrigger(triggerId);
     if (!at)
         return true;
 
-    WorldPacket p(CMSG_AREA_TRIGGER);
-    p << triggerId;
-    p.rpos(0);
-    bot->GetSession()->HandleAreaTriggerOpcode(p);
+    WorldPackets::AreaTrigger::AreaTrigger packet{WorldPacket(CMSG_AREA_TRIGGER)};
+    packet.AreaTriggerID = int32(triggerId);
+    packet.Entered = true;
+    packet.FromClient = true;
+    bot->GetSession()->HandleAreaTriggerOpcode(packet);
 
     ai->TellMaster("Hello");
     return true;

@@ -11,7 +11,7 @@
 #include "PlayerbotMgr.h"
 #include "RandomPlayerbotMgr.h"
 #include "Chat/Chat.h"
-#include "Chat/ChatCommand.h"
+#include "Chat/ChatCommands/ChatCommand.h"
 #include "Scripting/ScriptMgr.h"
 
 using namespace Trinity::ChatCommands;

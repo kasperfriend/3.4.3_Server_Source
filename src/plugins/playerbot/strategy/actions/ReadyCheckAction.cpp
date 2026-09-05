@@ -49,11 +49,7 @@ bool ReadyCheckAction::ReadyCheck()
 
     if (bot->GetClass() == CLASS_HUNTER)
     {
-        if (!bot->GetUInt32Value(PLAYER_AMMO_ID))
-        {
-            ai->TellMaster("Out of ammo!");
-            return false;
-        }
+
 
         if (!bot->GetPet())
         {

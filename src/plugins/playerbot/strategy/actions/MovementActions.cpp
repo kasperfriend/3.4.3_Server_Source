@@ -154,9 +154,9 @@ bool MovementAction::IsMovingAllowed(uint32 mapId, float x, float y, float z)
 bool MovementAction::IsMovingAllowed()
 {
     if (bot->IsFrozen() || bot->IsPolymorphed() ||
-			(bot->isDead() && !bot->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_GHOST)) ||
+			(bot->isDead() && !bot->HasPlayerFlag(PLAYER_FLAGS_GHOST)) ||
             bot->IsBeingTeleported() ||
-            bot->IsRooted() ||
+            bot->HasUnitState(UNIT_STATE_ROOT) ||
             bot->HasAuraType(SPELL_AURA_MOD_CONFUSE) || bot->IsCharmed() ||
             bot->HasAuraType(SPELL_AURA_MOD_STUN) || bot->IsFlying())
         return false;

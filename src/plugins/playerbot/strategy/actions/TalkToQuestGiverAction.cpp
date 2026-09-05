@@ -50,7 +50,7 @@ void TalkToQuestGiverAction::RewardNoItem(Quest const* quest, WorldObject* quest
 {
     if (bot->CanRewardQuest(quest, false))
     {
-        bot->RewardQuest(quest, 0, questGiver, false);
+        bot->RewardQuest(quest, LootItemType::Item, 0, questGiver, false);
         out << "Completed";
     }
     else
@@ -63,9 +63,9 @@ void TalkToQuestGiverAction::RewardSingleItem(Quest const* quest, WorldObject* q
 {
     int index = 0;
     ItemTemplate const *item = sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[index]);
-    if (bot->CanRewardQuest(quest, index, false))
+    if (bot->CanRewardQuest(quest, LootItemType::Item, index, false))
     {
-        bot->RewardQuest(quest, index, questGiver, true);
+        bot->RewardQuest(quest, LootItemType::Item, index, questGiver, true);
 
         out << "Rewarded " << chat->formatItem(item);
     }
