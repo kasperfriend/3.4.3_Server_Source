@@ -22,8 +22,8 @@ list<ObjectGuid> AttackersValue::Calculate()
 	for (set<Unit*>::iterator i = targets.begin(); i != targets.end(); i++)
 		result.push_back((*i)->GetGUID());
 
-    if (bot->duel && bot->duel->opponent)
-        result.push_back(bot->duel->opponent->GetGUID());
+    if (bot->duel && bot->duel->Opponent)
+        result.push_back(bot->duel->Opponent->GetGUID());
 
 	return result;
 }
@@ -33,7 +33,7 @@ void AttackersValue::AddAttackersOf(Group* group, set<Unit*>& targets)
     Group::MemberSlotList const& groupSlot = group->GetMemberSlots();
     for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
     {
-        Player *member = sObjectMgr->GetPlayerByLowGUID(itr->guid);
+        Player *member = ObjectAccessor::FindPlayer(itr->guid);
         if (!member || !member->IsAlive() || member == bot)
             continue;
 
@@ -50,7 +50,7 @@ void AttackersValue::AddAttackersOf(Group* group, set<Unit*>& targets)
 
 void AttackersValue::AddAttackersOf(Unit* unit, set<Unit*>& targets)
 {
-    HostileRefManager& refManager = unit->getHostileRefManager();
+    HostileRefManager& refManager = unit->GetThreatManager();
     HostileReference *ref = refManager.getFirst();
     if (!ref)
         return;
@@ -88,7 +88,7 @@ bool AttackersValue::hasRealThreat(Unit *attacker)
         attacker->IsInWorld() &&
         attacker->IsAlive() &&
         !attacker->IsPolymorphed() &&
-        !attacker->isInRoots() &&
+        !attacker->IsRooted() &&
         !attacker->IsFriendlyTo(bot) &&
-        (attacker->getThreatManager().getCurrentVictim() || dynamic_cast<Player*>(attacker));
+        (attacker->GetThreatManager().getCurrentVictim() || dynamic_cast<Player*>(attacker));
 }

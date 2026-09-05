@@ -16,7 +16,7 @@ bool HasAggroValue::Calculate()
     if (!target)
         return true;
 
-    HostileReference *ref = bot->getHostileRefManager().getFirst();
+    HostileReference *ref = bot->GetThreatManager().getFirst();
     if (!ref)
         return true; // simulate as target is not atacking anybody yet
 
@@ -63,11 +63,11 @@ uint8 BalancePercentValue::Calculate()
         Group::MemberSlotList const& groupSlot = group->GetMemberSlots();
         for (Group::member_citerator itr = groupSlot.begin(); itr != groupSlot.end(); itr++)
         {
-            Player *player = sObjectMgr->GetPlayerByLowGUID(itr->guid);
+            Player *player = ObjectAccessor::FindPlayer(itr->guid);
             if( !player || !player->IsAlive())
                 continue;
 
-            playerLevel += player->getLevel();
+            playerLevel += player->GetLevel();
         }
     }
 

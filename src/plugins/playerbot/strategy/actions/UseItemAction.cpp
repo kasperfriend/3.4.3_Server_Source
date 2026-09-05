@@ -104,7 +104,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
         {
             uint32 targetFlag = TARGET_FLAG_UNIT_ENEMY;
             *packet << targetFlag;
-            packet->appendPackGUID(goGuid.GetRawValue());
+            *packet << goGuid;
             out << " on " << chat->formatGameobject(go);
             targetSelected = true;
         }
@@ -123,7 +123,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
         {
             uint32 targetFlag = TARGET_FLAG_ITEM;
             *packet << targetFlag;
-            packet->appendPackGUID(itemTarget->GetGUID());
+            packet-> operator<<(itemTarget->GetGUID());
             out << " on " << chat->formatItem(itemTarget->GetTemplate());
             targetSelected = true;
         }
@@ -137,7 +137,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
         {
             uint32 targetFlag = TARGET_FLAG_UNIT;
             *packet << targetFlag;
-            packet->appendPackGUID(masterSelection->GetGUID());
+            packet-> operator<<(masterSelection->GetGUID());
             out << " on " << masterSelection->GetName();
             targetSelected = true;
         }
@@ -167,7 +167,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     if (bot->isMoving())
         return false;
 
-    for (int i=0; i<MAX_ITEM_PROTO_SPELLS; i++)
+    for (int i=0; i<MAX_ITEM_PROTO_EFFECTS; i++)
     {
         uint32 spellId = item->GetTemplate()->Spells[i].SpellId;
         if (!spellId)
@@ -176,7 +176,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
         if (!ai->CanCastSpell(spellId, bot, false))
             continue;
 
-        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (pSpellInfo->Targets & TARGET_FLAG_ITEM)
         {
             Item* itemForSpell = AI_VALUE2(Item*, "item for spell", spellId);
@@ -198,7 +198,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
             else
             {
                 *packet << TARGET_FLAG_ITEM;
-                packet->appendPackGUID(itemForSpell->GetGUID());
+                packet-> operator<<(itemForSpell->GetGUID());
                 targetSelected = true;
                 out << " on "<< chat->formatItem(itemForSpell->GetTemplate());
             }
@@ -219,7 +219,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     if (!targetSelected)
         return false;
 
-    if (item->GetTemplate()->Class == ITEM_CLASS_CONSUMABLE && item->GetTemplate()->SubClass == ITEM_SUBCLASS_FOOD)
+    if (item->GetTemplate()->Class == ITEM_CLASS_CONSUMABLE && item->GetTemplate()->SubClass == ITEM_SUBCLASS_FOOD_DRINK)
     {
         if (bot->IsInCombat())
             return false;

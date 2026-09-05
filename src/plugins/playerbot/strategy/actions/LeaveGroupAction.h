@@ -2,6 +2,7 @@
 
 #include "../Action.h"
 #include "../../RandomPlayerbotMgr.h"
+#include "Server/Packets/PartyPackets.h"
 
 namespace ai
 {
@@ -16,10 +17,8 @@ namespace ai
 
             ai->TellMaster("Goodbye!", PLAYERBOT_SECURITY_TALK);
 
-            WorldPacket p;
-            string member = bot->GetName();
-            p << uint32(PARTY_OP_LEAVE) << member << uint32(0);
-            bot->GetSession()->HandleGroupDisbandOpcode(p);
+            WorldPackets::Party::LeaveGroup leave(WorldPacket(CMSG_LEAVE_GROUP));
+            bot->GetSession()->HandleLeaveGroupOpcode(leave);
 
             if (sRandomPlayerbotMgr.IsRandomBot(bot))
             {

@@ -121,7 +121,7 @@ uint32 OpenLootAction::GetOpeningSpell(LootObject& lootObject, GameObject* go)
     {
         uint32 spellId = itr->first;
 
-        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 
@@ -140,7 +140,7 @@ uint32 OpenLootAction::GetOpeningSpell(LootObject& lootObject, GameObject* go)
         if (spellId == MINING || spellId == HERB_GATHERING)
             continue;
 
-        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 
@@ -155,7 +155,7 @@ bool OpenLootAction::CanOpenLock(LootObject& lootObject, const SpellInfo* pSpell
 {
     for (int effIndex = 0; effIndex <= EFFECT_2; effIndex++)
     {
-        if (pSpellInfo->Effects[effIndex].Effect != SPELL_EFFECT_OPEN_LOCK && pSpellInfo->Effects[effIndex].Effect != SPELL_EFFECT_SKINNING)
+        if (pSpellInfo->GetEffect(SpellEffIndex(effIndex)).Effect != SPELL_EFFECT_OPEN_LOCK && pSpellInfo->GetEffect(SpellEffIndex(effIndex)).Effect != SPELL_EFFECT_SKINNING)
             return false;
 
         uint32 lockId = go->GetGOInfo()->GetLockId();
@@ -178,7 +178,7 @@ bool OpenLootAction::CanOpenLock(LootObject& lootObject, const SpellInfo* pSpell
             */
             case LOCK_KEY_SKILL:
                 {
-                    if(uint32(pSpellInfo->Effects[effIndex].MiscValue) != lockInfo->Index[j])
+                    if(uint32(pSpellInfo->GetEffect(SpellEffIndex(effIndex)).MiscValue) != lockInfo->Index[j])
                         continue;
 
                     uint32 skillId = SkillByLockType(LockType(lockInfo->Index[j]));
@@ -304,14 +304,14 @@ bool StoreLootAction::IsLootAllowed(uint32 itemid)
     if (!proto)
         return false;
 
-    uint32 max = proto->MaxCount;
+    uint32 max = proto->GetMaxCount();
     if (max > 0 && bot->HasItemCount(itemid, max, true))
         return false;
 
-    if (proto->StartQuest ||
-        proto->Bonding == BIND_QUEST_ITEM ||
-        proto->Bonding == BIND_QUEST_ITEM1 ||
-        proto->Class == ITEM_CLASS_QUEST)
+    if (proto->GetStartQuest() ||
+        proto->GetBonding() == BIND_QUEST ||
+        proto->GetBonding() == BIND_QUEST_ITEM1 ||
+        proto->GetClass() == ITEM_CLASS_QUEST)
         return true;
 
     if (lootStrategy == LOOTSTRATEGY_QUEST)
@@ -325,13 +325,13 @@ bool StoreLootAction::IsLootAllowed(uint32 itemid)
     if (lootStrategy == LOOTSTRATEGY_SKILL)
         return false;
 
-    if (proto->Class == ITEM_CLASS_MONEY || proto->Quality == ITEM_QUALITY_POOR)
+    if (proto->GetClass() == ITEM_CLASS_MONEY || proto->GetQuality() == ITEM_QUALITY_POOR)
         return true;
 
     if (lootStrategy == LOOTSTRATEGY_GRAY)
         return true;
 
-    if (proto->Bonding == BIND_WHEN_PICKED_UP)
+    if (proto->GetBonding() == BIND_ON_ACQUIRE)
         return false;
 
     return true;

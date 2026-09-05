@@ -33,7 +33,7 @@ bool LootRollAction::Execute(Event event)
             if (!proto)
                 continue;
 
-            switch (proto->Class)
+            switch (proto->GetClass())
             {
             case ITEM_CLASS_WEAPON:
             case ITEM_CLASS_ARMOR:

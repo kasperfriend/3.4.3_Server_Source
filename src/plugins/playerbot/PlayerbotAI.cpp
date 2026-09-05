@@ -137,7 +137,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed)
             *GetAiObjectContext()->GetValue<bool>("invalid target", "current target"))
     {
         Spell* spell = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-        if (spell && !spell->GetSpellInfo()->IsPositive())
+        if (spell && !spell->GetSpellInfo(, DIFFICULTY_NONE)->IsPositive())
         {
             InterruptSpell();
             SetNextCheckDelay(sPlayerbotAIConfig.globalCoolDown);
@@ -401,13 +401,13 @@ void PlayerbotAI::ChangeEngine(BotState type)
         switch (type)
         {
         case BOT_STATE_COMBAT:
-            TC_LOG_DEBUG("playerbot",  "=== %s COMBAT ===", bot->GetName().c_str());;
+            TC_LOG_DEBUG("playerbot",  "=== {} COMBAT ===", bot->GetName().c_str());
             break;
         case BOT_STATE_NON_COMBAT:
-            TC_LOG_DEBUG("playerbot",  "=== %s NON-COMBAT ===", bot->GetName().c_str());;
+            TC_LOG_DEBUG("playerbot",  "=== {} NON-COMBAT ===", bot->GetName().c_str());
             break;
         case BOT_STATE_DEAD:
-            TC_LOG_DEBUG("playerbot",  "=== %s DEAD ===", bot->GetName().c_str());;
+            TC_LOG_DEBUG("playerbot",  "=== {} DEAD ===", bot->GetName().c_str());
             break;
         }
     }
@@ -426,7 +426,7 @@ void PlayerbotAI::DoNextAction()
 
         // TODO
         //WorldPacket packet(CMSG_MOVE_SET_FLY);
-        //packet.appendPackGUID(bot->GetGUID());
+        //packet << bot->GetGUID();
         //packet << bot->m_movementInfo;
         bot->SetMover(bot);
         //bot->GetSession()->HandleMovementOpcodes(packet);
@@ -525,7 +525,7 @@ void PlayerbotAI::DoSpecificAction(string name)
 
 bool PlayerbotAI::PlaySound(uint32 emote)
 {
-    if (EmotesTextSoundEntry const* soundEntry = FindTextSoundEmoteFor(emote, bot->getRace(), bot->getGender()))
+    if (EmotesTextSoundEntry const* soundEntry = FindTextSoundEmoteFor(emote, bot->GetRace(), bot->GetNativeGender()))
     {
         bot->PlayDistanceSound(soundEntry->SoundId);
         return true;
@@ -565,7 +565,7 @@ bool PlayerbotAI::IsRanged(Player* player)
     if (botAi)
         return botAi->ContainsStrategy(STRATEGY_TYPE_RANGED);
 
-    switch (player->getClass())
+    switch (player->GetClass())
     {
     case CLASS_DEATH_KNIGHT:
     case CLASS_PALADIN:
@@ -584,7 +584,7 @@ bool PlayerbotAI::IsTank(Player* player)
     if (botAi)
         return botAi->ContainsStrategy(STRATEGY_TYPE_TANK);
 
-    switch (player->getClass())
+    switch (player->GetClass())
     {
     case CLASS_DEATH_KNIGHT:
     case CLASS_PALADIN:
@@ -602,7 +602,7 @@ bool PlayerbotAI::IsHeal(Player* player)
     if (botAi)
         return botAi->ContainsStrategy(STRATEGY_TYPE_HEAL);
 
-    switch (player->getClass())
+    switch (player->GetClass())
     {
     case CLASS_PRIEST:
         return true;
@@ -716,7 +716,7 @@ bool PlayerbotAI::TellMaster(string text, PlayerbotSecurityLevel securityLevel)
     if (!bot->isMoving() && !bot->IsInCombat() && bot->GetMapId() == master->GetMapId())
     {
         if (!bot->isInFront(master, M_PI / 2))
-            bot->SetFacingTo(bot->GetAngle(master));
+            bot->SetFacingTo(bot->GetAbsoluteAngle(master));
 
         bot->HandleEmoteCommand(EMOTE_ONESHOT_TALK);
     }
@@ -733,10 +733,10 @@ bool IsRealAura(Player* bot, Aura const* aura, Unit* unit)
         return true;
 
     uint32 stacks = aura->GetStackAmount();
-    if (stacks >= aura->GetSpellInfo()->StackAmount)
+    if (stacks >= aura->GetSpellInfo(, DIFFICULTY_NONE)->StackAmount)
         return true;
 
-    if (aura->GetCaster() == bot || aura->GetSpellInfo()->IsPositive() || aura->IsArea())
+    if (aura->GetCaster() == bot || aura->GetSpellInfo(, DIFFICULTY_NONE)->IsPositive() || aura->IsArea())
         return true;
 
     return false;
@@ -764,7 +764,7 @@ bool PlayerbotAI::HasAura(string name, Unit* unit)
         if (!aura)
             continue;
 
-        const string auraName = aura->GetSpellInfo()->SpellName[0];
+        const string auraName = aura->GetSpellInfo(, DIFFICULTY_NONE)->SpellName[0];
         if (auraName.empty() || auraName.length() != wnamepart.length() || !Utf8FitTo(auraName, wnamepart))
             continue;
 
@@ -832,7 +832,7 @@ bool PlayerbotAI::CanCastSpell(uint32 spellid, Unit* target, bool checkHasSpell)
     if (bot->GetSpellHistory()->HasCooldown(spellid))
         return false;
 
-    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid );
+    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid, DIFFICULTY_NONE);
     if (!spellInfo)
         return false;
 
@@ -903,7 +903,7 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
         target = bot;
 
     Pet* pet = bot->GetPet();
-    const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+    const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
     if (pet && pet->HasSpell(spellId))
     {
         pet->GetCharmInfo()->SetSpellAutocast(pSpellInfo, true);
@@ -951,8 +951,8 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
         targets.SetItemTarget(spell->m_CastItem);
     }
 
-    if (pSpellInfo->Effects[0].Effect == SPELL_EFFECT_OPEN_LOCK ||
-        pSpellInfo->Effects[0].Effect == SPELL_EFFECT_SKINNING)
+    if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_OPEN_LOCK ||
+        pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_SKINNING)
     {
         LootObject loot = *aiObjectContext->GetValue<LootObject>("loot target");
         if (!loot.IsLootPossible(bot))
@@ -984,7 +984,7 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
 
     if (!bot->isInFront(faceTo, M_PI / 2))
     {
-        bot->SetFacingTo(bot->GetAngle(faceTo));
+        bot->SetFacingTo(bot->GetAbsoluteAngle(faceTo));
         delete spell;
         SetNextCheckDelay(sPlayerbotAIConfig.globalCoolDown);
         return false;
@@ -1002,7 +1002,7 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
 
 void PlayerbotAI::WaitForSpellCast(Spell *spell)
 {
-    const SpellInfo* const pSpellInfo = spell->GetSpellInfo();
+    const SpellInfo* const pSpellInfo = spell->GetSpellInfo(, DIFFICULTY_NONE);
 
     float castTime = spell->GetCastTime();
     if (pSpellInfo->IsChanneled())
@@ -1073,7 +1073,7 @@ bool PlayerbotAI::IsInterruptableSpellCasting(Unit* target, string spell)
     if (!spellid || !target->IsNonMeleeSpellCast(true))
         return false;
 
-    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid );
+    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid, DIFFICULTY_NONE);
     if (!spellInfo)
         return false;
 
@@ -1085,7 +1085,7 @@ bool PlayerbotAI::IsInterruptableSpellCasting(Unit* target, string spell)
         if ((spellInfo->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) && spellInfo->PreventionType == SPELL_PREVENTION_TYPE_SILENCE)
             return true;
 
-        if ((spellInfo->Effects[i].Effect == SPELL_EFFECT_REMOVE_AURA || spellInfo->Effects[i].Effect == SPELL_EFFECT_INTERRUPT_CAST) &&
+        if ((spellInfo->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_REMOVE_AURA || spellInfo->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_INTERRUPT_CAST) &&
                 !target->IsImmunedToSpellEffect(spellInfo, i))
             return true;
     }
@@ -1101,7 +1101,7 @@ bool PlayerbotAI::HasAuraToDispel(Unit* target, uint32 dispelType)
         for (Unit::AuraEffectList::const_iterator itr = auras.begin(); itr != auras.end(); ++itr)
         {
             const AuraEffect *const aura = *itr;
-			const SpellInfo* entry = aura->GetSpellInfo();
+			const SpellInfo* entry = aura->GetSpellInfo(, DIFFICULTY_NONE);
             uint32 spellId = entry->Id;
 
             bool isPositiveSpell = entry->IsPositive();
@@ -1149,7 +1149,7 @@ bool IsAlliance(uint8 race)
 
 bool PlayerbotAI::IsOpposing(Player* player)
 {
-    return IsOpposing(player->getRace(), bot->getRace());
+    return IsOpposing(player->GetRace(), bot->GetRace());
 }
 
 bool PlayerbotAI::IsOpposing(uint8 race1, uint8 race2)
@@ -1263,8 +1263,8 @@ void PlayerbotAI::_fillGearScoreData(Player *player, Item* item, std::vector<uin
     if (player->CanUseItem(item->GetTemplate()) != EQUIP_ERR_OK)
         return;
 
-    uint8 type   = item->GetTemplate()->InventoryType;
-    uint32 level = item->GetTemplate()->ItemLevel;
+    uint8 type   = item->GetTemplate()->GetInventoryType();
+    uint32 level = item->GetTemplate()->GetItemLevel();
 
     switch (type)
     {

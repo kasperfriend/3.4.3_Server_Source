@@ -41,7 +41,7 @@ void TrainerAction::List(Creature* creature, TrainerSpellAction action, SpellIds
             continue;
 
         uint32 spellId = tSpell->spell;
-        const SpellInfo *const pSpellInfo =  sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo *const pSpellInfo =  sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 

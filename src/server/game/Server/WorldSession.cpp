@@ -43,6 +43,7 @@
 #include "ObjectMgr.h"
 #include "OutdoorPvPMgr.h"
 #include "PacketUtilities.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "Player.h"
 #include "QueryHolder.h"
 #include "Random.h"
@@ -227,6 +228,14 @@ void WorldSession::SendPacket(WorldPacket const* packet, bool forced /*= false*/
         return;
     }
 
+    // playerbot mod: bots have no socket, hand the packet over to their AI instead
+    if (_isBotSession)
+    {
+        if (_player && _player->GetPlayerbotAI())
+            Playerbot::OnBotPacketSent(_player, packet);
+        return;
+    }
+
     ServerOpcodeHandler const* handler = opcodeTable[static_cast<OpcodeServer>(packet->GetOpcode())];
 
     if (!handler)
@@ -311,6 +320,43 @@ void WorldSession::QueuePacket(WorldPacket* new_packet)
     _recvQueue.add(new_packet);
 }
 
+// playerbot mod: bot sessions are not part of the world session map, the bot
+// manager pumps them through this method instead of WorldSession::Update
+void WorldSession::HandleBotPackets()
+{
+    WorldSessionFilter updater(this);
+    WorldPacket* packet = nullptr;
+    uint32 processedPackets = 0;
+    while (_recvQueue.next(packet, updater))
+    {
+        OpcodeClient opcode = static_cast<OpcodeClient>(packet->GetOpcode());
+        if (ClientOpcodeHandler const* opHandle = opcodeTable[opcode])
+        {
+            try
+            {
+                opHandle->Call(this, *packet);
+            }
+            catch (std::exception const& e)
+            {
+                TC_LOG_ERROR("playerbot", "Exception while handling bot packet {}: {}",
+                    GetOpcodeNameForLogging(opcode), e.what());
+            }
+            catch (...)
+            {
+                TC_LOG_ERROR("playerbot", "Unknown exception while handling bot packet {}",
+                    GetOpcodeNameForLogging(opcode));
+            }
+        }
+
+        delete packet;
+
+        if (++processedPackets > 100)
+            break;
+    }
+
+    ProcessQueryCallbacks();
+}
+
 /// Logging helper for unexpected opcodes
 void WorldSession::LogUnexpectedOpcode(WorldPacket* packet, char const* status, const char *reason)
 {
@@ -335,7 +381,7 @@ bool WorldSession::Update(uint32 diff, PacketFilter& updater)
     ///- Before we process anything:
     /// If necessary, kick the player because the client didn't send anything for too long
     /// (or they've been idling in character select)
-    if (IsConnectionIdle() && !HasPermission(rbac::RBAC_PERM_IGNORE_IDLE_CONNECTION))
+    if (m_Socket[CONNECTION_TYPE_REALM] && IsConnectionIdle() && !HasPermission(rbac::RBAC_PERM_IGNORE_IDLE_CONNECTION))
         m_Socket[CONNECTION_TYPE_REALM]->CloseSocket();
 
     ///- Retrieve packets from the receive queue and call the appropriate handlers
@@ -657,6 +703,7 @@ void WorldSession::LogoutPlayer(bool save)
 
         //! Call script hook before deletion
         sScriptMgr->OnPlayerLogout(_player);
+        Playerbot::OnPlayerLogout(_player);
 
         TC_METRIC_EVENT("player_events", "Logout", _player->GetName());
 

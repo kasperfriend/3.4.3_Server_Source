@@ -34,7 +34,7 @@ bool TellAttackersAction::Execute(Event event)
     }
 
     ai->TellMaster("--- Threat ---");
-    HostileReference *ref = bot->getHostileRefManager().getFirst();
+    HostileReference *ref = bot->GetThreatManager().getFirst();
     if (!ref)
         return true;
 
@@ -42,7 +42,7 @@ bool TellAttackersAction::Execute(Event event)
     {
         ThreatManager *threatManager = ref->GetSource();
         Unit *unit = threatManager->GetOwner();
-        float threat = ref->getThreat();
+        float threat = ref->GetThreat();
 
         ostringstream out; out << unit->GetName() << " (" << threat << ")";
         ai->TellMaster(out);

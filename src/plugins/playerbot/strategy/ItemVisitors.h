@@ -75,7 +75,7 @@ namespace ai
 
         virtual bool Visit(Item* item)
         {
-            if (item->GetTemplate()->Quality != quality)
+            if (item->GetTemplate()->GetQuality() != quality)
                 return true;
 
             if (result.size() >= (size_t)count)
@@ -121,7 +121,7 @@ namespace ai
             if (item->IsSoulBound())
                 return true;
 
-            if (item->GetTemplate()->Class != itemClass || item->GetTemplate()->SubClass != itemSubClass)
+            if (item->GetTemplate()->GetClass() != itemClass || item->GetTemplate()->GetSubClass() != itemSubClass)
                 return true;
 
             if (result.size() >= (size_t)count)
@@ -251,7 +251,7 @@ namespace ai
 
         virtual bool Visit(Item* item)
         {
-            count[item->GetTemplate()->Quality]++;
+            count[item->GetTemplate()->GetQuality()]++;
             return true;
         }
 

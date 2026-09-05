@@ -24,7 +24,7 @@ bool ListSpellsAction::Execute(Event event)
     for (PlayerSpellMap::iterator itr = bot->GetSpellMap().begin(); itr != bot->GetSpellMap().end(); ++itr) {
         const uint32 spellId = itr->first;
 
-        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
+        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!pSpellInfo)
             continue;
 

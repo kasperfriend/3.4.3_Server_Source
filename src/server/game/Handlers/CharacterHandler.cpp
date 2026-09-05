@@ -50,6 +50,7 @@
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "Pet.h"
 #include "Player.h"
 #include "PlayerDump.h"
@@ -1033,6 +1034,31 @@ void WorldSession::HandleContinuePlayerLogin()
     });
 }
 
+// playerbot mod: log a character in on a socket-less bot session
+void WorldSession::LoginBotPlayer(ObjectGuid guid)
+{
+    if (PlayerLoading() || GetPlayer())
+    {
+        TC_LOG_ERROR("playerbot", "Bot session {} tried to login {} while another login is in progress",
+            GetAccountId(), guid.ToString());
+        return;
+    }
+
+    m_playerLoading = guid;
+
+    std::shared_ptr<LoginQueryHolder> holder = std::make_shared<LoginQueryHolder>(GetAccountId(), guid);
+    if (!holder->Initialize())
+    {
+        m_playerLoading.Clear();
+        return;
+    }
+
+    AddQueryHolderCallback(CharacterDatabase.DelayQueryHolder(holder)).AfterComplete([this](SQLQueryHolderBase const& holder)
+    {
+        HandlePlayerLogin(static_cast<LoginQueryHolder const&>(holder));
+    });
+}
+
 void WorldSession::AbortLogin(WorldPackets::Character::LoginFailureReason reason)
 {
     if (!PlayerLoading() || GetPlayer())
@@ -1374,6 +1400,7 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     _player->UpdateCriteria(CriteriaType::Login, 1);
 
     sScriptMgr->OnPlayerLogin(pCurrChar, firstLogin);
+    Playerbot::OnPlayerLogin(pCurrChar);
 
     TC_METRIC_EVENT("player_events", "Login", pCurrChar->GetName());
 }

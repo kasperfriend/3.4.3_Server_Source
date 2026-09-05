@@ -19,8 +19,8 @@ bool TeleportAction::Execute(Event event)
             continue;
 
         uint32 spellId = goInfo->spellcaster.spellId;
-        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId);
-        if (pSpellInfo->Effects[0].Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->Effects[1].Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->Effects[2].Effect != SPELL_EFFECT_TELEPORT_UNITS)
+        const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
+        if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->GetEffect(SpellEffIndex(1)).Effect != SPELL_EFFECT_TELEPORT_UNITS && pSpellInfo->GetEffect(SpellEffIndex(2)).Effect != SPELL_EFFECT_TELEPORT_UNITS)
             continue;
 
         ostringstream out; out << "Teleporting using " << goInfo->name;

@@ -55,9 +55,9 @@ bool EquipAction::UseEquipmentSet(EquipmentSet& set)
         ObjectGuid guid;
         uint32 itemId = set.Items[slot];
         if (set.IgnoreMask & (1 << slot))
-            p->appendPackGUID((uint64(1)));
+            p-> operator<<((uint64(1)));
         else
-            p->appendPackGUID(itemId);
+            p-> operator<<(itemId);
         *p << srcbag << slot;
     }
     bot->GetSession()->QueuePacket(p);
@@ -87,9 +87,9 @@ void EquipAction::EquipItem(Item& item)
 {
     uint8 bagIndex = item.GetBagSlot();
     uint8 slot = item.GetSlot();
-    uint32 itemId = item.GetTemplate()->ItemId;
+    uint32 itemId = item.GetTemplate()->GetId();
 
-    if (item.GetTemplate()->InventoryType == INVTYPE_AMMO)
+    if (item.GetTemplate()->GetInventoryType() == INVTYPE_AMMO)
     {
         bot->SetAmmo(itemId);
     }

@@ -44,7 +44,7 @@ ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
     consumableSubClasses["elixir"] = ITEM_SUBCLASS_ELIXIR;
     consumableSubClasses["flask"] = ITEM_SUBCLASS_FLASK;
     consumableSubClasses["scroll"] = ITEM_SUBCLASS_SCROLL;
-    consumableSubClasses["food"] = ITEM_SUBCLASS_FOOD;
+    consumableSubClasses["food"] = ITEM_SUBCLASS_FOOD_DRINK;
     consumableSubClasses["bandage"] = ITEM_SUBCLASS_BANDAGE;
     consumableSubClasses["enchant"] = ITEM_SUBCLASS_CONSUMABLE_OTHER;
 
@@ -234,7 +234,7 @@ ItemIds ChatHelper::parseItems(string& text)
 string ChatHelper::formatQuest(Quest const* quest)
 {
     ostringstream out;
-    out << "|cFFFFFF00|Hquest:" << quest->GetQuestId() << ':' << quest->GetQuestLevel() << "|h[" << quest->GetTitle() << "]|h|r";
+    out << "|cFFFFFF00|Hquest:" << quest->GetQuestId() << ':' << quest->GetQuestLevel() << "|h[" << quest->GetLogTitle() << "]|h|r";
     return out.str();
 }
 
@@ -255,11 +255,11 @@ string ChatHelper::formatSpell(SpellInfo const *sInfo)
 string ChatHelper::formatItem(ItemTemplate const * proto, int count)
 {
     char color[32];
-    sprintf(color, "%x", ItemQualityColors[proto->Quality]);
+    sprintf(color, "%x", ItemQualityColors[proto->GetQuality()]);
 
     ostringstream out;
-    out << "|c" << color << "|Hitem:" << proto->ItemId
-        << ":0:0:0:0:0:0:0" << "|h[" << proto->Name1
+    out << "|c" << color << "|Hitem:" << proto->GetId()
+        << ":0:0:0:0:0:0:0" << "|h[" << proto->GetDefaultLocaleName()
         << "]|h|r";
 
     if (count > 1)
@@ -406,7 +406,7 @@ bool ChatHelper::parseable(string text)
 
 string ChatHelper::formatClass(Player* player, int spec)
 {
-    uint8 cls = player->getClass();
+    uint8 cls = player->GetClass();
 
     ostringstream out;
     out << specs[cls][spec] << " (";
@@ -425,7 +425,7 @@ string ChatHelper::formatClass(Player* player, int spec)
         if (!talentInfo)
             continue;
 
-        uint32 const* talentTabIds = GetTalentTabPages(player->getClass());
+        uint32 const* talentTabIds = GetTalentTabPages(player->GetClass());
         if (talentInfo->TalentTab == talentTabIds[0]) c0++;
         if (talentInfo->TalentTab == talentTabIds[1]) c1++;
         if (talentInfo->TalentTab == talentTabIds[2]) c2++;

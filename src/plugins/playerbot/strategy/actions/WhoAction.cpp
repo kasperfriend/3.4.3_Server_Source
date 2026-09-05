@@ -88,7 +88,7 @@ string WhoAction::QuerySkill(string text)
             ObjectGuid guid = bot->GetGUID();
             string data = "0";
             out << "|cFFFFFF00|Htrade:" << spellId << ":" << value << ":" << maxSkill << ":"
-                    << std::hex << std::uppercase << guid.GetRawValue()
+                    << guid.ToString()
                     << std::nouppercase << std::dec << ":" << data
                     << "|h[" << skills[skill] << "]|h|r"
                     << " |h|cff00ff00" << value << "|h|cffffffff/"
@@ -105,7 +105,7 @@ string WhoAction::QuerySpec(string text)
 
     int spec = AiFactory::GetPlayerSpecTab(bot);
     out << "|h|cffffffff" << chat->formatClass(bot, spec);
-    out << " (|h|cff00ff00" << (uint32)bot->getLevel() << "|h|cffffffff lvl), ";
+    out << " (|h|cff00ff00" << (uint32)bot->GetLevel() << "|h|cffffffff lvl), ";
     out << "|h|cff00ff00" << ai->GetEquipGearScore(bot, false, false) << "|h|cffffffff GS (";
 
     ItemCountByQuality visitor;

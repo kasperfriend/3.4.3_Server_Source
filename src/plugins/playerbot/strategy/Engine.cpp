@@ -504,7 +504,7 @@ void Engine::LogAction(const char* format, ...)
         if (sPlayerbotAIConfig.logInGroupOnly && !bot->GetGroup())
             return;
 
-        TC_LOG_DEBUG("playerbot",  "%s %s", bot->GetName().c_str(), buf);;
+        TC_LOG_DEBUG("playerbot",  "{} {}", bot->GetName().c_str(), buf);
     }
 }
 
@@ -542,5 +542,5 @@ void Engine::LogValues()
         return;
 
     string text = ai->GetAiObjectContext()->FormatValues();
-    TC_LOG_DEBUG("playerbot",  "Values for %s: %s", bot->GetName().c_str(), text.c_str());;
+    TC_LOG_DEBUG("playerbot",  "Values for {}: {}", bot->GetName().c_str(), text.c_str());
 }

@@ -116,13 +116,13 @@ void BankAction::ListItems()
         if (pBag)
         {
             const ItemTemplate* const pBagProto = pBag->GetTemplate();
-            std::string bagName = pBagProto->Name1;
+            std::string bagName = pBagProto->GetDefaultLocaleName();
 
             for (uint8 slot = 0; slot < pBag->GetBagSize(); ++slot)
             {
                 Item* const item = bot->GetItemByPos(bag, slot);
                 if (item)
-                    items[item->GetTemplate()->ItemId] = item->GetCount();
+                    items[item->GetTemplate()->GetId()] = item->GetCount();
             }
         }
     }
@@ -141,7 +141,7 @@ Item* BankAction::FindItemInBank(uint32 ItemId)
             if (!pItemProto)
                 continue;
 
-            if (pItemProto->ItemId == ItemId)   // have required item
+            if (pItemProto->GetId() == ItemId)   // have required item
                 return pItem;
         }
     }
@@ -159,7 +159,7 @@ Item* BankAction::FindItemInBank(uint32 ItemId)
                     if (!pItemProto)
                         continue;
 
-                    if (pItemProto->ItemId == ItemId)
+                    if (pItemProto->GetId() == ItemId)
                         return pItem;
                 }
             }

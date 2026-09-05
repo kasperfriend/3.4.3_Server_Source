@@ -66,8 +66,8 @@ bool AttackAction::Attack(Unit* target)
 
     if (bot->IsMounted())
     {
-        WorldPacket emptyPacket;
-        bot->GetSession()->HandleCancelMountAuraOpcode(emptyPacket);
+        WorldPackets::Spells::CancelMountAura cancelMount(WorldPacket(CMSG_CANCEL_MOUNT_AURA));
+        bot->GetSession()->HandleCancelMountAuraOpcode(cancelMount);
     }
 
     ObjectGuid guid = target->GetGUID();
@@ -83,7 +83,7 @@ bool AttackAction::Attack(Unit* target)
     if (pet)
     {
         pet->SetTarget(target->GetGUID());
-        pet->AI()->EnterCombat(target);
+        pet->AI()->JustEngagedWith(target);
 		pet->GetCharmInfo()->SetIsCommandAttack(true);
 		pet->AI()->AttackStart(target);
     }

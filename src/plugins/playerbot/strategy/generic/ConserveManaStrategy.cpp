@@ -58,7 +58,7 @@ float SaveManaMultiplier::GetValue(Action* action)
 
     string spell = spellAction->getName();
     uint32 spellId = AI_VALUE2(uint32, "spell id", spell);
-    const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(spellId);
+    const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
     if (!spellInfo || spellInfo->PowerType != POWER_MANA)
         return 1.0f;
 

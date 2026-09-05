@@ -20,7 +20,7 @@ bool SaveManaAction::Execute(Event event)
 
     if (text == "*")
     {
-        switch (bot->getClass())
+        switch (bot->GetClass())
         {
         case CLASS_HUNTER:
         case CLASS_SHAMAN:

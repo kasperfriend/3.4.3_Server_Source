@@ -38,7 +38,7 @@ bool SuggestWhatToDoAction::Execute(Event event)
 
 void SuggestWhatToDoAction::instance()
 {
-    uint32 level = bot->getLevel();
+    uint32 level = bot->GetLevel();
     if (level > 15)
     {
         switch (urand(0, 5))
@@ -107,7 +107,7 @@ void SuggestWhatToDoAction::newQuest()
 
 void SuggestWhatToDoAction::grindMaterials()
 {
-    if (bot->getLevel() <= 5)
+    if (bot->GetLevel() <= 5)
         return;
 
     switch (urand(0, 5))
@@ -128,7 +128,7 @@ void SuggestWhatToDoAction::grindMaterials()
 
 void SuggestWhatToDoAction::grindReputation()
 {
-    if (bot->getLevel() > 15)
+    if (bot->GetLevel() > 15)
         ai->TellMasterNoFacing("I think we should do something to improve our reputation", PLAYERBOT_SECURITY_ALLOW_ALL);
 }
 
@@ -144,7 +144,7 @@ void SuggestWhatToDoAction::relax()
 
 void SuggestWhatToDoAction::achievement()
 {
-    if (bot->getLevel() > 15)
+    if (bot->GetLevel() > 15)
         spam("I would like to get some achievement. Would you like to join me?");
 }
 
@@ -156,16 +156,16 @@ public:
     virtual bool Visit(Item* item)
     {
         ItemTemplate const* proto = item->GetTemplate();
-        if (proto->Quality != quality)
+        if (proto->GetQuality() != quality)
             return true;
 
-        if (proto->Class == ITEM_CLASS_TRADE_GOODS && proto->Bonding == NO_BIND)
+        if (proto->GetClass() == ITEM_CLASS_TRADE_GOODS && proto->GetBonding() == BIND_NONE)
         {
-            if(proto->Quality == ITEM_QUALITY_NORMAL && item->GetCount() > 1 && item->GetCount() == item->GetMaxStackCount())
-                stacks.push_back(proto->ItemId);
+            if(proto->GetQuality() == ITEM_QUALITY_NORMAL && item->GetCount() > 1 && item->GetCount() == item->GetMaxStackCount())
+                stacks.push_back(proto->GetId());
 
-            items.push_back(proto->ItemId);
-            count[proto->ItemId] += item->GetCount();
+            items.push_back(proto->GetId());
+            count[proto->GetId()] += item->GetCount();
         }
 
         return true;

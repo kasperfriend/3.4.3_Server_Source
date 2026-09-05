@@ -47,7 +47,7 @@ PlayerbotSecurityLevel PlayerbotSecurity::LevelFor(Player* from, DenyReason* rea
             }
         }
 
-        if ((int)bot->getLevel() - (int)from->getLevel() > 5)
+        if ((int)bot->GetLevel() - (int)from->GetLevel() > 5)
         {
             if (reason) *reason = PLAYERBOT_DENY_LOW_LEVEL;
             return PLAYERBOT_SECURITY_TALK;
@@ -64,7 +64,7 @@ PlayerbotSecurityLevel PlayerbotSecurity::LevelFor(Player* from, DenyReason* rea
 
         int botGS = (int)bot->GetPlayerbotAI()->GetEquipGearScore(bot, false, false);
         int fromGS = (int)bot->GetPlayerbotAI()->GetEquipGearScore(from, false, false);
-        if (botGS && bot->getLevel() > 15 && (100 * (botGS - fromGS) / botGS) >= 20)
+        if (botGS && bot->GetLevel() > 15 && (100 * (botGS - fromGS) / botGS) >= 20)
         {
             if (reason) *reason = PLAYERBOT_DENY_GEARSCORE;
             return PLAYERBOT_SECURITY_TALK;
@@ -130,7 +130,7 @@ bool PlayerbotSecurity::CheckLevelFor(PlayerbotSecurityLevel level, bool silent,
             out << "I'll do it later";
             break;
         case PLAYERBOT_DENY_LOW_LEVEL:
-            out << "You are too low level: |cffff0000" << (uint32)from->getLevel() << "|cffffffff/|cff00ff00" << (uint32)bot->getLevel();
+            out << "You are too low level: |cffff0000" << (uint32)from->GetLevel() << "|cffffffff/|cff00ff00" << (uint32)bot->GetLevel();
             break;
         case PLAYERBOT_DENY_GEARSCORE:
             {
@@ -164,7 +164,7 @@ bool PlayerbotSecurity::CheckLevelFor(PlayerbotSecurityLevel level, bool silent,
 					const AreaTableEntry* entry = sAreaTableStore.LookupEntry(area);
                     if (entry)
                     {
-                        out << " |cffffffff(|cffff0000" << entry->area_name[0] << "|cffffffff)";
+                        out << " |cffffffff(|cffff0000" << entry->AreaName[LOCALE_enUS] << "|cffffffff)";
                     }
                 }
             }

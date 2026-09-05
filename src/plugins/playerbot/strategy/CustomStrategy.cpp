@@ -15,7 +15,7 @@ NextAction* toNextAction(string action)
     else if (tokens.size() == 1)
         return new NextAction(tokens[0], ACTION_NORMAL);
 
-    TC_LOG_ERROR("playerbot",  "Invalid action '%s'", action);;
+    TC_LOG_ERROR("playerbot",  "Invalid action '{}'", action);
     return NULL;
 }
 
@@ -38,7 +38,7 @@ TriggerNode* toTriggerNode(string actionLine)
     if (tokens.size() == 2)
         return new TriggerNode(tokens[0], toNextActionArray(tokens[1]));
 
-    TC_LOG_ERROR("playerbot",  "Invalid action line '%s'", actionLine);;
+    TC_LOG_ERROR("playerbot",  "Invalid action line '{}'", actionLine);
     return NULL;
 }
 

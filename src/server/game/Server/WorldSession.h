@@ -1016,6 +1016,15 @@ class TC_GAME_API WorldSession
         void QueuePacket(WorldPacket* new_packet);
         bool Update(uint32 diff, PacketFilter& updater);
 
+        // playerbot mod (ported from ike3/mangosbot):
+        // bot sessions have no socket, they are owned and updated by the bot manager
+        void SetBotSession(bool isBot) { _isBotSession = isBot; }
+        bool IsBotSession() const { return _isBotSession; }
+        /// process everything a socket-less bot session needs (queued packets + db callbacks)
+        void HandleBotPackets();
+        /// synchronously start loading a character into this (bot) session
+        void LoginBotPlayer(ObjectGuid guid);
+
         /// Handle the authentication waiting queue (to be completed)
         void SendAuthWaitQueue(uint32 position);
 
@@ -1841,6 +1850,7 @@ class TC_GAME_API WorldSession
 
         ObjectGuid::LowType m_GUIDLow;                      // set logined or recently logout player (while m_playerRecentlyLogout set)
         Player* _player;
+        bool _isBotSession = false;                         // playerbot mod
         std::shared_ptr<WorldSocket> m_Socket[MAX_CONNECTION_TYPES];
         std::string m_Address;                              // Current Remote Address
      // std::string m_LAddress;                             // Last Attempted Remote Adress - we can not set attempted ip for a non-existing session!

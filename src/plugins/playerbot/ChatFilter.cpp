@@ -59,14 +59,14 @@ public:
             int fromLevel = atoi(message.substr(message.find("@") + 1, message.find("-")).c_str());
             int toLevel = atoi(message.substr(message.find("-") + 1, message.find(" ")).c_str());
 
-            if (bot->getLevel() >= fromLevel && bot->getLevel() <= toLevel)
+            if (bot->GetLevel() >= fromLevel && bot->GetLevel() <= toLevel)
                 return ChatFilter::Filter(message);
 
             return message;
         }
 
 		int level = atoi(message.substr(message.find("@") + 1, message.find(" ")).c_str());
-        if (bot->getLevel() == level)
+        if (bot->GetLevel() == level)
             return ChatFilter::Filter(message);
 
         return message;
@@ -88,7 +88,7 @@ public:
         if (!melee && !ranged)
             return message;
 
-        switch (bot->getClass())
+        switch (bot->GetClass())
         {
             case CLASS_WARRIOR:
             case CLASS_PALADIN:
@@ -206,7 +206,7 @@ public:
         for (map<string, uint8>::iterator i = classNames.begin(); i != classNames.end(); i++)
         {
             bool isClass = message.find(i->first) == 0;
-            if (isClass && bot->getClass() != i->second)
+            if (isClass && bot->GetClass() != i->second)
                 return "";
 
             if (found |= isClass)

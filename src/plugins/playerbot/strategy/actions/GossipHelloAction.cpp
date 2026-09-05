@@ -25,10 +25,10 @@ bool GossipHelloAction::Execute(Event event)
     if (!guid)
         return false;
 
-    Creature *pCreature = bot->GetNPCIfCanInteractWith(guid, UNIT_NPC_FLAG_NONE);
+    Creature *pCreature = bot->GetNPCIfCanInteractWith(guid, UNIT_NPC_FLAG_NONE, UNIT_NPC_FLAG_2_NONE);
     if (!pCreature)
     {
-        TC_LOG_DEBUG("playerbot",  "[PlayerbotMgr]: HandleMasterIncomingPacket - Received  CMSG_TALK_TO_GOSSIP %d not found or you can't interact with him.", guid.GetRawValue());;
+        TC_LOG_DEBUG("playerbot", "[PlayerbotMgr]: HandleMasterIncomingPacket - Received CMSG_TALK_TO_GOSSIP {} not found or you can't interact with him.", guid.ToString());
         return false;
     }
 

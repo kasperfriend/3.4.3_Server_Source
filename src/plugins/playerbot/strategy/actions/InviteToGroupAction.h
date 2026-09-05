@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Action.h"
+#include "Server/Packets/PartyPackets.h"
 
 namespace ai
 {
@@ -15,11 +16,10 @@ namespace ai
             if (!master)
                 return false;
 
-            WorldPacket p;
-            uint32 roles_mask = 0;
-            p << master->GetName();
-            p << roles_mask;
-            bot->GetSession()->HandleGroupInviteOpcode(p);
+            WorldPackets::Party::PartyInviteClient invite(WorldPacket(CMSG_PARTY_INVITE));
+            invite.TargetName = master->GetName();
+            invite.TargetGUID = master->GetGUID();
+            bot->GetSession()->HandlePartyInviteOpcode(invite);
 
             return true;
         }

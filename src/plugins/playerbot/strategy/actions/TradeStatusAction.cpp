@@ -54,7 +54,7 @@ bool TradeStatusAction::Execute(Event event)
             {
                 Item* item = master->GetTradeData()->GetItem((TradeSlots)slot);
                 if (item)
-                    itemIds[item->GetTemplate()->ItemId] += item->GetCount();
+                    itemIds[item->GetTemplate()->GetId()] += item->GetCount();
             }
 
             bot->GetSession()->HandleAcceptTradeOpcode(p);
@@ -129,7 +129,7 @@ bool TradeStatusAction::CheckTrade()
         item = master->GetTradeData()->GetItem((TradeSlots)slot);
         if (item)
         {
-            ostringstream out; out << item->GetTemplate()->ItemId;
+            ostringstream out; out << item->GetTemplate()->GetId();
             ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", out.str());
             if (!auctionbot.GetBuyPrice(item->GetTemplate()) || usage == ITEM_USAGE_NONE)
             {
@@ -199,7 +199,7 @@ int32 TradeStatusAction::CalculateCost(TradeData* data, bool sell)
         if (!proto)
             continue;
 
-        if (proto->Quality < ITEM_QUALITY_NORMAL)
+        if (proto->GetQuality() < ITEM_QUALITY_NORMAL)
             return 0;
 
         if (sell)

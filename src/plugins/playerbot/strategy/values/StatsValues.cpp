@@ -98,7 +98,7 @@ uint8 BagSpaceValue::Calculate()
         if (pBag)
         {
             ItemTemplate const* pBagProto = pBag->GetTemplate();
-            if (pBagProto->Class == ITEM_CLASS_CONTAINER && pBagProto->SubClass == ITEM_SUBCLASS_CONTAINER)
+            if (pBagProto->GetClass() == ITEM_CLASS_CONTAINER && pBagProto->GetSubClass() == ITEM_SUBCLASS_CONTAINER)
             {
                 total += pBag->GetBagSize();
                 totalfree += pBag->GetFreeSlots();

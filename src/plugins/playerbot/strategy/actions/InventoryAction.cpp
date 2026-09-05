@@ -14,19 +14,19 @@ public:
 
     virtual bool Accept(const ItemTemplate* proto)
     {
-        if (proto->Class == ITEM_CLASS_CONSUMABLE &&
-            proto->SubClass == ITEM_SUBCLASS_POTION &&
+        if (proto->GetClass() == ITEM_CLASS_CONSUMABLE &&
+            proto->GetSubClass() == ITEM_SUBCLASS_POTION &&
             proto->Spells[0].SpellCategory == 4)
         {
-            for (int j = 0; j < MAX_ITEM_PROTO_SPELLS; j++)
+            for (int j = 0; j < MAX_ITEM_PROTO_EFFECTS; j++)
             {
-                const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(proto->Spells[j].SpellId);
+                const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(proto->Spells[j].SpellId, DIFFICULTY_NONE);
                 if (!spellInfo)
                     return false;
 
                 for (int i = 0 ; i < 3; i++)
                 {
-                    if (spellInfo->Effects[i].Effect == effectId)
+                    if (spellInfo->GetEffect(SpellEffIndex(i)).Effect == effectId)
                         return true;
                 }
             }
@@ -48,8 +48,8 @@ public:
 
     virtual bool Accept(const ItemTemplate* proto)
     {
-        return proto->Class == ITEM_CLASS_CONSUMABLE &&
-            proto->SubClass == ITEM_SUBCLASS_FOOD &&
+        return proto->GetClass() == ITEM_CLASS_CONSUMABLE &&
+            proto->GetSubClass() == ITEM_SUBCLASS_FOOD_DRINK &&
             proto->Spells[0].SpellCategory == spellCategory;
     }
 
@@ -103,17 +103,17 @@ void InventoryAction::IterateItemsInEquip(IterateItemsVisitor* visitor)
 
 bool compare_items(const ItemTemplate *proto1, const ItemTemplate *proto2)
 {
-    if (proto1->Class != proto2->Class)
-        return proto1->Class > proto2->Class;
+    if (proto1->GetClass() != proto2->GetClass())
+        return proto1->GetClass() > proto2->GetClass();
 
-    if (proto1->SubClass != proto2->SubClass)
-        return proto1->SubClass < proto2->SubClass;
+    if (proto1->GetSubClass() != proto2->GetSubClass())
+        return proto1->GetSubClass() < proto2->GetSubClass();
 
-    if (proto1->Quality != proto2->Quality)
-        return proto1->Quality < proto2->Quality;
+    if (proto1->GetQuality() != proto2->GetQuality())
+        return proto1->GetQuality() < proto2->GetQuality();
 
-    if (proto1->ItemLevel != proto2->ItemLevel)
-        return proto1->ItemLevel > proto2->ItemLevel;
+    if (proto1->GetItemLevel() != proto2->GetItemLevel())
+        return proto1->GetItemLevel() > proto2->GetItemLevel();
 
     return false;
 }
@@ -138,10 +138,10 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
     {
         ItemTemplate const *proto = *i;
 
-        if (proto->Class != oldClass)
+        if (proto->GetClass() != oldClass)
         {
-            oldClass = proto->Class;
-            switch (proto->Class)
+            oldClass = proto->GetClass();
+            switch (proto->GetClass())
             {
             case ITEM_CLASS_CONSUMABLE:
                 ai->TellMaster("--- consumable ---");
@@ -197,7 +197,7 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
             }
         }
 
-        TellItem(proto, itemMap[proto->ItemId]);
+        TellItem(proto, itemMap[proto->GetId()]);
     }
 }
 

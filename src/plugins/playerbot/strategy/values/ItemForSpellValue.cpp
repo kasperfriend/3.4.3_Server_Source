@@ -18,7 +18,7 @@ Item* ItemForSpellValue::Calculate()
     if (!spellid)
         return NULL;
 
-    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid);
+    SpellInfo const *spellInfo = sSpellMgr->GetSpellInfo(spellid, DIFFICULTY_NONE);
     if (!spellInfo)
         return NULL;
 

@@ -11,9 +11,9 @@ public:
     {
         for (int i=0; i<3; i++)
         {
-            if (spell->Effects[i].Effect == SPELL_EFFECT_RESURRECT ||
-                spell->Effects[i].Effect == SPELL_EFFECT_RESURRECT_NEW ||
-                spell->Effects[i].Effect == SPELL_EFFECT_SELF_RESURRECT)
+            if (spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_RESURRECT ||
+                spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_RESURRECT_NEW ||
+                spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_SELF_RESURRECT)
                 return true;
         }
         return false;

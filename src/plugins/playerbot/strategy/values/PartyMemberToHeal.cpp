@@ -11,10 +11,10 @@ class IsTargetOfHealingSpell : public SpellEntryPredicate
 public:
     virtual bool Check(SpellInfo const* spell) {
         for (int i=0; i<3; i++) {
-            if (spell->Effects[i].Effect == SPELL_EFFECT_HEAL ||
-                spell->Effects[i].Effect == SPELL_EFFECT_HEAL_MAX_HEALTH ||
-                spell->Effects[i].Effect == SPELL_EFFECT_HEAL_MECHANICAL ||
-                spell->Effects[i].Effect == SPELL_EFFECT_HEAL_PCT)
+            if (spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_HEAL ||
+                spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_HEAL_MAX_HEALTH ||
+                spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_HEAL_MECHANICAL ||
+                spell->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_HEAL_PCT)
                 return true;
         }
         return false;

@@ -50,7 +50,7 @@ void StatsAction::ListBagSlots(ostringstream &out)
         if (pBag)
         {
             ItemTemplate const* pBagProto = pBag->GetTemplate();
-            if (pBagProto->Class == ITEM_CLASS_CONTAINER && pBagProto->SubClass == ITEM_SUBCLASS_CONTAINER)
+            if (pBagProto->GetClass() == ITEM_CLASS_CONTAINER && pBagProto->GetSubClass() == ITEM_SUBCLASS_CONTAINER)
             {
                 total += pBag->GetBagSize();
                 totalfree += pBag->GetFreeSlots();
@@ -118,22 +118,22 @@ uint32 StatsAction::EstRepair(uint16 pos)
     {
         ItemTemplate const *ditemProto = item->GetTemplate();
 
-        DurabilityCostsEntry const *dcost = sDurabilityCostsStore.LookupEntry(ditemProto->ItemLevel);
+        DurabilityCostsEntry const *dcost = sDurabilityCostsStore.LookupEntry(ditemProto->GetItemLevel());
         if(!dcost)
         {
-            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong item lvl %u", ditemProto->ItemLevel);;
+            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong item lvl {}", ditemProto->GetItemLevel());
             return TotalCost;
         }
 
-        uint32 dQualitymodEntryId = (ditemProto->Quality+1)*2;
+        uint32 dQualitymodEntryId = (ditemProto->GetQuality()+1)*2;
         DurabilityQualityEntry const *dQualitymodEntry = sDurabilityQualityStore.LookupEntry(dQualitymodEntryId);
         if(!dQualitymodEntry)
         {
-            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong dQualityModEntry %u", dQualitymodEntryId);;
+            TC_LOG_ERROR("playerbot",  "RepairDurability: Wrong dQualityModEntry {}", dQualitymodEntryId);
             return TotalCost;
         }
 
-        uint32 dmultiplier = dcost->multiplier[ItemSubClassToDurabilityMultiplierId(ditemProto->Class,ditemProto->SubClass)];
+        uint32 dmultiplier = dcost->multiplier[ItemSubClassToDurabilityMultiplierId(ditemProto->GetClass(),ditemProto->GetSubClass())];
         uint32 costs = uint32(LostDurability*dmultiplier*double(dQualitymodEntry->quality_mod));
 
         if (costs==0)                                   //fix for ITEM_QUALITY_ARTIFACT

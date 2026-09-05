@@ -44,6 +44,7 @@
 #include "ProcessPriority.h"
 #include "RASession.h"
 #include "RealmList.h"
+#include "Playerbot/PlayerbotHooks.h"
 #include "ScriptLoader.h"
 #include "ScriptMgr.h"
 #include "ScriptReloadMgr.h"
@@ -122,6 +123,21 @@ private:
 void SignalHandler(boost::system::error_code const& error, int signalNumber);
 AsyncAcceptor* StartRaSocketAcceptor(Trinity::Asio::IoContext& ioContext);
 bool StartDB();
+
+// playerbot mod (ported from ike3/mangosbot): defined in the plugins library
+namespace Playerbot
+{
+    void RegisterPlayerbotScripts();
+    void InitializePlayerbots();
+    void ShutdownPlayerbots();
+}
+
+/// loads the static core scripts plus the playerbot commands
+static void LoadAllScripts()
+{
+    AddScripts();
+    Playerbot::RegisterPlayerbotScripts();
+}
 void StopDB();
 void WorldUpdateLoop();
 void ClearOnlineAccounts();
@@ -325,7 +341,7 @@ extern int main(int argc, char** argv)
         sMetric->Unload();
     });
 
-    sScriptMgr->SetScriptLoader(AddScripts);
+    sScriptMgr->SetScriptLoader(LoadAllScripts);
     std::shared_ptr<void> sScriptMgrHandle(nullptr, [](void*)
     {
         sScriptMgr->Unload();
@@ -335,6 +351,10 @@ extern int main(int argc, char** argv)
     // Initialize the World
     sSecretMgr->Initialize(SECRET_OWNER_WORLDSERVER);
     sWorld->SetInitialWorldSettings();
+
+    // playerbot mod: bring the bot system up once the world is ready
+    Playerbot::InitializePlayerbots();
+    std::shared_ptr<void> sPlayerbotHandle(nullptr, [](void*) { Playerbot::ShutdownPlayerbots(); });
 
     std::shared_ptr<void> mapManagementHandle(nullptr, [](void*)
     {

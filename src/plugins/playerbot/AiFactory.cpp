@@ -19,7 +19,7 @@
 
 AiObjectContext* AiFactory::createAiObjectContext(Player* player, PlayerbotAI* ai)
 {
-    switch (player->getClass())
+    switch (player->GetClass())
     {
     case CLASS_PRIEST:
         return new PriestAiObjectContext(ai);
@@ -67,7 +67,7 @@ int AiFactory::GetPlayerSpecTab(Player* player)
         if (!talentInfo)
             continue;
 
-        uint32 const* talentTabIds = GetTalentTabPages(player->getClass());
+        uint32 const* talentTabIds = GetTalentTabPages(player->GetClass());
         if (talentInfo->TalentTab == talentTabIds[0]) c0++;
         if (talentInfo->TalentTab == talentTabIds[1]) c1++;
         if (talentInfo->TalentTab == talentTabIds[2]) c2++;
@@ -88,13 +88,13 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
 
     engine->addStrategies("racials", "chat", "default", "aoe", "potions", "cast time", "conserve mana", "duel", "pvp", NULL);
 
-    switch (player->getClass())
+    switch (player->GetClass())
     {
         case CLASS_PRIEST:
             if (tab == 2)
             {
                 engine->addStrategies("dps", "threat", NULL);
-                if (player->getLevel() > 19)
+                if (player->GetLevel() > 19)
                     engine->addStrategy("dps debuff");
             }
             else
@@ -138,7 +138,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             if (tab == 0)
             {
                 engine->addStrategies("caster", "caster aoe", "threat", "flee", "dps assist", NULL);
-                if (player->getLevel() > 19)
+                if (player->GetLevel() > 19)
                     engine->addStrategy("caster debuff");
             }
             else if (tab == 2)
@@ -148,7 +148,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             break;
         case CLASS_HUNTER:
             engine->addStrategies("dps", "bdps", "threat", "dps assist", NULL);
-            if (player->getLevel() > 19)
+            if (player->GetLevel() > 19)
                 engine->addStrategy("dps debuff");
             break;
         case CLASS_ROGUE:
@@ -160,7 +160,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
             else
                 engine->addStrategies("dps", "threat", NULL);
 
-            if (player->getLevel() > 19)
+            if (player->GetLevel() > 19)
                 engine->addStrategy("dps debuff");
 
             engine->addStrategies("dps assist", "flee", NULL);
@@ -172,7 +172,7 @@ void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const fa
         if (!player->GetGroup())
         {
             engine->ChangeStrategy(sPlayerbotAIConfig.randomBotCombatStrategies);
-            if (player->getClass() == CLASS_DRUID && player->getLevel() < 20)
+            if (player->GetClass() == CLASS_DRUID && player->GetLevel() < 20)
             {
                 engine->addStrategies("bear", NULL);
             }
@@ -194,7 +194,7 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
 {
     int tab = GetPlayerSpecTab(player);
 
-    switch (player->getClass()){
+    switch (player->GetClass()){
         case CLASS_PALADIN:
             if (tab == 1)
                 nonCombatEngine->addStrategies("bthreat", "tank aoe", NULL);

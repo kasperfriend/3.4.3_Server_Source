@@ -73,7 +73,7 @@ bool SayAction::Execute(Event event)
     if (!target) target = AI_VALUE(Unit*, "current target");
     if (target) replaceAll(text, "<target>", target->GetName());
 
-    replaceAll(text, "<randomfaction>", IsAlliance(bot->getRace()) ? "Alliance" : "Horde");
+    replaceAll(text, "<randomfaction>", IsAlliance(bot->GetRace()) ? "Alliance" : "Horde");
 
     if (bot->GetMap())
     {
@@ -83,7 +83,7 @@ bool SayAction::Execute(Event event)
 			AreaTableEntry const* area = sAreaTableStore.LookupEntry(areaId);
             if (area)
             {
-                replaceAll(text, "<subzone>", area->area_name[0]);
+                replaceAll(text, "<subzone>", area->AreaName[LOCALE_enUS]);
             }
         }
     }
