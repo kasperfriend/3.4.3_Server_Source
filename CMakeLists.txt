@@ -10,6 +10,16 @@
 
 cmake_minimum_required(VERSION 3.18)
 
+# ---------------------------------------------------------------------------
+# Windows-only build.
+#
+# Linux / macOS support has been removed from this tree on purpose: the server
+# is shipped as Windows binaries, CI and the release pipeline build with MSVC
+# on Windows only, and the half-maintained Unix build files were a constant
+# source of breakage.  cmake/macros/CheckPlatform.cmake fails the configure
+# step with a clear message on any other platform.
+# ---------------------------------------------------------------------------
+
 # add this options before PROJECT keyword
 set(CMAKE_DISABLE_SOURCE_CHANGES ON)
 set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
@@ -31,12 +41,6 @@ endif()
 if(POLICY CMP0153)
   cmake_policy(SET CMP0153 NEW) # The exec_program() command should not be called
 endif()
-
-# Set RPATH-handing (CMake parameters)
-set(CMAKE_SKIP_BUILD_RPATH 0)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH 0)
-list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH 1)
 
 # set macro-directory
 list(APPEND CMAKE_MODULE_PATH

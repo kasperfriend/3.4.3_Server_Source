@@ -60,15 +60,9 @@ set_target_properties(database
         "server")
 
 if(BUILD_SHARED_LIBS)
-  if(UNIX)
-    install(TARGETS database
-      LIBRARY
-        DESTINATION lib)
-  elseif(WIN32)
-    install(TARGETS database
-      RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  endif()
+  install(TARGETS database
+    RUNTIME
+      DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
 # Generate precompiled header

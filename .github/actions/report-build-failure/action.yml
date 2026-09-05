@@ -42,10 +42,35 @@ runs:
             # Not an error: a job can fail before some of its logs exist.
             return 0
           fi
-          echo "--- error lines from $file (last 400 matches) ---"
-          grep -nE \
-            "error:|error C[0-9]{4}|error LNK[0-9]{4}|fatal error|MSB[0-9]{4}|Error [0-9]+|undefined reference|cannot find -l|No such file or directory|::error::|not produced by the build|MISS " \
-            "$file" 2>/dev/null | tail -n 400 || true
+
+          local pattern="error:|error C[0-9]{4}|error LNK[0-9]{4}|fatal error|MSB[0-9]{4}|Error [0-9]+|undefined reference|cannot find -l|No such file or directory|::error::|not produced by the build|MISS "
+          local matches
+          matches="$(grep -nE "$pattern" "$file" 2>/dev/null || true)"
+          local total
+          total="$(printf '%s' "$matches" | grep -c . || true)"
+
+          echo "--- $file: $total matching error lines ---"
+          echo ""
+
+          # The FIRST errors are the ones that matter: MSVC error recovery turns a
+          # single bad header into thousands of cascading follow-up errors, so a
+          # tail-only report shows nothing but noise.  Print the first occurrence
+          # of each distinct error (path+code+message, line numbers kept) in the
+          # order they were emitted.
+          echo "--- first 120 distinct errors from $file (root causes first) ---"
+          printf '%s\n' "$matches" \
+            | sed -E 's/\r$//' \
+            | awk -F: '{ key=$0; sub(/^[0-9]+:/, "", key);
+                         if (!(key in seen)) { seen[key]=1; print } }' \
+            | head -n 120
+          echo ""
+
+          echo "--- last 80 distinct errors from $file ---"
+          printf '%s\n' "$matches" \
+            | sed -E 's/\r$//' \
+            | awk -F: '{ key=$0; sub(/^[0-9]+:/, "", key);
+                         if (!(key in seen)) { seen[key]=1; print } }' \
+            | tail -n 80
           echo ""
           echo "--- tail of $file (last 60 lines) ---"
           tail -n 60 "$file" || true

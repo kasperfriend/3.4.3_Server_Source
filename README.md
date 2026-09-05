@@ -64,16 +64,30 @@ This repository uses GitHub Actions:
   current and supporting modern Boost in the source is the only combination that
   stays green over time.
 
-### Building on Linux (local)
+## Building (Windows only)
 
-```bash
-# Debian / Ubuntu
-sudo apt install build-essential gcc-12 g++-12 cmake \
-  libssl-dev libmysqlclient-dev libboost-all-dev \
-  libreadline-dev zlib1g-dev libbz2-dev libncurses-dev
+**This tree builds on Windows with MSVC only.** Linux / macOS support was
+removed on purpose — the Unix build files, compiler settings and the Linux CI
+job are gone, and `cmake` now stops with a clear error if you configure it on
+anything but Windows. If you need a Unix build, use upstream TrinityCore.
 
-cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DWITH_DYNAMIC_LINKING=0 -DSCRIPTS=static
-cmake --build build -j$(nproc)
-cmake --install build --prefix $HOME/trinitycore
+Install the prerequisites listed at the top of this file, then from a
+*Developer Command Prompt for VS 2022* (or with CMake GUI):
+
+```bat
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+  -DSERVERS=1 -DTOOLS=1 -DSCRIPTS=static ^
+  -DWITH_DYNAMIC_LINKING=0 ^
+  -DUSE_COREPCH=1 -DUSE_SCRIPTPCH=1
+
+cmake --build build --config RelWithDebInfo
+cmake --install build --config RelWithDebInfo --prefix C:\TrinityCore
 ```
+
+> **Keep the precompiled headers enabled** (`USE_COREPCH=1`, `USE_SCRIPTPCH=1`,
+> which are the defaults). The core headers rely on the include set the PCHs
+> provide; with `-DUSE_COREPCH=0` MSVC 14.4x no longer pulls most of the
+> standard library in transitively and the build dies in headers that are
+> otherwise fine, e.g. `SharedDefines.h: error C2039: 'unordered_map': is not a
+> member of 'std'` followed by thousands of cascading errors.

@@ -58,10 +58,14 @@ set_target_properties(plugins
     FOLDER
       "server")
 
+# Generate precompiled header.
+# Every plugin translation unit already starts with #include "../pchdef.h",
+# so turning it into a real PCH is free and cuts the compile time of the ~500
+# bot sources down massively.
+if(USE_COREPCH)
+  add_cxx_pch(plugins ${CMAKE_CURRENT_SOURCE_DIR}/pchdef.h)
+endif()
+
 # Install the playerbot configuration next to worldserver.conf so that the
 # worldserver picks it up automatically from worldserver.conf.d.
-if(UNIX)
-  install(FILES playerbot/aiplayerbot.conf.dist DESTINATION ${CONF_DIR}/worldserver.conf.d)
-elseif(WIN32)
-  install(FILES playerbot/aiplayerbot.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}/worldserver.conf.d")
-endif()
+install(FILES playerbot/aiplayerbot.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}/worldserver.conf.d")

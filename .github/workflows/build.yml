@@ -1,8 +1,8 @@
 # Continuous-integration build for TrinityCore 3.4.3 + AI Playerbots.
 #
 # Runs on every push to main and on every pull request.  Windows / MSVC is the
-# only build target: the Linux job was removed because this project ships
-# Windows binaries, and a failing job that nothing consumes is just noise.
+# only build target - this source tree does not support Linux or macOS at all
+# any more (the Unix CMake files and compiler settings were removed).
 # The Windows job is blocking - the run is green only when worldserver.exe and
 # bnetserver.exe are actually produced.
 
@@ -156,6 +156,20 @@ jobs:
       - name: Configure (CMake)
         shell: pwsh
         run: |
+          # USE_COREPCH / USE_SCRIPTPCH are deliberately ON - the same values the
+          # release workflow and a stock Visual Studio build use.
+          #
+          # This is not just a build-time optimisation.  The core headers rely on
+          # the include set provided by the precompiled headers
+          # (src/server/game/PrecompiledHeaders/gamePCH.h and friends); with PCH
+          # disabled every translation unit only sees what it includes itself and
+          # MSVC 14.44 no longer pulls most of the standard library in
+          # transitively.  A no-PCH build therefore dies in headers that are
+          # perfectly fine in the supported configuration, e.g.
+          #   SharedDefines.h: error C2039: 'unordered_map' is not a member of 'std'
+          #   CriteriaHandler.h: error C2039: 'span' is not a member of 'std'
+          # followed by thousands of cascading errors, because the parse of
+          # SharedDefines.h (included by nearly every core file) is poisoned.
           cmake -B build -S . `
             -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
@@ -165,8 +179,8 @@ jobs:
             -DTOOLS=0 `
             -DSCRIPTS=static `
             -DWITH_DYNAMIC_LINKING=0 `
-            -DUSE_COREPCH=0 `
-            -DUSE_SCRIPTPCH=0 `
+            -DUSE_COREPCH=1 `
+            -DUSE_SCRIPTPCH=1 `
             -DWITH_WARNINGS=0 `
             -DWITHOUT_GIT=1 `
             -DCOPY_CONF=1

@@ -54,15 +54,9 @@ set_target_properties(proto
       "server")
 
 if( BUILD_SHARED_LIBS )
-  if( UNIX )
-    install(TARGETS proto
-      LIBRARY
-        DESTINATION lib)
-  elseif( WIN32 )
-    install(TARGETS proto
-      RUNTIME
-        DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  endif()
+  install(TARGETS proto
+    RUNTIME
+      DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
 # Generate precompiled header

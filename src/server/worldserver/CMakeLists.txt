@@ -32,17 +32,6 @@ add_executable(worldserver
   ${PRIVATE_SOURCES}
 )
 
-if(NOT WIN32)
-  target_compile_definitions(worldserver PRIVATE
-    _TRINITY_CORE_CONFIG="${CONF_DIR}/worldserver.conf"
-    _TRINITY_CORE_CONFIG_DIR="${CONF_DIR}/worldserver.conf.d"
-  )
-endif()
-
-if(UNIX AND NOT NOJEM AND NOT APPLE)
-  set(worldserver_LINK_FLAGS "-pthread -lncurses ${worldserver_LINK_FLAGS}")
-endif()
-
 set_target_properties(worldserver PROPERTIES LINK_FLAGS "${worldserver_LINK_FLAGS}")
 
 target_link_libraries(worldserver
@@ -91,16 +80,9 @@ if(COPY_CONF AND WIN32)
   endif()
 endif()
 
-if(UNIX)
-  install(TARGETS worldserver DESTINATION bin)
-  if(COPY_CONF)
-    install(FILES worldserver.conf.dist DESTINATION ${CONF_DIR})
-  endif()
-elseif(WIN32)
-  install(TARGETS worldserver DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  if(COPY_CONF)
-    install(FILES worldserver.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}")
-  endif()
+install(TARGETS worldserver DESTINATION "${CMAKE_INSTALL_PREFIX}")
+if(COPY_CONF)
+  install(FILES worldserver.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}")
 endif()
 
 # Generate precompiled header
