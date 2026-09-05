@@ -200,16 +200,54 @@ migrations applied during the port:
 
 ---
 
-## 7. Limitations
+## 7. Limitations & known issues
 
-* The bots are ported "best effort": all 257 translation units compile and link
-  against the 3.4.3 API (verified object-by-object; the only unresolved
-  plugin-side symbols are the three core hook-registry functions), but the class
-  strategy rotations still use 3.3.5-era spell names and will need tuning for
-  3.4.3 spell IDs.
-* A few 3.3.5 features have no direct 3.4.3 equivalent and were removed rather
-  than emulated (ranged ammo checks, `GameObject` spellcaster teleports use the
-  new `spellCaster.spell` field, gossip options are matched by
-  `GossipOptionNpc` instead of the old numeric `OptionType`).
-* The auction-house side of ike3's AhBot is **not** ported; use the core's own
-  `AuctionHouseBot`. Only the item pricing helpers the bots need were kept.
+* **Spell rotations need tuning** — the class combat strategies (warrior, mage,
+  priest, etc.) were ported from the 3.3.5 mangosbot codebase and still
+  reference spell names that may differ between 3.3.5 and 3.4.3.  The bots will
+  fight, but their rotations may not be optimal.  The spell names are defined
+  in the strategy files under `strategy/<class>/` and can be adjusted.
+* **Static linking required** — the plugin calls many core functions that lack
+  `TC_GAME_API` exports.  Build with `-DWITH_DYNAMIC_LINKING=0` (the default).
+  If `BUILD_SHARED_LIBS` is detected, CMake will emit a warning.
+* **3.3.5 features without 3.4.3 equivalents** — ranged ammo checks, numeric
+  gossip `OptionType` matching, and `GameObject` spellcaster teleports were
+  removed rather than emulated.
+* **No AhBot** — ike3's auction-house bot is not ported.  Use the core's own
+  `AuctionHouseBot` module.  Only the item-pricing helpers the bots need were
+  kept in `src/plugins/ahbot/`.
+* **Windows builds** — Windows support is best-effort.  The CI runs a Windows
+  build using vcpkg for dependencies, but it is marked non-blocking due to the
+  fragility of the Windows dependency chain.  Linux is the primary supported
+  platform.
+
+---
+
+## 8. CI/CD
+
+This repository includes two GitHub Actions workflows:
+
+### Build (`build.yml`)
+
+Runs automatically on every push to `main` and on every pull request.
+
+* **Linux** (Ubuntu 22.04, GCC 12): full build with all servers and tools.
+  This is the primary CI check and **must pass**.
+* **Windows** (Windows Server 2022, MSVC 2022): best-effort build using
+  vcpkg for dependencies.  Marked `continue-on-error` because the Windows
+  dependency chain (Boost via vcpkg) is fragile.
+
+### Release (`release.yml`)
+
+Triggered **manually** from the Actions tab (`Run workflow` button).
+
+Inputs:
+* **tag** — release tag name (e.g. `v3.4.3-bots-1`), or leave empty for auto
+* **prerelease** — mark as pre-release (default: true)
+* **build_type** — `RelWithDebInfo` or `Release`
+* **build_windows** — also build Windows binaries (adds ~45 min)
+
+The workflow builds the server, packages the binaries together with SQL
+schemas, configuration files, and documentation, strips debug symbols, and
+creates a GitHub Release with downloadable `.tar.gz` (Linux) and `.zip`
+(Windows) archives.

@@ -1,5 +1,19 @@
 # Playerbots (ported from ike3/mangosbot trinity-wotlk-ai) plus the minimal
 # auction-bot pricing support used by the bots.
+#
+# IMPORTANT: The playerbot plugin calls many core functions that are not
+# marked TC_GAME_API.  When WITH_DYNAMIC_LINKING is ON the core libraries
+# use -fvisibility=hidden and those symbols become unavailable.  The
+# plugin therefore requires static linking (WITH_DYNAMIC_LINKING=OFF).
+
+if(BUILD_SHARED_LIBS)
+  message(WARNING
+    "  Playerbot plugin: BUILD_SHARED_LIBS is ON (WITH_DYNAMIC_LINKING=1).\n"
+    "  The bot code calls core functions that lack TC_GAME_API exports,\n"
+    "  so the build will almost certainly fail to link.  Reconfigure with\n"
+    "    -DWITH_DYNAMIC_LINKING=0\n"
+    "  to build the bots correctly.")
+endif()
 
 file(GLOB_RECURSE sources_playerbot playerbot/*.cpp playerbot/*.h)
 file(GLOB_RECURSE sources_ahbot ahbot/*.cpp ahbot/*.h)

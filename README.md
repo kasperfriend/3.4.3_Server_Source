@@ -31,3 +31,30 @@ Quick start:
 See [docs/Playerbots.md](docs/Playerbots.md) for the full documentation:
 architecture, hook points, configuration reference, chat commands, random bot
 population management and the 3.3.5 → 3.4.3 porting notes.
+
+## Continuous Integration & Releases
+
+This repository uses GitHub Actions:
+
+* **Build workflow** (`.github/workflows/build.yml`) — automatically builds the
+  project on every push to `main` and on every pull request, verifying that the
+  server and the playerbot plugin compile and link correctly on Ubuntu 22.04.
+* **Release workflow** (`.github/workflows/release.yml`) — triggered manually
+  from the **Actions** tab (`Run workflow`).  Builds the full server with
+  playerbots, packages the binaries together with the SQL schemas, configuration
+  files, and documentation, and creates a GitHub Release with downloadable
+  archives for Linux (and optionally Windows).
+
+### Building on Linux (local)
+
+```bash
+# Debian / Ubuntu
+sudo apt install build-essential gcc-12 g++-12 cmake \
+  libssl-dev libmysqlclient-dev libboost-all-dev \
+  libreadline-dev zlib1g-dev libbz2-dev libncurses-dev
+
+cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DWITH_DYNAMIC_LINKING=0 -DSCRIPTS=static
+cmake --build build -j$(nproc)
+cmake --install build --prefix $HOME/trinitycore
+```
