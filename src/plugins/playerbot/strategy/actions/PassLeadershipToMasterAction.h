@@ -14,7 +14,7 @@ namespace ai
             Player* master = GetMaster();
             if (master && bot->GetGroup() && bot->GetGroup()->IsMember(master->GetGUID()))
             {
-                WorldPackets::Party::SetPartyLeader setLeader(WorldPacket(CMSG_SET_PARTY_LEADER));
+                WorldPackets::Party::SetPartyLeader setLeader{WorldPacket(CMSG_SET_PARTY_LEADER)};
                 setLeader.TargetGUID = master->GetGUID();
                 bot->GetSession()->HandleSetPartyLeaderOpcode(setLeader);
                 return true;

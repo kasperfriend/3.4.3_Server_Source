@@ -248,7 +248,7 @@ string ChatHelper::formatGameobject(GameObject* go)
 string ChatHelper::formatSpell(SpellInfo const *sInfo)
 {
     ostringstream out;
-    out << "|cffffffff|Hspell:" << sInfo->Id << "|h[" << sInfo->SpellName[LOCALE_enUS] << "]|h|r";
+    out << "|cffffffff|Hspell:" << sInfo->Id << "|h[" << sInfo->SpellName->Str[LOCALE_enUS] << "]|h|r";
     return out.str();
 }
 

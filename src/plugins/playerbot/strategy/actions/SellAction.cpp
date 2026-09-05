@@ -86,7 +86,7 @@ void SellAction::Sell(Item* item)
     ObjectGuid itemguid = item->GetGUID();
     uint32 count = item->GetCount();
 
-    WorldPackets::Item::SellItem sell(WorldPacket(CMSG_SELL_ITEM));
+    WorldPackets::Item::SellItem sell{WorldPacket(CMSG_SELL_ITEM)};
     sell.VendorGUID = vendor->GetGUID();
     sell.ItemGUID = itemguid;
     sell.Amount = count;

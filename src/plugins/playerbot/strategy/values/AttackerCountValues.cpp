@@ -16,18 +16,15 @@ bool HasAggroValue::Calculate()
     if (!target)
         return true;
 
-    HostileReference *ref = bot->GetThreatManager().getFirst();
-    if (!ref)
+    auto const& threatenedByMe = bot->GetThreatManager().GetThreatenedByMeList();
+    if (threatenedByMe.empty())
         return true; // simulate as target is not atacking anybody yet
 
-    while( ref )
+    for (auto const& pair : threatenedByMe)
     {
-        ThreatManager *threatManager = ref->GetSource();
-        Unit *attacker = threatManager->GetOwner();
-        Unit *victim = attacker->GetVictim();
-        if (victim == bot && target == attacker)
+        Unit* attacker = pair.second->GetOwner();
+        if (attacker && attacker->GetVictim() == bot && target == attacker)
             return true;
-        ref = ref->next();
     }
     return false;
 }
@@ -79,21 +76,24 @@ uint8 BalancePercentValue::Calculate()
         if (!creature || !creature->IsAlive())
             continue;
 
-        uint32 level = creature->getLevel();
+        uint32 level = creature->GetLevel();
 
-        switch (creature->GetCreatureTemplate()->rank) {
-        case CREATURE_ELITE_RARE:
-            level *= 2;
-            break;
-        case CREATURE_ELITE_ELITE:
-            level *= 3;
-            break;
-        case CREATURE_ELITE_RAREELITE:
-            level *= 3;
-            break;
-        case CREATURE_ELITE_WORLDBOSS:
+        if (creature->IsDungeonBoss() || creature->isWorldBoss())
             level *= 5;
-            break;
+        else
+        {
+            switch (creature->GetCreatureTemplate()->Classification)
+            {
+                case CreatureClassifications::Rare:
+                    level *= 2;
+                    break;
+                case CreatureClassifications::Elite:
+                case CreatureClassifications::RareElite:
+                    level *= 3;
+                    break;
+                default:
+                    break;
+            }
         }
         attackerLevel += level;
     }

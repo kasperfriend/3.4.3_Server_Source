@@ -67,9 +67,11 @@ int strcmpi(std::string s1, std::string s2);
 
 // client packet classes the bots feed into the session handlers
 #include "Server/Packets/AreaTriggerPackets.h"
+#include "Server/Packets/CharacterPackets.h"
 #include "Server/Packets/ChatPackets.h"
 #include "Server/Packets/DuelPackets.h"
 #include "Server/Packets/GuildPackets.h"
+#include "Server/Packets/EquipmentSetPackets.h"
 #include "Server/Packets/ItemPackets.h"
 #include "Server/Packets/LootPackets.h"
 #include "Server/Packets/MailPackets.h"
@@ -80,6 +82,39 @@ int strcmpi(std::string s1, std::string s2);
 #include "Server/Packets/QuestPackets.h"
 #include "Server/Packets/SpellPackets.h"
 #include "Server/Packets/TradePackets.h"
+
+
+// --- playerbot compatibility helpers for the 3.4.3 item template layout ---
+#define MAX_ITEM_PROTO_EFFECTS 5
+
+inline ItemEffectEntry const* ItemEffectAt(ItemTemplate const* proto, uint32 index)
+{
+    return (proto && index < proto->Effects.size()) ? proto->Effects[index] : nullptr;
+}
+
+inline uint32 ItemSpellId(ItemTemplate const* proto, uint32 index)
+{
+    ItemEffectEntry const* effect = ItemEffectAt(proto, index);
+    return effect ? uint32(effect->SpellID) : 0u;
+}
+
+inline uint32 ItemSpellCategory(ItemTemplate const* proto, uint32 index)
+{
+    ItemEffectEntry const* effect = ItemEffectAt(proto, index);
+    return effect ? uint32(effect->SpellCategoryID) : 0u;
+}
+
+inline uint32 ItemSpellTrigger(ItemTemplate const* proto, uint32 index)
+{
+    ItemEffectEntry const* effect = ItemEffectAt(proto, index);
+    return effect ? uint32(effect->TriggerType) : 0u;
+}
+
+inline int32 ItemSpellCharges(ItemTemplate const* proto, uint32 index)
+{
+    ItemEffectEntry const* effect = ItemEffectAt(proto, index);
+    return effect ? int32(effect->Charges) : 0;
+}
 
 #include "playerbotDefs.h"
 #include "PlayerbotAIAware.h"

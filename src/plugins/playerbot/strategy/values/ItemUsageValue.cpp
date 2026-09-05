@@ -39,7 +39,7 @@ ItemUsage ItemUsageValue::QueryItemUsageForEquip(ItemTemplate const * item)
     if (item->GetInventoryType() == INVTYPE_NON_EQUIP)
         return ITEM_USAGE_NONE;
 
-    Item *pItem = Item::CreateItem(item->GetId(), 1, bot);
+    Item *pItem = Item::CreateItem(item->GetId(), 1, ItemContext::NONE, bot);
     if (!pItem)
         return ITEM_USAGE_NONE;
 
@@ -114,7 +114,7 @@ bool ItemUsageValue::IsItemUsefulForSkill(ItemTemplate const * proto)
         break;
     case ITEM_CLASS_RECIPE:
         {
-            if (bot->HasSpell(proto->Spells[2].SpellId))
+            if ItemSpellId((bot->HasSpell(proto, 2)))
                 break;
 
             switch (proto->GetSubClass())

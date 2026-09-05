@@ -22,7 +22,7 @@ bool CheckMountStateAction::Execute(Event event)
     }
     else if (!master->IsMounted() && bot->IsMounted())
     {
-        WorldPackets::Spells::CancelMountAura cancelMount(WorldPacket(CMSG_CANCEL_MOUNT_AURA));
+        WorldPackets::Spells::CancelMountAura cancelMount{WorldPacket(CMSG_CANCEL_MOUNT_AURA)};
         bot->GetSession()->HandleCancelMountAuraOpcode(cancelMount);
         return true;
     }
@@ -40,7 +40,7 @@ bool CheckMountStateAction::Mount()
     AuraEffect* front = auras.front();
     if (!front) return false;
 
-    const SpellInfo* masterSpell = front->GetSpellInfo(, DIFFICULTY_NONE);
+    const SpellInfo* masterSpell = front->GetSpellInfo();
     int32 masterSpeed = max(masterSpell->GetEffect(SpellEffIndex(1)).BasePoints, masterSpell->GetEffect(SpellEffIndex(2)).BasePoints);
 
     map<uint32, map<int32, vector<uint32> > > allSpells;

@@ -31,9 +31,9 @@ bool SayAction::Execute(Event event)
             do
             {
                 Field* fields = results->Fetch();
-                string name = fields[0].GetCString();
-                string text = fields[1].GetCString();
-                string type = fields[2].GetCString();
+                string name = fields[0].GetString();
+                string text = fields[1].GetString();
+                string type = fields[2].GetString();
 
                 if (type == "yell") text = "/y " + text;
                 stringTable[name].push_back(text);
@@ -48,7 +48,7 @@ bool SayAction::Execute(Event event)
             do
             {
                 Field* fields = results->Fetch();
-                string name = fields[0].GetCString();
+                string name = fields[0].GetString();
                 uint32 probability = fields[1].GetUInt32();
 
                 probabilityTable[name] = probability;

@@ -100,7 +100,7 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
     uint32 isValid = GetEventValue(bot, "add");
     if (!isValid)
     {
-		Player* player = GetPlayerBot(bot);
+		Player* player = GetPlayerBot(ObjectGuid::Create<HighGuid::Player>(bot));
 		if (!player || !player->GetGroup())
 		{
 			TC_LOG_INFO("playerbot",  "Bot {} expired", bot);
@@ -109,9 +109,9 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
         return true;
     }
 
-    if (!GetPlayerBot(bot))
+    if (!GetPlayerBot(ObjectGuid::Create<HighGuid::Player>(bot)))
     {
-        AddPlayerBot(bot, 0);
+        AddPlayerBot(ObjectGuid::Create<HighGuid::Player>(bot), 0);
         if (!GetEventValue(bot, "online"))
         {
             SetEventValue(bot, "online", 1, sPlayerbotAIConfig.minRandomBotInWorldTime);
@@ -119,7 +119,7 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
         return true;
     }
 
-    Player* player = GetPlayerBot(bot);
+    Player* player = GetPlayerBot(ObjectGuid::Create<HighGuid::Player>(bot));
     if (!player)
         return false;
 
@@ -176,7 +176,7 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
     if (!logout)
     {
         TC_LOG_INFO("playerbot",  "Logging out bot {}", bot);
-        LogoutPlayerBot(bot);
+        LogoutPlayerBot(ObjectGuid::Create<HighGuid::Player>(bot));
         SetEventValue(bot, "logout", 1, sPlayerbotAIConfig.maxRandomBotInWorldTime);
         return true;
     }
@@ -216,8 +216,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
         if (!map)
             continue;
 
-        if (!map->IsOutdoors(x, y, z) ||
-                map->IsInWater(bot->GetPhaseShift(), x, y, z))
+        if (map->IsInWater(bot->GetPhaseShift(), x, y, z))
             continue;
 
         uint32 areaId = map->GetAreaId(bot->GetPhaseShift(), x, y, z);
@@ -418,21 +417,18 @@ void RandomPlayerbotMgr::Refresh(Player* bot)
 
     bot->GetPlayerbotAI()->Reset();
 
-    HostileReference *ref = bot->GetThreatManager().getFirst();
-    while( ref )
+    for (auto const& pair : bot->GetThreatManager().GetThreatenedByMeList())
     {
-        ThreatManager *threatManager = ref->GetSource();
-        Unit *unit = threatManager->GetOwner();
-        float threat = ref->GetThreat();
-
-        unit->RemoveAllAttackers();
-        unit->ClearInCombat();
-
-        ref = ref->next();
+        if (Unit* unit = pair.second->GetOwner())
+        {
+            unit->RemoveAllAttackers();
+            unit->CombatStop(true);
+        }
     }
 
+    bot->GetThreatManager().ClearAllThreat();
     bot->RemoveAllAttackers();
-    bot->ClearInCombat();
+    bot->CombatStop(true);
 
     bot->DurabilityRepairAll(false, 1.0f, false);
     bot->SetFullHealth();
@@ -448,7 +444,7 @@ void RandomPlayerbotMgr::Refresh(Player* bot)
 
 bool RandomPlayerbotMgr::IsRandomBot(Player* bot)
 {
-    return IsRandomBot(bot->GetGUID());
+    return IsRandomBot(bot->GetGUID().GetCounter());
 }
 
 bool RandomPlayerbotMgr::IsRandomBot(uint32 bot)
@@ -648,7 +644,7 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* handler, cha
         list<string> messages = sRandomPlayerbotMgr.HandlePlayerbotCommand(args, NULL);
         for (list<string>::iterator i = messages.begin(); i != messages.end(); ++i)
         {
-            TC_LOG_INFO("playerbot",  i->c_str());
+            TC_LOG_INFO("playerbot",  "{}", i->c_str());
         }
         return true;
     }
@@ -833,7 +829,7 @@ void RandomPlayerbotMgr::PrintStats()
 
 double RandomPlayerbotMgr::GetBuyMultiplier(Player* bot)
 {
-    uint32 id = bot->GetGUID();
+    uint32 id = bot->GetGUID().GetCounter();
     uint32 value = GetEventValue(id, "buymultiplier");
     if (!value)
     {
@@ -847,7 +843,7 @@ double RandomPlayerbotMgr::GetBuyMultiplier(Player* bot)
 
 double RandomPlayerbotMgr::GetSellMultiplier(Player* bot)
 {
-    uint32 id = bot->GetGUID();
+    uint32 id = bot->GetGUID().GetCounter();
     uint32 value = GetEventValue(id, "sellmultiplier");
     if (!value)
     {
@@ -861,13 +857,13 @@ double RandomPlayerbotMgr::GetSellMultiplier(Player* bot)
 
 uint32 RandomPlayerbotMgr::GetLootAmount(Player* bot)
 {
-    uint32 id = bot->GetGUID();
+    uint32 id = bot->GetGUID().GetCounter();
     return GetEventValue(id, "lootamount");
 }
 
 void RandomPlayerbotMgr::SetLootAmount(Player* bot, uint32 value)
 {
-    uint32 id = bot->GetGUID();
+    uint32 id = bot->GetGUID().GetCounter();
     SetEventValue(id, "lootamount", value, 24 * 3600);
 }
 
@@ -887,7 +883,7 @@ string RandomPlayerbotMgr::HandleRemoteCommand(string request)
     }
 
     string command = string(request.begin(), pos);
-    uint64 guid = atoi(string(pos + 1, request.end()).c_str());
+    ObjectGuid guid = ObjectGuid::Create<HighGuid::Player>(uint64(atoi(string(pos + 1, request.end()).c_str())));
     Player* bot = GetPlayerBot(guid);
     if (!bot)
         return "invalid guid";

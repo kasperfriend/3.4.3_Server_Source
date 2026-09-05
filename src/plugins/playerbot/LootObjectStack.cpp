@@ -67,7 +67,7 @@ void LootObject::Refresh(Player* bot, ObjectGuid guid)
         if (creature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_SKINNABLE))
         {
             skillId = creature->GetCreatureTemplate()->GetRequiredLootSkill();
-            uint32 targetLevel = creature->getLevel();
+            uint32 targetLevel = creature->GetLevel();
             reqSkillValue = targetLevel < 10 ? 0 : targetLevel < 20 ? (targetLevel - 10) * 10 : targetLevel * 5;
             if (bot->HasSkill(skillId) && bot->GetSkillValue(skillId) >= reqSkillValue)
                 this->guid = guid;

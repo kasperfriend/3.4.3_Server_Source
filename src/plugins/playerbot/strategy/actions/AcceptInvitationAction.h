@@ -24,13 +24,13 @@ namespace ai
 
             if (!ai->GetSecurity()->CheckLevelFor(PLAYERBOT_SECURITY_INVITE, false, inviter))
             {
-                WorldPackets::Party::PartyInviteResponse decline(WorldPacket(CMSG_PARTY_INVITE_RESPONSE));
+                WorldPackets::Party::PartyInviteResponse decline{WorldPacket(CMSG_PARTY_INVITE_RESPONSE)};
                 decline.Accept = false;
                 bot->GetSession()->HandlePartyInviteResponseOpcode(decline);
                 return false;
             }
 
-            WorldPackets::Party::PartyInviteResponse response(WorldPacket(CMSG_PARTY_INVITE_RESPONSE));
+            WorldPackets::Party::PartyInviteResponse response{WorldPacket(CMSG_PARTY_INVITE_RESPONSE)};
             response.Accept = true;
             bot->GetSession()->HandlePartyInviteResponseOpcode(response);
 

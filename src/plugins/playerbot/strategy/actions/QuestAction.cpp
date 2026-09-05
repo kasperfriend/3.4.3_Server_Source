@@ -91,7 +91,7 @@ bool QuestAction::AcceptQuest(Quest const* quest, uint64 questGiver)
 
     else
     {
-        WorldPackets::Quest::QuestGiverAcceptQuest accept(WorldPacket(CMSG_QUEST_GIVER_ACCEPT_QUEST));
+        WorldPackets::Quest::QuestGiverAcceptQuest accept{WorldPacket(CMSG_QUEST_GIVER_ACCEPT_QUEST)};
         accept.QuestGiverGUID = questGiver;
         accept.QuestID = int32(questId);
         bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(accept);

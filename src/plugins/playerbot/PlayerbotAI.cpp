@@ -137,7 +137,7 @@ void PlayerbotAI::UpdateAI(uint32 elapsed)
             *GetAiObjectContext()->GetValue<bool>("invalid target", "current target"))
     {
         Spell* spell = bot->GetCurrentSpell(CURRENT_GENERIC_SPELL);
-        if (spell && !spell->GetSpellInfo(, DIFFICULTY_NONE)->IsPositive())
+        if (spell && !spell->GetSpellInfo()->IsPositive())
         {
             InterruptSpell();
             SetNextCheckDelay(sPlayerbotAIConfig.globalCoolDown);
@@ -428,7 +428,7 @@ void PlayerbotAI::DoNextAction()
         //WorldPacket packet(CMSG_MOVE_SET_FLY);
         //packet << bot->GetGUID();
         //packet << bot->m_movementInfo;
-        bot->SetMover(bot);
+        
         //bot->GetSession()->HandleMovementOpcodes(packet);
     }
 
@@ -525,9 +525,9 @@ void PlayerbotAI::DoSpecificAction(string name)
 
 bool PlayerbotAI::PlaySound(uint32 emote)
 {
-    if (EmotesTextSoundEntry const* soundEntry = FindTextSoundEmoteFor(emote, bot->GetRace(), bot->GetNativeGender()))
+    if (EmotesTextSoundEntry const* soundEntry = sDB2Manager.GetTextSoundEmoteFor(emote, bot->GetRace(), bot->GetNativeGender(), bot->GetClass()))
     {
-        bot->PlayDistanceSound(soundEntry->SoundId);
+        bot->PlayDistanceSound(soundEntry->SoundID);
         return true;
     }
 
@@ -733,10 +733,10 @@ bool IsRealAura(Player* bot, Aura const* aura, Unit* unit)
         return true;
 
     uint32 stacks = aura->GetStackAmount();
-    if (stacks >= aura->GetSpellInfo(, DIFFICULTY_NONE)->StackAmount)
+    if (stacks >= aura->GetSpellInfo()->StackAmount)
         return true;
 
-    if (aura->GetCaster() == bot || aura->GetSpellInfo(, DIFFICULTY_NONE)->IsPositive() || aura->IsArea())
+    if (aura->GetCaster() == bot || aura->GetSpellInfo()->IsPositive() || aura->IsArea())
         return true;
 
     return false;
@@ -764,7 +764,7 @@ bool PlayerbotAI::HasAura(string name, Unit* unit)
         if (!aura)
             continue;
 
-        const string auraName = aura->GetSpellInfo(, DIFFICULTY_NONE)->SpellName[0];
+        const string auraName = aura->GetSpellInfo()->SpellName->Str[LOCALE_enUS];
         if (auraName.empty() || auraName.length() != wnamepart.length() || !Utf8FitTo(auraName, wnamepart))
             continue;
 
@@ -843,7 +843,7 @@ bool PlayerbotAI::CanCastSpell(uint32 spellid, Unit* target, bool checkHasSpell)
     if (!positiveSpell && bot->IsFriendlyTo(target))
         return false;
 
-    if (target->IsImmunedToSpell(spellInfo))
+    if (target->IsImmunedToSpell(spellInfo, bot))
         return false;
 
     if (bot != target && bot->GetDistance(target) > sPlayerbotAIConfig.sightDistance)
@@ -874,7 +874,6 @@ bool PlayerbotAI::CanCastSpell(uint32 spellid, Unit* target, bool checkHasSpell)
     case SPELL_FAILED_SUMMON_PENDING:
     case SPELL_FAILED_BAD_IMPLICIT_TARGETS:
     case SPELL_FAILED_BAD_TARGETS:
-    case SPELL_CAST_OK:
     case SPELL_FAILED_ITEM_NOT_FOUND:
         return true;
     default:
@@ -990,7 +989,7 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
         return false;
     }
 
-	spell->prepare(&targets);
+	spell->prepare(targets);
 	WaitForSpellCast(spell);
 
     if (oldSel)
@@ -1002,7 +1001,7 @@ bool PlayerbotAI::CastSpell(uint32 spellId, Unit* target)
 
 void PlayerbotAI::WaitForSpellCast(Spell *spell)
 {
-    const SpellInfo* const pSpellInfo = spell->GetSpellInfo(, DIFFICULTY_NONE);
+    const SpellInfo* const pSpellInfo = spell->GetSpellInfo();
 
     float castTime = spell->GetCastTime();
     if (pSpellInfo->IsChanneled())
@@ -1077,16 +1076,16 @@ bool PlayerbotAI::IsInterruptableSpellCasting(Unit* target, string spell)
     if (!spellInfo)
         return false;
 
-    if (target->IsImmunedToSpell(spellInfo))
+    if (target->IsImmunedToSpell(spellInfo, bot))
         return false;
 
     for (uint32 i = EFFECT_0; i <= EFFECT_2; i++)
     {
-        if ((spellInfo->InterruptFlags & SPELL_INTERRUPT_FLAG_INTERRUPT) && spellInfo->PreventionType == SPELL_PREVENTION_TYPE_SILENCE)
+        if (spellInfo->InterruptFlags.HasFlag(SpellInterruptFlags::DamageCancels) && spellInfo->PreventionType == SPELL_PREVENTION_TYPE_SILENCE)
             return true;
 
         if ((spellInfo->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_REMOVE_AURA || spellInfo->GetEffect(SpellEffIndex(i)).Effect == SPELL_EFFECT_INTERRUPT_CAST) &&
-                !target->IsImmunedToSpellEffect(spellInfo, i))
+                !target->IsImmunedToSpellEffect(spellInfo, spellInfo->GetEffect(SpellEffIndex(i)), bot))
             return true;
     }
 
@@ -1101,7 +1100,7 @@ bool PlayerbotAI::HasAuraToDispel(Unit* target, uint32 dispelType)
         for (Unit::AuraEffectList::const_iterator itr = auras.begin(); itr != auras.end(); ++itr)
         {
             const AuraEffect *const aura = *itr;
-			const SpellInfo* entry = aura->GetSpellInfo(, DIFFICULTY_NONE);
+			const SpellInfo* entry = aura->GetSpellInfo();
             uint32 spellId = entry->Id;
 
             bool isPositiveSpell = entry->IsPositive();
@@ -1132,13 +1131,13 @@ bool PlayerbotAI::canDispel(const SpellInfo* entry, uint32 dispelType)
     if (entry->Dispel != dispelType)
         return false;
 
-    return !entry->SpellName[0] ||
-        (strcmpi((const char*)entry->SpellName[0], "demon skin") &&
-        strcmpi((const char*)entry->SpellName[0], "mage armor") &&
-        strcmpi((const char*)entry->SpellName[0], "frost armor") &&
-        strcmpi((const char*)entry->SpellName[0], "wavering will") &&
-        strcmpi((const char*)entry->SpellName[0], "chilled") &&
-        strcmpi((const char*)entry->SpellName[0], "ice armor"));
+    return !entry->SpellName->Str[LOCALE_enUS] ||
+        (strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "demon skin") &&
+        strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "mage armor") &&
+        strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "frost armor") &&
+        strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "wavering will") &&
+        strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "chilled") &&
+        strcmpi((const char*)entry->SpellName->Str[LOCALE_enUS], "ice armor"));
 }
 
 bool IsAlliance(uint8 race)
@@ -1273,7 +1272,7 @@ void PlayerbotAI::_fillGearScoreData(Player *player, Item* item, std::vector<uin
             break;
         case INVTYPE_WEAPON:
         case INVTYPE_WEAPONMAINHAND:
-            (*gearScore)[SLOT_MAIN_HAND] = std::max((*gearScore)[SLOT_MAIN_HAND], level);
+            (*gearScore)[EQUIPMENT_SLOT_MAINHAND] = std::max((*gearScore)[EQUIPMENT_SLOT_MAINHAND], level);
             break;
         case INVTYPE_SHIELD:
         case INVTYPE_WEAPONOFFHAND:

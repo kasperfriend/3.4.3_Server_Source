@@ -37,7 +37,7 @@ bool CheckMailAction::Execute(Event event)
     {
         uint32 id = *i;
         bot->SendMailResult(id, MAIL_DELETED, MAIL_OK);
-        SQLTransaction tran = CharacterDatabase.BeginTransaction();
+        CharacterDatabaseTransaction tran = CharacterDatabase.BeginTransaction();
         CharacterDatabase.PExecute("DELETE FROM mail WHERE id = '%u'", id);
         CharacterDatabase.PExecute("DELETE FROM mail_items WHERE mail_id = '%u'", id);
         CharacterDatabase.CommitTransaction(tran);

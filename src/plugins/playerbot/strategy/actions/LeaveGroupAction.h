@@ -17,7 +17,7 @@ namespace ai
 
             ai->TellMaster("Goodbye!", PLAYERBOT_SECURITY_TALK);
 
-            WorldPackets::Party::LeaveGroup leave(WorldPacket(CMSG_LEAVE_GROUP));
+            WorldPackets::Party::LeaveGroup leave{WorldPacket(CMSG_LEAVE_GROUP)};
             bot->GetSession()->HandleLeaveGroupOpcode(leave);
 
             if (sRandomPlayerbotMgr.IsRandomBot(bot))

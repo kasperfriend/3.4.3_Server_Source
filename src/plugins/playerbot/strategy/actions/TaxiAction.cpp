@@ -14,7 +14,7 @@ bool TaxiAction::Execute(Event event)
     WorldPacket& p = event.getPacket();
 	if (!p.empty() && p.GetOpcode() == CMSG_MOVE_SPLINE_DONE)
     {
-        WorldPackets::Movement::MoveSplineDone splineDone(WorldPacket(p));
+        WorldPackets::Movement::MoveSplineDone splineDone{WorldPacket(p)};
         splineDone.Read();
         bot->GetSession()->HandleMoveSplineDoneOpcode(splineDone);
         movement.taxiNodes.clear();

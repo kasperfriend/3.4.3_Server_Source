@@ -66,7 +66,7 @@ bool AttackAction::Attack(Unit* target)
 
     if (bot->IsMounted())
     {
-        WorldPackets::Spells::CancelMountAura cancelMount(WorldPacket(CMSG_CANCEL_MOUNT_AURA));
+        WorldPackets::Spells::CancelMountAura cancelMount{WorldPacket(CMSG_CANCEL_MOUNT_AURA)};
         bot->GetSession()->HandleCancelMountAuraOpcode(cancelMount);
     }
 

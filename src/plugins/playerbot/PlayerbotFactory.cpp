@@ -169,8 +169,8 @@ void PlayerbotFactory::InitPet()
             return;
 
 		vector<uint32> ids;
-	    CreatureTemplateContainer const* creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
-	    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer->begin(); i != creatureTemplateContainer->end(); ++i)
+	    CreatureTemplateContainer const& creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
+	    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer.begin(); i != creatureTemplateContainer.end(); ++i)
 	    {
 	        CreatureTemplate const& co = i->second;
             if (!co.IsTameable(false))
@@ -929,7 +929,7 @@ void PlayerbotFactory::EnchantItem(Item* item)
 bool PlayerbotFactory::CanEquipUnseenItem(uint8 slot, uint16 &dest, uint32 item)
 {
     dest = 0;
-    Item *pItem = Item::CreateItem(item, 1, bot);
+    Item *pItem = Item::CreateItem(item, 1, ItemContext::NONE, bot);
     if (pItem)
     {
         InventoryResult result = bot->CanEquipItem(slot, dest, pItem, true, false);
@@ -1061,8 +1061,8 @@ void PlayerbotFactory::InitAvailableSpells()
 {
     bot->LearnDefaultSkills();
 
-    CreatureTemplateContainer const* creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
-    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer->begin(); i != creatureTemplateContainer->end(); ++i)
+    CreatureTemplateContainer const& creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
+    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer.begin(); i != creatureTemplateContainer.end(); ++i)
     {
         CreatureTemplate const& co = i->second;
         if (co.trainer_type != TRAINER_TYPE_TRADESKILLS && co.trainer_type != TRAINER_TYPE_CLASS)
@@ -1347,7 +1347,7 @@ void PlayerbotFactory::InitPotions()
 
         if (proto->GetClass() != ITEM_CLASS_CONSUMABLE ||
             proto->GetSubClass() != ITEM_SUBCLASS_POTION ||
-            proto->Spells[0].SpellCategory != 4 ||
+            ItemSpellCategory(proto, 0) != 4 ||
             proto->GetBonding() != BIND_NONE)
             continue;
 
@@ -1362,7 +1362,7 @@ void PlayerbotFactory::InitPotions()
 
         for (int j = 0; j < MAX_ITEM_PROTO_EFFECTS; j++)
         {
-            const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(proto->Spells[j].SpellId, DIFFICULTY_NONE);
+            const SpellInfo* const spellInfo = ItemSpellId(sSpellMgr->GetSpellInfo(proto, j), DIFFICULTY_NONE);
             if (!spellInfo)
                 continue;
 
@@ -1406,7 +1406,7 @@ void PlayerbotFactory::InitFood()
 
         if (proto->GetClass() != ITEM_CLASS_CONSUMABLE ||
             proto->GetSubClass() != ITEM_SUBCLASS_FOOD_DRINK ||
-            (proto->Spells[0].SpellCategory != 11 && proto->Spells[0].SpellCategory != 59) ||
+            ItemSpellCategory((proto, 0) != 11 && ItemSpellCategory(proto, 0) != 59) ||
             proto->GetBonding() != BIND_NONE)
             continue;
 
@@ -1419,7 +1419,7 @@ void PlayerbotFactory::InitFood()
         if (proto->Area || proto->GetMap() || proto->RequiredCityRank || proto->RequiredHonorRank)
             continue;
 
-        items[proto->Spells[0].SpellCategory].push_back(itemId);
+        items[ItemSpellCategory(proto, 0)].push_back(itemId);
     }
 
     uint32 categories[] = { 11, 59 };
@@ -1640,7 +1640,7 @@ void PlayerbotFactory::InitGlyphs()
 
         for (uint32 spell = 0; spell < MAX_ITEM_PROTO_EFFECTS; spell++)
         {
-            uint32 spellId = proto->Spells[spell].SpellId;
+            uint32 spellId = ItemSpellId(proto, spell);
             SpellInfo const *entry = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
             if (!entry)
                 continue;

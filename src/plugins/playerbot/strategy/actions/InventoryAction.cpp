@@ -16,11 +16,11 @@ public:
     {
         if (proto->GetClass() == ITEM_CLASS_CONSUMABLE &&
             proto->GetSubClass() == ITEM_SUBCLASS_POTION &&
-            proto->Spells[0].SpellCategory == 4)
+            ItemSpellCategory(proto, 0) == 4)
         {
             for (int j = 0; j < MAX_ITEM_PROTO_EFFECTS; j++)
             {
-                const SpellInfo* const spellInfo = sSpellMgr->GetSpellInfo(proto->Spells[j].SpellId, DIFFICULTY_NONE);
+                const SpellInfo* const spellInfo = ItemSpellId(sSpellMgr->GetSpellInfo(proto, j), DIFFICULTY_NONE);
                 if (!spellInfo)
                     return false;
 
@@ -50,7 +50,7 @@ public:
     {
         return proto->GetClass() == ITEM_CLASS_CONSUMABLE &&
             proto->GetSubClass() == ITEM_SUBCLASS_FOOD_DRINK &&
-            proto->Spells[0].SpellCategory == spellCategory;
+            ItemSpellCategory(proto, 0) == spellCategory;
     }
 
 private:

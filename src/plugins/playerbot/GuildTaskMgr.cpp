@@ -150,7 +150,7 @@ uint32 GuildTaskMgr::CreateTask(uint32 owner, uint32 guildId)
 
 bool GuildTaskMgr::CreateItemTask(uint32 owner, uint32 guildId)
 {
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
         return false;
 
@@ -175,20 +175,21 @@ bool GuildTaskMgr::CreateItemTask(uint32 owner, uint32 guildId)
 
 bool GuildTaskMgr::CreateKillTask(uint32 owner, uint32 guildId)
 {
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
         return false;
 
-    uint32 rank = !urand(0, 2) ? CREATURE_ELITE_RAREELITE : CREATURE_ELITE_RARE;
+    CreatureClassifications rank = !urand(0, 2) ? CreatureClassifications::RareElite : CreatureClassifications::Rare;
     vector<uint32> ids;
-    CreatureTemplateContainer const* creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
-    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer->begin(); i != creatureTemplateContainer->end(); ++i)
+    CreatureTemplateContainer const& creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
+    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer.begin(); i != creatureTemplateContainer.end(); ++i)
     {
         CreatureTemplate const& co = i->second;
-        if (co.rank != rank)
+        if (co.Classification != rank)
             continue;
 
-        if (co.maxlevel > player->GetLevel() + 4 || co.minlevel < player->GetLevel() - 3)
+        CreatureDifficulty const* creatureDifficulty = co.GetDifficulty(DIFFICULTY_NONE);
+        if (!creatureDifficulty || creatureDifficulty->MaxLevel > player->GetLevel() + 4 || creatureDifficulty->MinLevel < player->GetLevel() - 3)
             continue;
 
         if (co.Name.find("UNUSED") != string::npos)
@@ -221,7 +222,7 @@ bool GuildTaskMgr::SendAdvertisement(uint32 owner, uint32 guildId)
     if (!guild)
         return false;
 
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
         return false;
 
@@ -266,14 +267,14 @@ string formatTime(uint32 secs)
 bool GuildTaskMgr::SendItemAdvertisement(uint32 itemId, uint32 owner, uint32 guildId, uint32 validIn)
 {
     Guild *guild = sGuildMgr->GetGuildById(guildId);
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     Player* leader = ObjectAccessor::FindPlayer(guild->GetLeaderGUID());
 
     ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
     if (!proto)
         return false;
 
-    SQLTransaction trans = CharacterDatabase.BeginTransaction();
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
     ostringstream body;
     body << "Hello, " << player->GetName() << ",\n";
     body << "\n";
@@ -302,14 +303,14 @@ bool GuildTaskMgr::SendItemAdvertisement(uint32 itemId, uint32 owner, uint32 gui
 bool GuildTaskMgr::SendKillAdvertisement(uint32 creatureId, uint32 owner, uint32 guildId, uint32 validIn)
 {
     Guild *guild = sGuildMgr->GetGuildById(guildId);
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     Player* leader = ObjectAccessor::FindPlayer(guild->GetLeaderGUID());
 
     CreatureTemplate const* proto = sObjectMgr->GetCreatureTemplate(creatureId);
     if (!proto)
         return false;
 
-    SQLTransaction trans = CharacterDatabase.BeginTransaction();
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
     ostringstream body;
     body << "Hello, " << player->GetName() << ",\n";
     body << "\n";
@@ -335,7 +336,7 @@ bool GuildTaskMgr::SendThanks(uint32 owner, uint32 guildId)
     if (!guild)
         return false;
 
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
         return false;
 
@@ -350,7 +351,7 @@ bool GuildTaskMgr::SendThanks(uint32 owner, uint32 guildId)
         if (!proto)
             return false;
 
-        SQLTransaction trans = CharacterDatabase.BeginTransaction();
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
         ostringstream body;
         body << "Hello, " << player->GetName() << ",\n";
         body << "\n";
@@ -541,7 +542,7 @@ bool GuildTaskMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
                 if (type == "killTask")
                 {
                     CreatureTemplate const* proto = sObjectMgr->GetCreatureTemplate(value);
-                    string rank = proto->Classification == CREATURE_ELITE_RARE ? "rare" : "elite";
+                    string rank = proto->Classification == CreatureClassifications::Rare ? "rare" : "elite";
                     if (proto) name << " (" << proto->Name << "," << rank << ")";
                 }
                 else if (type == "itemTask")
@@ -661,7 +662,7 @@ bool GuildTaskMgr::Reward(uint32 owner, uint32 guildId)
     if (!guild)
         return false;
 
-    Player* player = ObjectAccessor::FindPlayer(owner);
+    Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
         return false;
 
@@ -706,13 +707,13 @@ bool GuildTaskMgr::Reward(uint32 owner, uint32 guildId)
         rewardType = RANDOM_ITEM_GUILD_TASK_REWARD_TRADE;
     }
 
-    SQLTransaction trans = CharacterDatabase.BeginTransaction();
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
     MailDraft draft("Thank You", body.str());
 
     uint32 itemId = sRandomItemMgr.GetRandomItem(rewardType);
     if (itemId)
     {
-        Item* item = Item::CreateItem(itemId, 1, leader);
+        Item* item = Item::CreateItem(itemId, 1, ItemContext::NONE, leader);
         item->SaveToDB(trans);
         draft.AddItem(item);
     }

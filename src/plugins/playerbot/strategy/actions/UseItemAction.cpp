@@ -75,20 +75,19 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     if (bot->IsInCombat() && item->IsPotion() && bot->GetLastPotionId())
         return false;
 
-    uint8 bagIndex = item->GetBagSlot();
-    uint8 slot = item->GetSlot();
-    uint8 cast_count = 1;
-    uint64 item_guid = item->GetGUID();
-    uint32 glyphIndex = 0;
-    uint8 unk_flags = 0;
+    ItemTemplate const* proto = item->GetTemplate();
 
-    WorldPacket* const packet = new WorldPacket(CMSG_USE_ITEM, 1 + 1 + 1 + 4 + 8 + 4 + 1 + 8 + 1);
-    *packet << bagIndex << slot << cast_count << uint32(0) << item_guid
-        << glyphIndex << unk_flags;
+    WorldPackets::Spells::UseItem useItem{WorldPacket(CMSG_USE_ITEM)};
+    useItem.PackSlot = item->GetBagSlot();
+    useItem.Slot = item->GetSlot();
+    useItem.CastItem = item->GetGUID();
+    useItem.Cast.CastID = ObjectGuid::Create<HighGuid::Cast>(SPELL_CAST_SOURCE_NORMAL, bot->GetMapId(), 0, bot->GetMap()->GenerateLowGuid<HighGuid::Cast>());
+    useItem.Cast.SpellID = 0;
+    useItem.Cast.Target.Flags = TARGET_FLAG_NONE;
 
     bool targetSelected = false;
-    ostringstream out; out << "Using " << chat->formatItem(item->GetTemplate());
-    if (item->GetTemplate()->Stackable)
+    ostringstream out; out << "Using " << chat->formatItem(proto);
+    if (proto->GetMaxStackSize())
     {
         uint32 count = item->GetCount();
         if (count > 1)
@@ -97,14 +96,13 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
             out << " (the last one!)";
     }
 
-    if (goGuid)
+    if (!goGuid.IsEmpty())
     {
         GameObject* go = ai->GetGameObject(goGuid);
         if (go && go->isSpawned())
         {
-            uint32 targetFlag = TARGET_FLAG_UNIT_ENEMY;
-            *packet << targetFlag;
-            *packet << goGuid;
+            useItem.Cast.Target.Flags = TARGET_FLAG_GAMEOBJECT;
+            useItem.Cast.Target.Unit = goGuid;
             out << " on " << chat->formatGameobject(go);
             targetSelected = true;
         }
@@ -112,47 +110,31 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
 
     if (itemTarget)
     {
-        if (item->GetTemplate()->Class == ITEM_CLASS_GEM)
+        if (proto->GetClass() == ITEM_CLASS_GEM)
         {
             bool fit = SocketItem(itemTarget, item) || SocketItem(itemTarget, item, true);
             if (!fit)
                 ai->TellMaster("Socket does not fit");
             return fit;
         }
-        else
-        {
-            uint32 targetFlag = TARGET_FLAG_ITEM;
-            *packet << targetFlag;
-            packet-> operator<<(itemTarget->GetGUID());
-            out << " on " << chat->formatItem(itemTarget->GetTemplate());
-            targetSelected = true;
-        }
+
+        useItem.Cast.Target.Flags = TARGET_FLAG_ITEM;
+        useItem.Cast.Target.Item = itemTarget->GetGUID();
+        out << " on " << chat->formatItem(itemTarget->GetTemplate());
+        targetSelected = true;
     }
 
-    Player* master = GetMaster();
-    if (!targetSelected && item->GetTemplate()->Class != ITEM_CLASS_CONSUMABLE && master)
-    {
-        Unit* masterSelection = master->GetSelectedUnit();
-        if (masterSelection)
-        {
-            uint32 targetFlag = TARGET_FLAG_UNIT;
-            *packet << targetFlag;
-            packet-> operator<<(masterSelection->GetGUID());
-            out << " on " << masterSelection->GetName();
-            targetSelected = true;
-        }
-    }
-
-    if(uint32 questid = item->GetTemplate()->StartQuest)
+    if (uint32 questid = proto->GetStartQuest())
     {
         Quest const* qInfo = sObjectMgr->GetQuestTemplate(questid);
         if (qInfo)
         {
-            WorldPacket* const packet = new WorldPacket(CMSG_QUEST_GIVER_ACCEPT_QUEST, 8+4+4);
-            *packet << item_guid;
-            *packet << questid;
-            *packet << uint32(0);
-            bot->GetSession()->QueuePacket(packet); // queue the packet to get around race condition
+            WorldPackets::Quest::QuestGiverAcceptQuest packet{WorldPacket(CMSG_QUEST_GIVER_ACCEPT_QUEST)};
+            packet.QuestGiverGUID = item->GetGUID();
+            packet.QuestID = questid;
+            packet.StartCheat = false;
+            bot->GetSession()->HandleQuestgiverAcceptQuestOpcode(packet);
+
             ostringstream out; out << "Got quest " << chat->formatQuest(qInfo);
             ai->TellMasterNoFacing(out.str());
             return true;
@@ -161,15 +143,15 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
 
     MotionMaster &mm = *bot->GetMotionMaster();
     mm.Clear();
-    bot->ClearUnitState( UNIT_STATE_CHASE );
-    bot->ClearUnitState( UNIT_STATE_FOLLOW );
+    bot->ClearUnitState(UNIT_STATE_CHASE);
+    bot->ClearUnitState(UNIT_STATE_FOLLOW);
 
     if (bot->isMoving())
         return false;
 
-    for (int i=0; i<MAX_ITEM_PROTO_EFFECTS; i++)
+    for (uint32 i = 0; i < MAX_ITEM_PROTO_EFFECTS; i++)
     {
-        uint32 spellId = item->GetTemplate()->Spells[i].SpellId;
+        uint32 spellId = ItemSpellId(proto, i);
         if (!spellId)
             continue;
 
@@ -177,6 +159,11 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
             continue;
 
         const SpellInfo* const pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
+        if (!pSpellInfo)
+            continue;
+
+        useItem.Cast.SpellID = spellId;
+
         if (pSpellInfo->Targets & TARGET_FLAG_ITEM)
         {
             Item* itemForSpell = AI_VALUE2(Item*, "item for spell", spellId);
@@ -191,25 +178,22 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
                 if (selfOnly)
                     return false;
 
-                *packet << TARGET_FLAG_TRADE_ITEM << (uint8)1 << (uint64)TRADE_SLOT_NONTRADED;
+                useItem.Cast.Target.Flags = TARGET_FLAG_TRADE_ITEM;
+                useItem.Cast.Target.Item = itemForSpell->GetGUID();
                 targetSelected = true;
                 out << " on traded item";
             }
             else
             {
-                *packet << TARGET_FLAG_ITEM;
-                packet-> operator<<(itemForSpell->GetGUID());
+                useItem.Cast.Target.Flags = TARGET_FLAG_ITEM;
+                useItem.Cast.Target.Item = itemForSpell->GetGUID();
                 targetSelected = true;
-                out << " on "<< chat->formatItem(itemForSpell->GetTemplate());
+                out << " on " << chat->formatItem(itemForSpell->GetTemplate());
             }
-
-            Spell *spell = new Spell(bot, pSpellInfo, TRIGGERED_NONE, ObjectGuid::Empty, true);
-            ai->WaitForSpellCast(spell);
-            delete spell;
         }
         else
         {
-            *packet << TARGET_FLAG_NONE;
+            useItem.Cast.Target.Flags = TARGET_FLAG_NONE;
             targetSelected = true;
             out << " on self";
         }
@@ -219,7 +203,7 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     if (!targetSelected)
         return false;
 
-    if (item->GetTemplate()->Class == ITEM_CLASS_CONSUMABLE && item->GetTemplate()->SubClass == ITEM_SUBCLASS_FOOD_DRINK)
+    if (proto->GetClass() == ITEM_CLASS_CONSUMABLE && proto->GetSubClass() == ITEM_SUBCLASS_FOOD_DRINK)
     {
         if (bot->IsInCombat())
             return false;
@@ -229,63 +213,45 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     }
 
     ai->TellMasterNoFacing(out.str());
-    bot->GetSession()->QueuePacket(packet);
+    bot->GetSession()->HandleUseItemOpcode(useItem);
     return true;
 }
 
 bool UseItemAction::SocketItem(Item* item, Item* gem, bool replace)
 {
-    WorldPacket* const packet = new WorldPacket(CMSG_SOCKET_GEMS);
-    *packet << item->GetGUID();
+    WorldPackets::Item::SocketGems socketGems{WorldPacket(CMSG_SOCKET_GEMS)};
+    socketGems.ItemGuid = item->GetGUID();
 
     bool fits = false;
     for (uint32 enchant_slot = SOCK_ENCHANTMENT_SLOT; enchant_slot < SOCK_ENCHANTMENT_SLOT + MAX_GEM_SOCKETS; ++enchant_slot)
     {
-        uint8 SocketColor = item->GetTemplate()->Socket[enchant_slot-SOCK_ENCHANTMENT_SLOT].Color;
-        GemPropertiesEntry const* gemProperty = sGemPropertiesStore.LookupEntry(gem->GetTemplate()->GemProperties);
-        if (gemProperty && (gemProperty->color & SocketColor))
+        uint32 socketIndex = enchant_slot - SOCK_ENCHANTMENT_SLOT;
+        uint8 socketColor = item->GetTemplate()->GetSocketColor(socketIndex);
+        GemPropertiesEntry const* gemProperty = sGemPropertiesStore.LookupEntry(gem->GetTemplate()->GetGemProperties());
+        if (gemProperty && (gemProperty->Type & socketColor) && !fits)
         {
-            if (fits)
-            {
-                *packet << ObjectGuid();
-                continue;
-            }
-
             uint32 enchant_id = item->GetEnchantmentId(EnchantmentSlot(enchant_slot));
-            if (!enchant_id)
+            SpellItemEnchantmentEntry const* enchantEntry = enchant_id ? sSpellItemEnchantmentStore.LookupEntry(enchant_id) : nullptr;
+
+            if (!enchant_id || !enchantEntry || !enchantEntry->GemItemID ||
+                (replace && uint32(enchantEntry->GemItemID) != gem->GetTemplate()->GetId()))
             {
-                *packet << gem->GetGUID();
+                socketGems.GemItem[socketIndex] = gem->GetGUID();
                 fits = true;
                 continue;
             }
-
-            SpellItemEnchantmentEntry const* enchantEntry = sSpellItemEnchantmentStore.LookupEntry(enchant_id);
-            if (!enchantEntry || !enchantEntry->GemID)
-            {
-                *packet << gem->GetGUID();
-                fits = true;
-                continue;
-            }
-
-			if (replace && enchantEntry->GemID != gem->GetTemplate()->ItemId)
-            {
-                *packet << gem->GetGUID();
-                fits = true;
-                continue;
-            }
-
         }
 
-        *packet << ObjectGuid();
+        socketGems.GemItem[socketIndex] = ObjectGuid::Empty;
     }
 
     if (fits)
     {
         ostringstream out; out << "Socketing " << chat->formatItem(item->GetTemplate());
-        out << " with "<< chat->formatItem(gem->GetTemplate());
+        out << " with " << chat->formatItem(gem->GetTemplate());
         ai->TellMasterNoFacing(out.str());
 
-        bot->GetSession()->QueuePacket(packet);
+        bot->GetSession()->HandleSocketGems(socketGems);
     }
     return fits;
 }

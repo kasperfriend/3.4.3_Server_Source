@@ -32,7 +32,7 @@ public:
 
         for (int i=0; i<MAX_ITEM_PROTO_EFFECTS; i++)
         {
-            uint32 spellId = proto->Spells[i].SpellId;
+            uint32 spellId = ItemSpellId(proto, i);
             if (!spellId)
                 continue;
 

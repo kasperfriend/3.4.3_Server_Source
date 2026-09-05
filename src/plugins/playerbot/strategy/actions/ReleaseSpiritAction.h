@@ -18,7 +18,7 @@ namespace ai
 
             ai->ChangeStrategy("-follow,+stay", BOT_STATE_NON_COMBAT);
 
-            bot->SetBotDeathTimer();
+            
             bot->BuildPlayerRepop();
 
             bot->RepopAtGraveyard();

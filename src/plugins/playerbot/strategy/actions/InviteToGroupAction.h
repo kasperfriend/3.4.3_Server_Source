@@ -16,7 +16,7 @@ namespace ai
             if (!master)
                 return false;
 
-            WorldPackets::Party::PartyInviteClient invite(WorldPacket(CMSG_PARTY_INVITE));
+            WorldPackets::Party::PartyInviteClient invite{WorldPacket(CMSG_PARTY_INVITE)};
             invite.TargetName = master->GetName();
             invite.TargetGUID = master->GetGUID();
             bot->GetSession()->HandlePartyInviteOpcode(invite);
