@@ -1,0 +1,587 @@
+# Release build – triggered manually from the Actions tab.
+#
+# Builds the server (worldserver + bnetserver) with AI Playerbots on
+# Ubuntu 22.04 and Windows Server 2022, packages the binaries with
+# SQL, config, docs and all required DLLs, and publishes a GitHub
+# Release with downloadable archives.
+#
+# Usage:  Actions → Release → Run workflow → fill in the tag name.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v3.4.3-bots-1). Leave empty for auto-generated."
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark as pre-release"
+        type: boolean
+        default: true
+      build_type:
+        description: "CMake build type"
+        type: choice
+        options:
+          - RelWithDebInfo
+          - Release
+        default: RelWithDebInfo
+      build_windows:
+        description: "Also build Windows binaries (adds ~45 min)"
+        type: boolean
+        default: true
+
+jobs:
+  # ==================================================================
+  #  Linux release build
+  # ==================================================================
+  release-linux:
+    name: Release (Linux x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                       /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo apt-get purge -y --auto-remove \
+            '^temurin-.*-jdk' '^openjdk-.*' '^dotnet-.*' \
+            '^llvm-.*' '^google-chrome-.*' '^microsoft-edge-.*' 2>/dev/null || true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            gcc-12 g++-12 \
+            cmake \
+            git \
+            libssl-dev \
+            libmysqlclient-dev \
+            libboost-all-dev \
+            libreadline-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            libncurses-dev \
+            patchelf
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+      - name: Configure (CMake)
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/release/trinitycore-3.4.3 \
+            -DSERVERS=1 \
+            -DTOOLS=1 \
+            -DSCRIPTS=static \
+            -DWITH_DYNAMIC_LINKING=0 \
+            -DUSE_COREPCH=1 \
+            -DUSE_SCRIPTPCH=1 \
+            -DWITH_WARNINGS=0 \
+            -DWITHOUT_GIT=1 \
+            -DCOPY_CONF=1
+
+      - name: Build
+        run: |
+          cmake --build build -j$(nproc)
+
+      - name: Install
+        run: |
+          cmake --install build
+
+      - name: Bundle SQL, config, docs
+        run: |
+          DEST=$GITHUB_WORKSPACE/release/trinitycore-3.4.3
+          # SQL files
+          mkdir -p "$DEST/sql"
+          cp -r sql/base "$DEST/sql/" 2>/dev/null || true
+          cp -r sql/create "$DEST/sql/" 2>/dev/null || true
+          cp -r sql/custom "$DEST/sql/" 2>/dev/null || true
+          cp -r sql/updates "$DEST/sql/" 2>/dev/null || true
+          # Playerbot config
+          mkdir -p "$DEST/etc/worldserver.conf.d"
+          cp src/plugins/playerbot/aiplayerbot.conf.dist "$DEST/etc/worldserver.conf.d/" 2>/dev/null || true
+          # Documentation
+          mkdir -p "$DEST/docs"
+          cp docs/Playerbots.md "$DEST/docs/" 2>/dev/null || true
+          cp README.md "$DEST/" 2>/dev/null || true
+          # Quick-start script
+          cat > "$DEST/start-worldserver.sh" << 'STARTEOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          echo "Starting worldserver from $DIR ..."
+          echo "Make sure you have:"
+          echo "  1. Created auth, characters, world databases"
+          echo "  2. Imported sql/base/*.sql, sql/updates/*.sql"
+          echo "  3. Imported sql/custom/playerbot/characters_playerbot.sql"
+          echo "  4. Configured etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf"
+          echo ""
+          cd "$DIR"
+          exec ./bin/worldserver
+          STARTEOF
+          chmod +x "$DEST/start-worldserver.sh"
+
+      - name: Strip debug symbols
+        run: |
+          DEST=$GITHUB_WORKSPACE/release/trinitycore-3.4.3
+          for bin in "$DEST/bin/worldserver" "$DEST/bin/bnetserver" \
+                     "$DEST/bin/map_extractor" "$DEST/bin/vmap4_extractor" \
+                     "$DEST/bin/vmap4_assembler" "$DEST/bin/mmaps_generator"; do
+            if [ -f "$bin" ]; then
+              if [ "${{ inputs.build_type }}" = "RelWithDebInfo" ]; then
+                objcopy --only-keep-debug "$bin" "$bin.debug" 2>/dev/null || true
+              fi
+              strip --strip-unneeded "$bin" 2>/dev/null || true
+              echo "  $(basename $bin): $(du -h "$bin" | cut -f1)"
+            fi
+          done
+
+      - name: Create release archive
+        id: package
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="build-$(date +%Y%m%d)"
+          fi
+          ARCHIVE="trinitycore-3.4.3-linux-x86_64-${TAG}.tar.gz"
+          cd $GITHUB_WORKSPACE/release
+          tar czf "$GITHUB_WORKSPACE/$ARCHIVE" trinitycore-3.4.3/
+          echo "artifact_name=$ARCHIVE" >> $GITHUB_OUTPUT
+          echo ""
+          echo "Archive contents:"
+          tar tzf "$GITHUB_WORKSPACE/$ARCHIVE" | head -30
+          echo "  ... ($(tar tzf "$GITHUB_WORKSPACE/$ARCHIVE" | wc -l) entries)"
+          echo "Archive size: $(du -h "$GITHUB_WORKSPACE/$ARCHIVE" | cut -f1)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.artifact_name }}
+          retention-days: 7
+
+  # ==================================================================
+  #  Windows release build
+  # ==================================================================
+  release-windows:
+    name: Release (Windows x64)
+    runs-on: windows-2022
+    timeout-minutes: 360
+    if: ${{ inputs.build_windows }}
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact_name }}
+
+    env:
+      VCPKG_ROOT: C:\vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          cd $env:VCPKG_ROOT
+          .\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Install dependencies via vcpkg
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install `
+            boost-system:x64-windows `
+            boost-filesystem:x64-windows `
+            boost-program-options:x64-windows `
+            boost-iostreams:x64-windows `
+            boost-regex:x64-windows `
+            boost-locale:x64-windows `
+            openssl:x64-windows
+        timeout-minutes: 300
+
+      - name: Configure (CMake)
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3" `
+            -DSERVERS=1 `
+            -DTOOLS=1 `
+            -DSCRIPTS=static `
+            -DWITH_DYNAMIC_LINKING=0 `
+            -DUSE_COREPCH=1 `
+            -DUSE_SCRIPTPCH=1 `
+            -DWITH_WARNINGS=0 `
+            -DWITHOUT_GIT=1 `
+            -DCOPY_CONF=1
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config ${{ inputs.build_type }} -- /m /p:CL_MPCount=2
+
+      - name: Install
+        shell: pwsh
+        run: |
+          cmake --install build --config ${{ inputs.build_type }}
+
+      - name: Bundle SQL, config, docs, DLLs, and launcher
+        shell: pwsh
+        run: |
+          $DEST = "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3"
+          $BINDIR = "$DEST\bin"
+
+          # --- SQL ---
+          New-Item -ItemType Directory -Force "$DEST\sql" | Out-Null
+          Copy-Item -Recurse -Force "sql\base"   "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\create"  "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\custom"  "$DEST\sql\" -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "sql\updates" "$DEST\sql\" -ErrorAction SilentlyContinue
+
+          # --- Config ---
+          New-Item -ItemType Directory -Force "$DEST\etc\worldserver.conf.d" | Out-Null
+          Copy-Item "src\plugins\playerbot\aiplayerbot.conf.dist" "$DEST\etc\worldserver.conf.d\" -ErrorAction SilentlyContinue
+
+          # --- Docs ---
+          New-Item -ItemType Directory -Force "$DEST\docs" | Out-Null
+          Copy-Item "docs\Playerbots.md" "$DEST\docs\" -ErrorAction SilentlyContinue
+          Copy-Item "README.md" "$DEST\" -ErrorAction SilentlyContinue
+
+          # --- vcpkg DLLs (OpenSSL, Boost, zlib, etc.) ---
+          $VCINST = "$env:VCPKG_ROOT\installed\x64-windows\bin"
+          if (Test-Path $VCINST) {
+            Write-Host "Copying vcpkg DLLs from $VCINST ..."
+            Copy-Item "$VCINST\*.dll" "$BINDIR\" -ErrorAction SilentlyContinue
+            Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
+          }
+
+          # --- MySQL client DLL ---
+          # The pre-installed MySQL Server on the runner provides libmysql.dll.
+          $MYSQL_PATHS = @(
+            "C:\Program Files\MySQL\MySQL Server 8.0\lib",
+            "C:\Program Files\MySQL\MySQL Server 8.4\lib",
+            "C:\Program Files (x86)\MySQL\MySQL Server 8.0\lib"
+          )
+          foreach ($mp in $MYSQL_PATHS) {
+            $dll = Join-Path $mp "libmysql.dll"
+            if (Test-Path $dll) {
+              Write-Host "Copying MySQL DLL: $dll"
+              Copy-Item $dll "$BINDIR\" -Force
+              break
+            }
+          }
+          # Fallback: search vcpkg if we installed libmysql there
+          $vcpkg_mysql = "$env:VCPKG_ROOT\installed\x64-windows\bin\libmysql.dll"
+          if ((-not (Test-Path "$BINDIR\libmysql.dll")) -and (Test-Path $vcpkg_mysql)) {
+            Write-Host "Copying MySQL DLL from vcpkg"
+            Copy-Item $vcpkg_mysql "$BINDIR\" -Force
+          }
+
+          # --- MSVC Runtime DLLs ---
+          # Deploy the VC++ redistributable DLLs next to the executables
+          # so the server runs on any Windows 10/11 machine without a
+          # separate VC++ Redist install.
+          $VCREDIST = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT"
+          $found = Get-ChildItem -Path $VCREDIST -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            # Try the Enterprise path specifically
+            $VCREDIST2 = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT"
+            $found = Get-ChildItem -Path $VCREDIST2 -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($found) {
+            Write-Host "Copying MSVC runtime DLLs from $($found.FullName) ..."
+            Copy-Item "$($found.FullName)\*.dll" "$BINDIR\" -ErrorAction SilentlyContinue
+          } else {
+            # Last resort: use vcpkg's MSVC merge module or just warn
+            Write-Warning "Could not find MSVC redistributable DLLs. Users may need to install the VC++ Redistributable."
+            # Try to find the DLLs in the system
+            $sys32 = "$env:SystemRoot\System32"
+            foreach ($dll in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "concrt140.dll")) {
+              $src = Join-Path $sys32 $dll
+              if (Test-Path $src) {
+                Write-Host "  Copying $dll from System32"
+                Copy-Item $src "$BINDIR\" -Force
+              }
+            }
+          }
+
+          # --- Database setup scripts ---
+          if (Test-Path "Setup-Database.bat") {
+            Copy-Item "Setup-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Setup-Database.bat"
+          }
+          if (Test-Path "Start-Database.bat") {
+            Copy-Item "Start-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Start-Database.bat"
+          }
+          if (Test-Path "Stop-Database.bat") {
+            Copy-Item "Stop-Database.bat" "$DEST\" -Force
+            Write-Host "  Copied Stop-Database.bat"
+          }
+
+          # --- Launcher batch file ---
+          @"
+          @echo off
+          title TrinityCore 3.4.3 World Server
+          echo ============================================================
+          echo   TrinityCore 3.4.3 + AI Playerbots
+          echo ============================================================
+          echo.
+          echo If this is your first time, run Setup-Database.bat first!
+          echo It will download and configure a portable MariaDB database.
+          echo.
+          echo Starting worldserver...
+          echo.
+          cd /d "%~dp0"
+          bin\worldserver.exe
+          pause
+          "@ | Set-Content "$DEST\start-worldserver.bat" -Encoding ASCII
+
+          # --- README for the zip ---
+          @"
+          TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
+          =======================================================
+
+          QUICK START (3 steps):
+            1. Double-click Setup-Database.bat
+               (downloads portable MariaDB, creates databases, imports SQL)
+            2. Extract client maps (see below)
+            3. Double-click start-worldserver.bat
+
+          Database scripts:
+            Setup-Database.bat  - First-time setup (downloads MariaDB, imports SQL)
+            Start-Database.bat  - Start the database (run before worldserver)
+            Stop-Database.bat   - Stop the database
+
+          Contents:
+            bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
+            sql\          - database schemas (base, create, custom, updates)
+            etc\          - configuration files (auto-configured by Setup-Database.bat)
+            docs\         - Playerbots.md documentation
+
+          Client map extraction (one-time):
+            bin\map_extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4_extractor.exe -d "C:\path\to\WoW"
+            bin\vmap4_assembler.exe Buildings vmaps
+            bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
+            (then copy the dbc, maps, vmaps, mmaps folders next to the .exe files)
+
+          For AI Playerbot documentation, see docs\Playerbots.md
+          "@ | Set-Content "$DEST\WINDOWS-README.txt" -Encoding ASCII
+
+          Write-Host ""
+          Write-Host "=== Final package contents ==="
+          Get-ChildItem "$BINDIR\*.exe" | ForEach-Object { Write-Host "  bin\$($_.Name) ($([math]::Round($_.Length/1MB,1)) MB)" }
+          Get-ChildItem "$BINDIR\*.dll" | ForEach-Object { Write-Host "  bin\$($_.Name)" }
+          Write-Host "  sql\ (database schemas)"
+          Write-Host "  etc\ (configuration)"
+          Write-Host "  docs\ (documentation)"
+          Write-Host "  Setup-Database.bat (database installer)"
+          Write-Host "  Start-Database.bat (database launcher)"
+          Write-Host "  Stop-Database.bat (database stopper)"
+          Write-Host "  start-worldserver.bat (server launcher)"
+
+      - name: Create release archive
+        id: package
+        shell: pwsh
+        run: |
+          $TAG = "${{ inputs.tag }}"
+          if ([string]::IsNullOrWhiteSpace($TAG)) {
+            $TAG = "build-" + (Get-Date -Format "yyyyMMdd")
+          }
+          $ARCHIVE = "trinitycore-3.4.3-windows-x64-$TAG.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\release\trinitycore-3.4.3" `
+            -DestinationPath "$env:GITHUB_WORKSPACE\$ARCHIVE" -Force
+          "artifact_name=$ARCHIVE" >> $env:GITHUB_OUTPUT
+          $size = [math]::Round((Get-Item "$env:GITHUB_WORKSPACE\$ARCHIVE").Length / 1MB, 1)
+          Write-Host "Archive: $ARCHIVE ($size MB)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.artifact_name }}
+          retention-days: 7
+
+  # ==================================================================
+  #  Publish GitHub Release
+  # ==================================================================
+  publish-release:
+    name: Publish GitHub Release
+    needs: [release-linux, release-windows]
+    # Run when linux succeeds, regardless of windows (windows is optional)
+    if: always() && needs.release-linux.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository (for release notes)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -lh artifacts/
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="build-$(date +%Y%m%d)"
+          fi
+          # Make sure the tag doesn't already exist; if so, append a suffix
+          for i in $(seq 1 20); do
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              break
+            fi
+            TAG="${TAG}-$i"
+          done
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using tag: $TAG"
+
+      - name: Count commits since last release
+        id: commits
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            COUNT=$(git rev-list ${LAST_TAG}..HEAD --count)
+            echo "count=$COUNT" >> $GITHUB_OUTPUT
+            echo "since=$LAST_TAG" >> $GITHUB_OUTPUT
+          else
+            COUNT=$(git rev-list HEAD --count)
+            echo "count=$COUNT" >> $GITHUB_OUTPUT
+            echo "since=initial" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build release body
+        id: body
+        run: |
+          HAS_WINDOWS="no"
+          if ls artifacts/*.zip 1>/dev/null 2>&1; then
+            HAS_WINDOWS="yes"
+          fi
+
+          cat > release_body.md << BODYEOF
+          ## TrinityCore 3.4.3 Server with AI Playerbots
+
+          Built from commit \`${{ github.sha }}\` on branch \`${{ github.ref_name }}\`.
+          ${{ steps.commits.outputs.count }} commits since ${{ steps.commits.outputs.since }}.
+
+          ### What's included
+
+          | Component | Description |
+          | --- | --- |
+          | **worldserver** | Game server with integrated AI playerbots ([ike3/mangosbot](https://github.com/ike3/mangosbot) port) |
+          | **bnetserver** | Authentication / Battle.net login server |
+          | **map_extractor** | Client DBC/DB2 data extraction |
+          | **vmap4_extractor / vmap4_assembler** | Visibility map generation |
+          | **mmaps_generator** | Movement map (navmesh) generation |
+          | **sql/** | Database schemas: base, create, custom (playerbot tables), updates |
+          | **etc/** | Server configuration including \`aiplayerbot.conf.dist\` |
+          | **docs/Playerbots.md** | Full AI playerbot documentation |
+
+          ### Downloads
+
+          | Platform | Archive | Prerequisites |
+          | --- | --- | --- |
+          | **Linux** x86_64 | \`.tar.gz\` | MySQL 8.0, OpenSSL 1.1+ |
+          BODYEOF
+
+          if [ "$HAS_WINDOWS" = "yes" ]; then
+            cat >> release_body.md << WINEOF
+          | **Windows** x64 | \`.zip\` | None — portable DB, MSVC runtime, all DLLs included |
+          WINEOF
+          fi
+
+          cat >> release_body.md << QSEOF
+
+          ### Quick start (Linux)
+
+          \`\`\`bash
+          tar xzf trinitycore-3.4.3-linux-x86_64-*.tar.gz
+          cd trinitycore-3.4.3
+
+          # Create databases
+          mysql -u root -e "CREATE DATABASE auth; CREATE DATABASE characters; CREATE DATABASE world;"
+
+          # Import SQL
+          mysql -u root auth < sql/base/auth_database.sql
+          mysql -u root characters < sql/base/characters_database.sql
+          mysql -u root world < sql/base/world_database.sql
+          mysql -u root characters < sql/custom/playerbot/characters_playerbot.sql
+
+          # Configure
+          cp etc/worldserver.conf.dist etc/worldserver.conf
+          # Edit etc/worldserver.conf and etc/worldserver.conf.d/aiplayerbot.conf
+
+          # Run
+          ./bin/worldserver
+          \`\`\`
+          QSEOF
+
+          if [ "$HAS_WINDOWS" = "yes" ]; then
+            cat >> release_body.md << WINQSEOF
+
+          ### Quick start (Windows)
+
+          1. Extract the \`.zip\`
+          2. Double-click **\`Setup-Database.bat\`** — downloads portable MariaDB, creates databases, imports all SQL, and configures the server automatically
+          3. Extract client maps (map_extractor, vmap4_extractor, vmap4_assembler, mmaps_generator)
+          4. Double-click **\`start-worldserver.bat\`**
+
+          No MySQL/MariaDB installation needed — the setup script downloads a fully portable database.
+          All required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime) are included in the zip.
+          WINQSEOF
+          fi
+
+          cat >> release_body.md << FOOTEOF
+
+          ### Build information
+
+          - Build type: \`${{ inputs.build_type }}\`
+          - Static linking: \`WITH_DYNAMIC_LINKING=0\`
+          - Scripts: \`static\` (all scripts linked into worldserver)
+          FOOTEOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "TrinityCore 3.4.3 + AI Playerbots — ${{ steps.tag.outputs.tag }}"
+          body_path: release_body.md
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
