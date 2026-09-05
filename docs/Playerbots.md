@@ -64,6 +64,11 @@ cmake --install build
 `cmake --install` also drops `aiplayerbot.conf.dist` into
 `<conf dir>/worldserver.conf.d/`.
 
+> **Note:** build with the default static linking (`WITH_DYNAMIC_LINKING=0`).
+> With shared libraries the core is compiled with `-fvisibility=hidden` and the
+> bots reference plenty of core functions that are not marked `TC_GAME_API`,
+> which would fail to link.
+
 ---
 
 ## 3. Database setup
@@ -197,9 +202,11 @@ migrations applied during the port:
 
 ## 7. Limitations
 
-* The bots are ported "best effort": all 257 translation units compile against
-  the 3.4.3 API, but the class strategy rotations still use 3.3.5-era spell
-  names and will need tuning for 3.4.3 spell IDs.
+* The bots are ported "best effort": all 257 translation units compile and link
+  against the 3.4.3 API (verified object-by-object; the only unresolved
+  plugin-side symbols are the three core hook-registry functions), but the class
+  strategy rotations still use 3.3.5-era spell names and will need tuning for
+  3.4.3 spell IDs.
 * A few 3.3.5 features have no direct 3.4.3 equivalent and were removed rather
   than emulated (ranged ammo checks, `GameObject` spellcaster teleports use the
   new `spellCaster.spell` field, gossip options are matched by
