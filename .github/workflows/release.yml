@@ -84,6 +84,14 @@ jobs:
           #   * Boost 1.87 stopped pulling <boost/filesystem/directory.hpp> in
           #     from <boost/filesystem/operations.hpp>; the six core files that
           #     use directory iterators now include it explicitly.
+          #   * Boost 1.72 extracted filesystem_error into
+          #     <boost/filesystem/exception.hpp> and kept it reachable from
+          #     operations.hpp only as a deprecated implicit include that later
+          #     releases dropped.  The two extraction tools that catch
+          #     boost::filesystem::filesystem_error
+          #     (src/tools/map_extractor/System.cpp and
+          #     src/tools/vmap4_extractor/vmapexport.cpp) now include
+          #     <boost/filesystem/exception.hpp> explicitly.
           #   * Boost 1.87 removed <boost/asio/io_service.hpp>; the playerbot
           #     command server now uses boost::asio::io_context.
           #

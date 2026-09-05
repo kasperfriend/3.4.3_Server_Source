@@ -32,6 +32,11 @@
 #include <CascLib.h>
 #include <boost/filesystem/directory.hpp>
 #include <boost/filesystem/operations.hpp>
+// Boost 1.72 extracted filesystem_error into exception.hpp and operations.hpp
+// only includes it as a deprecated implicit include that newer Boost releases
+// have since removed; pull it in explicitly so catching
+// boost::filesystem::filesystem_error compiles.
+#include <boost/filesystem/exception.hpp>
 #include <fstream>
 #include <list>
 #include <map>
