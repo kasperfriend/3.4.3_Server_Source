@@ -27,6 +27,7 @@
 #include "TemporarySummon.h"
 #include "Unit.h"
 #include "Util.h"
+#include "VehicleDefines.h"
 #include <optional>
 
  // Helpers

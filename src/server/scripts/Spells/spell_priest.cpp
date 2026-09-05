@@ -26,6 +26,7 @@
 #include "CommonPredicates.h"
 #include "Errors.h"
 #include "GridNotifiers.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "Random.h"
 #include "SharedDefines.h"

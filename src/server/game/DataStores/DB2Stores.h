@@ -26,6 +26,7 @@
 #include <map>
 #include <set>
 #include <span>
+#include <unordered_set>
 #include <vector>
 
  // temporary hack until includes are sorted out (don't want to pull in Windows.h)

@@ -42,6 +42,7 @@ class Creature;
 class CreatureAI;
 class DynamicObject;
 class GameObject;
+class Group;
 class InstanceScript;
 class Item;
 class Map;

@@ -19,6 +19,7 @@
 #define _CharmInfo_h__
 
 #include "Define.h"
+#include "ObjectGuid.h"
 #include "UnitDefines.h"
 
 class SpellInfo;

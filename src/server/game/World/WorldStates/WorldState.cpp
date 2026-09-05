@@ -1,3 +1,4 @@
+#include "Log.h"
 #include "Player.h"
 #include "SharedDefines.h"
 #include "WorldState.h"
