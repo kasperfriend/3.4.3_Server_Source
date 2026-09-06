@@ -245,13 +245,14 @@ bool StoreLootAction::Execute(Event event)
         p >> items;
         p >> currencies;
 
-        bool acquired = p.ReadBit();    // Acquired; false => error response
+        p.ReadBit();                    // Acquired (false => error response)
         p.ReadBit();                    // AELooting
         p.ReadBit();                    // PersonalLooting
         p.ResetBitPos();
-
-        if (!acquired)
-            return false;               // loot error ("didn't kill" etc.), nothing offered
+        // Note: error responses (Acquired == false, e.g. "didn't kill") carry no
+        // items, so the loop below queues nothing for them; the remove + release
+        // at the end still runs so the bot gives up this loot object exactly like
+        // the 3.3.5 flow did (otherwise it would re-open it every tick).
 
         if (gold > 0)
         {
