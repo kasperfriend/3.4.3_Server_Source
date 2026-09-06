@@ -7,6 +7,8 @@
 #include "../../server/game/Entities/Player/Player.h"
 #include "../../server/game/Guilds/Guild.h"
 #include "../../server/game/Guilds/GuildMgr.h"
+#include "../../server/game/DataStores/DB2Stores.h"
+#include "../../server/game/Server/WorldSession.h"
 #include "RandomPlayerbotFactory.h"
 
 map<uint8, vector<uint8> > RandomPlayerbotFactory::availableRaces;
@@ -74,43 +76,76 @@ RandomPlayerbotFactory::RandomPlayerbotFactory(uint32 accountId) : accountId(acc
     availableRaces[CLASS_DRUID].push_back(RACE_TAUREN);
 }
 
-static void FillRandomCustomizations(uint8 race, uint8 gender, WorldPackets::Array<UF::ChrCustomizationChoice, 250>& customizations)
+static void FillRandomCustomizations(WorldSession* session, uint8 race, uint8 cls, uint8 gender, WorldPackets::Array<UF::ChrCustomizationChoice, 250>& customizations)
 {
     std::vector<ChrCustomizationOptionEntry const*> const* options = sDB2Manager.GetCustomiztionOptions(race, gender);
     if (!options)
         return;
 
+    // Mirror the core's validated customization generation (see the .modify
+    // gender command in cs_modify.cpp): both the option and every candidate
+    // choice must pass MeetsChrCustomizationReq. The old code only filtered
+    // choices and never checked the option's own requirement, so requirement
+    // gated options (e.g. class/race locked) were picked and Player::Create
+    // rejected the appearance with "invalid appearance attributes".
+    Races raceId = Races(race);
+    Classes classId = Classes(cls);
+    std::vector<UF::ChrCustomizationChoice> selected;
+
     for (ChrCustomizationOptionEntry const* option : *options)
     {
-        std::vector<ChrCustomizationChoiceEntry const*> const* choices = sDB2Manager.GetCustomiztionChoices(option->ID);
-        if (!choices || choices->empty())
+        ChrCustomizationReqEntry const* optionReq = sChrCustomizationReqStore.LookupEntry(option->ChrCustomizationReqID);
+        if (optionReq && !session->MeetsChrCustomizationReq(optionReq, raceId, classId, false, MakeChrCustomizationChoiceRange(selected)))
             continue;
 
-        // only pick choices without additional requirements so that the bot always looks valid
+        std::vector<ChrCustomizationChoiceEntry const*> const* choicesForOption = sDB2Manager.GetCustomiztionChoices(option->ID);
+        if (!choicesForOption || choicesForOption->empty())
+            continue;
+
+        // gather every choice whose requirement passes with the options chosen
+        // so far, then pick one at random
         std::vector<ChrCustomizationChoiceEntry const*> usable;
-        for (ChrCustomizationChoiceEntry const* choice : *choices)
-            if (!choice->ChrCustomizationReqID)
-                usable.push_back(choice);
+        for (ChrCustomizationChoiceEntry const* choice : *choicesForOption)
+        {
+            ChrCustomizationReqEntry const* choiceReq = sChrCustomizationReqStore.LookupEntry(choice->ChrCustomizationReqID);
+            if (choiceReq && !session->MeetsChrCustomizationReq(choiceReq, raceId, classId, true, MakeChrCustomizationChoiceRange(selected)))
+                continue;
+
+            usable.push_back(choice);
+        }
 
         if (usable.empty())
-            usable = *choices;
+            continue;
 
         ChrCustomizationChoiceEntry const* picked = usable[urand(0, usable.size() - 1)];
 
         UF::ChrCustomizationChoice choice;
         choice.ChrCustomizationOptionID = option->ID;
         choice.ChrCustomizationChoiceID = picked->ID;
-        customizations.push_back(choice);
+        selected.push_back(choice);
     }
+
+    for (UF::ChrCustomizationChoice const& choice : selected)
+        customizations.push_back(choice);
 }
 
 bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
 {
     TC_LOG_DEBUG("playerbot", "Creating new random bot for class {}", cls);
 
+    // the class loop runs CLASS_WARRIOR..MAX_CLASSES; class ids without an
+    // entry (Death Knight handled by the caller, and id 12-14 which hold no
+    // playable class) have an empty race list - bail instead of indexing it
+    map<uint8, vector<uint8> >::const_iterator raceItr = availableRaces.find(cls);
+    if (raceItr == availableRaces.end() || raceItr->second.empty())
+    {
+        TC_LOG_DEBUG("playerbot", "No race list for class {}, skipping random bot", cls);
+        return false;
+    }
+
     uint8 gender = rand() % 2 ? GENDER_MALE : GENDER_FEMALE;
 
-    uint8 race = availableRaces[cls][urand(0, availableRaces[cls].size() - 1)];
+    uint8 race = raceItr->second[urand(0, raceItr->second.size() - 1)];
     string name = CreateRandomBotName();
     if (name.empty())
         return false;
@@ -125,18 +160,24 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     session->SetBotSession(true);
 
     Player* player = new Player(session);
+    // Player::Create relies on the motion master being initialized exactly
+    // like the core does it in HandleCharCreateOpcode.
+    player->GetMotionMaster()->Initialize();
 
     WorldPackets::Character::CharacterCreateInfo cci;
     cci.Name = name;
     cci.Race = race;
     cci.Class = cls;
     cci.Sex = gender;
-    FillRandomCustomizations(race, gender, cci.Customizations);
+    FillRandomCustomizations(session, race, cls, gender, cci.Customizations);
 
     if (!player->Create(sObjectMgr->GetGenerator<HighGuid::Player>().Generate(), &cci))
     {
         TC_LOG_ERROR("playerbot", "Unable to create random bot for account {} - name: \"{}\"; race: {}; class: {}",
                 accountId, name.c_str(), race, cls);
+        // the player is never added to a map; CleanupsBeforeDelete keeps the
+        // Player destructor's ResetMap/grid accounting consistent
+        player->CleanupsBeforeDelete();
         delete player;
         delete session;
         return false;
@@ -146,9 +187,17 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     player->SetAtLoginFlag(AT_LOGIN_NONE);
     player->SaveToDB(true);
 
+    // mirror core character creation: register the new character in the cache
+    // so name/account/guild lookups by GUID (incl. bot login) can find it
+    sCharacterCache->AddCharacterCacheEntry(player->GetGUID(), accountId, player->GetName(),
+        player->GetNativeGender(), player->GetRace(), player->GetClass(), player->GetLevel(), false);
+
     TC_LOG_DEBUG("playerbot", "Random bot created for account {} - name: \"{}\"; race: {}; class: {}",
             accountId, name.c_str(), race, cls);
 
+    // this player is never added to the world/map; run the same pre-delete
+    // teardown the core uses before freeing it
+    player->CleanupsBeforeDelete();
     delete player;
     delete session;
     return true;
@@ -328,17 +377,21 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
 
         int index = urand(0, availableLeaders.size() - 1);
         ObjectGuid leader = availableLeaders[index];
+        // a player may lead (and belong to) only one guild: remove the
+        // chosen leader so it can't be picked again for the next guild
+        availableLeaders.erase(availableLeaders.begin() + index);
         Player* player = ObjectAccessor::FindPlayer(leader);
         if (!player)
         {
-            TC_LOG_ERROR("playerbot",  "Cannot find player for leader {}", leader.ToString());
+            TC_LOG_ERROR("playerbot", "Cannot find player for leader {}", leader.ToString());
             break;
         }
 
         Guild* guild = new Guild();
         if (!guild->Create(player, guildName))
         {
-            TC_LOG_ERROR("playerbot",  "Error creating guild {}", guildName.c_str());
+            TC_LOG_ERROR("playerbot", "Error creating guild {}", guildName.c_str());
+            delete guild;
             break;
         }
 

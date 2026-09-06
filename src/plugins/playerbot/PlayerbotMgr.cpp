@@ -196,8 +196,15 @@ string PlayerbotHolder::ProcessBotCommand(string cmd, ObjectGuid guid, bool admi
 
     if (isRandomAccount && !isRandomBot && !admin)
     {
-        Player* bot = ObjectAccessor::FindPlayer(guid);
-        if (bot->GetGuildId() != masterGuildId)
+        // the character may be offline (FindPlayer returns null); fall back
+        // to the cached guild id instead of dereferencing a null player
+        uint32 guildId = 0;
+        if (Player* bot = ObjectAccessor::FindPlayer(guid))
+            guildId = bot->GetGuildId();
+        else
+            guildId = uint32(sCharacterCache->GetCharacterGuildIdByGuid(guid));
+
+        if (guildId != masterGuildId)
             return "not in your guild";
     }
 

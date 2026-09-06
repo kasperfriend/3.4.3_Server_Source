@@ -355,6 +355,15 @@ void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
                 locs.push_back(tele);
         }
 
+        // no teleport locations defined for this map (empty/stripped game_tele):
+        // indexing locs would underflow urand() and dereference
+        if (locs.empty())
+        {
+            TC_LOG_ERROR("playerbot", "No game_tele locations for map {}, skipping for random teleport of bot {}",
+                    mapId, bot->GetName());
+            continue;
+        }
+
         index = urand(0, locs.size() - 1);
         GameTele const* tele = locs[index];
         uint32 level = GetZoneLevel(tele->mapId, tele->position_x, tele->position_y, tele->position_z);
@@ -390,11 +399,18 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
     if (results)
     {
         Field* fields = results->Fetch();
-        uint8 minLevel = fields[0].GetUInt8();
-        uint8 maxLevel = fields[1].GetUInt8();
-        level = urand(minLevel, maxLevel);
-        if (level > maxLevel)
-            level = maxLevel;
+        // AVG() over zero matching rows returns NULL rather than no row;
+        // reading such a field is undefined - fall through to the random level
+        if (fields && !fields[0].IsNull() && !fields[1].IsNull())
+        {
+            uint8 minLevel = fields[0].GetUInt8();
+            uint8 maxLevel = fields[1].GetUInt8();
+            level = urand(minLevel, maxLevel);
+            if (level > maxLevel)
+                level = maxLevel;
+        }
+        else
+            level = urand(1, maxLevel);
     }
     else
     {
