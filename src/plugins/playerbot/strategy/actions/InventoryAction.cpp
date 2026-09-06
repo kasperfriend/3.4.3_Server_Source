@@ -128,7 +128,11 @@ void InventoryAction::TellItems(map<uint32, int> itemMap)
     list<ItemTemplate const*> items;
     for (map<uint32, int>::iterator i = itemMap.begin(); i != itemMap.end(); i++)
     {
-        items.push_back(sObjectMgr->GetItemTemplate(i->first));
+        // the item entry may be missing from the DB (deleted/changed item);
+        // dropping it here beats dereferencing null in the sort/loop below
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(i->first);
+        if (proto)
+            items.push_back(proto);
     }
 
     items.sort(compare_items);
