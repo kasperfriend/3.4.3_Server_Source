@@ -133,9 +133,19 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
 {
     TC_LOG_DEBUG("playerbot", "Creating new random bot for class {}", cls);
 
+    // the class loop runs CLASS_WARRIOR..MAX_CLASSES; class ids without an
+    // entry (Death Knight handled by the caller, and id 12-14 which hold no
+    // playable class) have an empty race list - bail instead of indexing it
+    map<uint8, vector<uint8> >::const_iterator raceItr = availableRaces.find(cls);
+    if (raceItr == availableRaces.end() || raceItr->second.empty())
+    {
+        TC_LOG_DEBUG("playerbot", "No race list for class {}, skipping random bot", cls);
+        return false;
+    }
+
     uint8 gender = rand() % 2 ? GENDER_MALE : GENDER_FEMALE;
 
-    uint8 race = availableRaces[cls][urand(0, availableRaces[cls].size() - 1)];
+    uint8 race = raceItr->second[urand(0, raceItr->second.size() - 1)];
     string name = CreateRandomBotName();
     if (name.empty())
         return false;
@@ -367,17 +377,21 @@ void RandomPlayerbotFactory::CreateRandomGuilds()
 
         int index = urand(0, availableLeaders.size() - 1);
         ObjectGuid leader = availableLeaders[index];
+        // a player may lead (and belong to) only one guild: remove the
+        // chosen leader so it can't be picked again for the next guild
+        availableLeaders.erase(availableLeaders.begin() + index);
         Player* player = ObjectAccessor::FindPlayer(leader);
         if (!player)
         {
-            TC_LOG_ERROR("playerbot",  "Cannot find player for leader {}", leader.ToString());
+            TC_LOG_ERROR("playerbot", "Cannot find player for leader {}", leader.ToString());
             break;
         }
 
         Guild* guild = new Guild();
         if (!guild->Create(player, guildName))
         {
-            TC_LOG_ERROR("playerbot",  "Error creating guild {}", guildName.c_str());
+            TC_LOG_ERROR("playerbot", "Error creating guild {}", guildName.c_str());
+            delete guild;
             break;
         }
 

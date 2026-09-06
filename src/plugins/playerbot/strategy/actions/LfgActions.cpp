@@ -142,12 +142,15 @@ bool LfgJoinAction::JoinProposal()
             idx.push_back(dungeon->ID);
     }
 
-    if (list.empty())
+    if (list.empty() && !random)
         return false;
 
     uint8 roles = GetRoles();
     if (random)
 	{
+        if (idx.empty())
+            return false;
+
         list.insert(idx[urand(0, idx.size() - 1)]);
         sLFGMgr->JoinLfg(bot, roles, list);
 

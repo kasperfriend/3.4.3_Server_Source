@@ -71,9 +71,10 @@ bool CheckMountStateAction::Mount()
     for (map<int32,vector<uint32> >::iterator i = spells.begin(); i != spells.end(); ++i)
     {
 		vector<uint32>& ids = i->second;
-        int index = urand(0, ids.size() - 1);
-        if (index >= ids.size())
+        if (ids.empty())
             continue;
+
+        int index = urand(0, ids.size() - 1);
 
         ai->CastSpell(ids[index], bot);
         return true;

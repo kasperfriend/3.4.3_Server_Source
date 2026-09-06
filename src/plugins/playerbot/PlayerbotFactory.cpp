@@ -1325,9 +1325,10 @@ void PlayerbotFactory::InitMounts()
         {
             int32 effect = i->first;
             vector<uint32>& ids = i->second;
-            uint32 index = urand(0, ids.size() - 1);
-            if (index >= ids.size())
+            if (ids.empty())
                 continue;
+
+            uint32 index = urand(0, ids.size() - 1);
 
             bot->LearnSpell(ids[index], false);
         }
@@ -1383,9 +1384,10 @@ void PlayerbotFactory::InitPotions()
     {
         uint32 effect = effects[i];
         vector<uint32>& ids = items[effect];
-        uint32 index = urand(0, ids.size() - 1);
-        if (index >= ids.size())
+        if (ids.empty())
             continue;
+
+        uint32 index = urand(0, ids.size() - 1);
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
@@ -1428,9 +1430,10 @@ void PlayerbotFactory::InitFood()
     {
         uint32 category = categories[i];
         vector<uint32>& ids = items[category];
-        uint32 index = urand(0, ids.size() - 1);
-        if (index >= ids.size())
+        if (ids.empty())
             continue;
+
+        uint32 index = urand(0, ids.size() - 1);
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
@@ -1585,13 +1588,17 @@ void PlayerbotFactory::InitInventoryEquip()
         ids.push_back(itemId);
     }
 
+    if (ids.empty())
+    {
+        TC_LOG_DEBUG("playerbot", "{}: no equipment items to add to inventory", bot->GetName());
+        return;
+    }
+
     int maxCount = urand(0, 3);
     int count = 0;
     for (int attempts = 0; attempts < 15; attempts++)
     {
         uint32 index = urand(0, ids.size() - 1);
-        if (index >= ids.size())
-            continue;
 
         uint32 itemId = ids[index];
         if (StoreItem(itemId, 1) && count++ >= maxCount)
@@ -1682,14 +1689,20 @@ void PlayerbotFactory::InitGlyphs()
             ids.push_back(id);
         }
 
+        // no glyphs for this slot's glyph type (fresh, per-type list):
+        // indexing it would underflow urand()
+        if (ids.empty())
+        {
+            TC_LOG_ERROR("playerbot", "No glyphs found for bot {} index {} slot {}", bot->GetName().c_str(), slotIndex, slot);
+            continue;
+        }
+
         int maxCount = urand(0, 3);
         int count = 0;
         bool found = false;
         for (int attempts = 0; attempts < 15; ++attempts)
         {
             uint32 index = urand(0, ids.size() - 1);
-            if (index >= ids.size())
-                continue;
 
             uint32 id = ids[index];
             if (chosen.find(id) != chosen.end())

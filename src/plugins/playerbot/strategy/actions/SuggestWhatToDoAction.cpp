@@ -94,6 +94,9 @@ void SuggestWhatToDoAction::specificQuest()
     int index = rand() % quests.size();
 
     Quest const* quest = sObjectMgr->GetQuestTemplate(quests[index]);
+    if (!quest)
+        return;
+
     ostringstream out; out << "We could do some quest, for instance " << chat->formatQuest(quest);
     spam(out.str());
 }
