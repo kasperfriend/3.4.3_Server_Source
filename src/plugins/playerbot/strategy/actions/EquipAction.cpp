@@ -91,8 +91,18 @@ void EquipAction::EquipItem(Item& item)
     }
     else
     {
-        WorldPacket* const packet = new WorldPacket(CMSG_AUTO_EQUIP_ITEM, 2);
-            *packet << bagIndex << slot;
+        WorldPacket* const packet = new WorldPacket(CMSG_AUTO_EQUIP_ITEM, 6);
+        // 3.4.3 AutoEquipItem::Read reads an InvUpdate first (2-bit entry count,
+        // then container/slot pairs) and the handler rejects anything but exactly
+        // one entry, then PackSlot/Slot. The classic 2-byte (bag, slot) payload
+        // made the server read the source bag as the bit field and run off the
+        // end, so the item was never equipped.
+        packet->WriteBits(1, 2);
+        packet->FlushBits();
+        *packet << bagIndex;   // InvUpdate entry: source container
+        *packet << slot;       // InvUpdate entry: source slot
+        *packet << bagIndex;   // PackSlot
+        *packet << slot;       // Slot
         bot->GetSession()->QueuePacket(packet);
     }
 

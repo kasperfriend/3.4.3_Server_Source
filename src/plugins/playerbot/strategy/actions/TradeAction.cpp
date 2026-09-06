@@ -12,8 +12,10 @@ bool TradeAction::Execute(Event event)
     uint32 copper = chat->parseMoney(text);
     if (copper > 0)
     {
-        WorldPacket* const packet = new WorldPacket(CMSG_SET_TRADE_GOLD, 4);
-        *packet << copper;
+        WorldPacket* const packet = new WorldPacket(CMSG_SET_TRADE_GOLD, 8);
+        // 3.4.3 SetTradeGold::Read expects a uint64 Coinage; the classic uint32
+        // payload threw on the truncated read so the offered gold was never set
+        *packet << uint64(copper);
         bot->GetSession()->QueuePacket(packet);
     }
 
