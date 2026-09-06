@@ -112,7 +112,8 @@ AiPlayerbot.CommandPrefix =
 #AiPlayerbot.MinRandomBots = 50
 #AiPlayerbot.MaxRandomBots = 200
 #AiPlayerbot.RandomBotMinLevel = 1
-#AiPlayerbot.RandomBotMaxLevel = 255 (ignored if more than MaxPlayerLevel mangosd.conf value)
+# ignored if more than the MaxPlayerLevel from the main worldserver.conf
+#AiPlayerbot.RandomBotMaxLevel = 255
 
 # Accounts to create for random bots
 #AiPlayerbot.RandomBotAccountPrefix = rndbot

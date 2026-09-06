@@ -316,7 +316,9 @@ private:
 
 
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(id);
-        if (proto->GetClass() == ITEM_CLASS_MISCELLANEOUS && (proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_REAGENT || proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_JUNK))
+        // items in the bot's bags may reference entries that no longer exist
+        // in the DB (deleted/changed item templates); treat those as junk
+        if (proto && proto->GetClass() == ITEM_CLASS_MISCELLANEOUS && (proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_REAGENT || proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_JUNK))
             return true;
 
         return false;
