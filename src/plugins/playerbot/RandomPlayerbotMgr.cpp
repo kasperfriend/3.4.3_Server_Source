@@ -212,7 +212,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
         float y = loc.m_positionY + urand(0, sPlayerbotAIConfig.grindDistance) - sPlayerbotAIConfig.grindDistance / 2;
         float z = loc.m_positionZ;
 
-        Map* map = sMapMgr->FindMap(loc.GetMapId(), 0);
+        Map* map = sMapMgr->CreateMap(loc.GetMapId(), bot);
         if (!map)
             continue;
 
@@ -405,6 +405,9 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
         {
             uint8 minLevel = fields[0].GetUInt8();
             uint8 maxLevel = fields[1].GetUInt8();
+            if (minLevel > maxLevel)
+                std::swap(minLevel, maxLevel);
+
             level = urand(minLevel, maxLevel);
             if (level > maxLevel)
                 level = maxLevel;
