@@ -689,7 +689,11 @@ void RandomPlayerbotMgr::HandleCommand(uint32 type, const string& text, Player& 
     for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        bot->GetPlayerbotAI()->HandleCommand(type, text, fromPlayer);
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (!ai)
+            continue;
+
+        ai->HandleCommand(type, text, fromPlayer);
     }
 }
 
