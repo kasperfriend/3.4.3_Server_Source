@@ -176,6 +176,25 @@ void PlayerbotAI::UpdateAIInternal(uint32 elapsed)
 	DoNextAction();
 }
 
+void PlayerbotAI::DropCommandsFrom(Player* player)
+{
+    if (!player || chatCommands.empty())
+        return;
+
+    // chatCommands is a stack; drain it, keep unrelated entries, rebuild it
+    vector<ChatCommandHolder> keep;
+    while (!chatCommands.empty())
+    {
+        ChatCommandHolder holder = chatCommands.top();
+        chatCommands.pop();
+        if (holder.GetOwner() != player)
+            keep.push_back(holder);
+    }
+
+    for (vector<ChatCommandHolder>::reverse_iterator i = keep.rbegin(); i != keep.rend(); ++i)
+        chatCommands.push(*i);
+}
+
 void PlayerbotAI::HandleTeleportAck()
 {
 	bot->GetMotionMaster()->Clear();

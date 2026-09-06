@@ -120,6 +120,8 @@ public:
 	virtual void UpdateAIInternal(uint32 elapsed);
 	string HandleRemoteCommand(string command);
     void HandleCommand(uint32 type, const string& text, Player& fromPlayer);
+    /// drop queued chat commands that reference a specific player (logged out)
+    void DropCommandsFrom(Player* player);
 	void HandleBotOutgoingPacket(const WorldPacket& packet);
     void HandleMasterIncomingPacket(const WorldPacket& packet);
     void HandleMasterOutgoingPacket(const WorldPacket& packet);

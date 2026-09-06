@@ -699,6 +699,14 @@ void RandomPlayerbotMgr::OnPlayerLogout(Player* player)
     {
         Player* const bot = it->second;
         PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (!ai)
+            continue;
+
+        // session logouts are processed before the next map/player update, but a
+        // bot tick after that would still drain chat commands that captured this
+        // player as their owner (whisper-then-quit); drop them while he is alive
+        ai->DropCommandsFrom(player);
+
         if (player == ai->GetMaster())
         {
             ai->SetMaster(NULL);
