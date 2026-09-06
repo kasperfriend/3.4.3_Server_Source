@@ -549,14 +549,17 @@ void PlayerbotMgr::HandleMasterIncomingPacket(const WorldPacket& packet)
     for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        bot->GetPlayerbotAI()->HandleMasterIncomingPacket(packet);
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (ai)
+            ai->HandleMasterIncomingPacket(packet);
     }
 
     for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin(); it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        if (bot->GetPlayerbotAI()->GetMaster() == GetMaster())
-            bot->GetPlayerbotAI()->HandleMasterIncomingPacket(packet);
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (ai && ai->GetMaster() == GetMaster())
+            ai->HandleMasterIncomingPacket(packet);
     }
 
     switch (packet.GetOpcode())
@@ -574,14 +577,17 @@ void PlayerbotMgr::HandleMasterOutgoingPacket(const WorldPacket& packet)
     for (PlayerBotMap::const_iterator it = GetPlayerBotsBegin(); it != GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        bot->GetPlayerbotAI()->HandleMasterOutgoingPacket(packet);
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (ai)
+            ai->HandleMasterOutgoingPacket(packet);
     }
 
     for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin(); it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        if (bot->GetPlayerbotAI()->GetMaster() == GetMaster())
-            bot->GetPlayerbotAI()->HandleMasterOutgoingPacket(packet);
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (ai && ai->GetMaster() == GetMaster())
+            ai->HandleMasterOutgoingPacket(packet);
     }
 }
 
@@ -595,7 +601,8 @@ void PlayerbotMgr::SaveToDB()
     for (PlayerBotMap::const_iterator it = sRandomPlayerbotMgr.GetPlayerBotsBegin(); it != sRandomPlayerbotMgr.GetPlayerBotsEnd(); ++it)
     {
         Player* const bot = it->second;
-        if (bot->GetPlayerbotAI()->GetMaster() == GetMaster())
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (ai && ai->GetMaster() == GetMaster())
             bot->SaveToDB();
     }
 }
