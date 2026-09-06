@@ -1393,6 +1393,8 @@ void PlayerbotFactory::InitPotions()
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            continue;
         bot->StoreNewItemInBestSlots(itemId, urand(1, proto->GetMaxStackSize()), ItemContext::NONE);
    }
 }
@@ -1439,6 +1441,8 @@ void PlayerbotFactory::InitFood()
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            continue;
         bot->StoreNewItemInBestSlots(itemId, urand(1, proto->GetMaxStackSize()), ItemContext::NONE);
    }
 }
