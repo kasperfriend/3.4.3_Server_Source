@@ -27,8 +27,12 @@ bool QueryQuestAction::Execute(Event event)
         if(questId != bot->GetQuestSlotQuestId(slot))
             continue;
 
+        Quest const* questTemplate = sObjectMgr->GetQuestTemplate(questId);
+        if (!questTemplate)
+            continue;
+
         ostringstream out;
-        out << "--- " << chat->formatQuest(sObjectMgr->GetQuestTemplate(questId)) << " ";
+        out << "--- " << chat->formatQuest(questTemplate) << " ";
         if (bot->GetQuestStatus(questId) == QUEST_STATUS_COMPLETE)
         {
             out << "|c0000FF00completed|r ---";

@@ -55,6 +55,8 @@ int ListQuestsAction::ListQuests(bool completed, bool silent)
             continue;
 
         Quest const* pQuest = sObjectMgr->GetQuestTemplate(questId);
+        if (!pQuest) continue;
+
         bool isCompletedQuest = bot->GetQuestStatus(questId) == QUEST_STATUS_COMPLETE;
         if (completed != isCompletedQuest)
             continue;

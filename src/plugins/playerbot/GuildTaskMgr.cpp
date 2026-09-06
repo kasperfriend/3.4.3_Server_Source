@@ -267,8 +267,11 @@ string formatTime(uint32 secs)
 bool GuildTaskMgr::SendItemAdvertisement(uint32 itemId, uint32 owner, uint32 guildId, uint32 validIn)
 {
     Guild *guild = sGuildMgr->GetGuildById(guildId);
+    if (!guild) return false;
     Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
+    if (!player) return false;
     Player* leader = ObjectAccessor::FindPlayer(guild->GetLeaderGUID());
+    if (!leader) return false;
 
     ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
     if (!proto)
@@ -303,8 +306,11 @@ bool GuildTaskMgr::SendItemAdvertisement(uint32 itemId, uint32 owner, uint32 gui
 bool GuildTaskMgr::SendKillAdvertisement(uint32 creatureId, uint32 owner, uint32 guildId, uint32 validIn)
 {
     Guild *guild = sGuildMgr->GetGuildById(guildId);
+    if (!guild) return false;
     Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
+    if (!player) return false;
     Player* leader = ObjectAccessor::FindPlayer(guild->GetLeaderGUID());
+    if (!leader) return false;
 
     CreatureTemplate const* proto = sObjectMgr->GetCreatureTemplate(creatureId);
     if (!proto)
