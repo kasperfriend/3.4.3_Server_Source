@@ -125,6 +125,9 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     session->SetBotSession(true);
 
     Player* player = new Player(session);
+    // Player::Create relies on the motion master being initialized exactly
+    // like the core does it in HandleCharCreateOpcode.
+    player->GetMotionMaster()->Initialize();
 
     WorldPackets::Character::CharacterCreateInfo cci;
     cci.Name = name;
@@ -137,6 +140,9 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     {
         TC_LOG_ERROR("playerbot", "Unable to create random bot for account {} - name: \"{}\"; race: {}; class: {}",
                 accountId, name.c_str(), race, cls);
+        // the player is never added to a map; CleanupsBeforeDelete keeps the
+        // Player destructor's ResetMap/grid accounting consistent
+        player->CleanupsBeforeDelete();
         delete player;
         delete session;
         return false;
@@ -149,6 +155,9 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
     TC_LOG_DEBUG("playerbot", "Random bot created for account {} - name: \"{}\"; race: {}; class: {}",
             accountId, name.c_str(), race, cls);
 
+    // this player is never added to the world/map; run the same pre-delete
+    // teardown the core uses before freeing it
+    player->CleanupsBeforeDelete();
     delete player;
     delete session;
     return true;

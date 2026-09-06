@@ -1281,15 +1281,18 @@ void PlayerbotFactory::InitAmmo()
     QueryResult results = WorldDatabase.PQuery("select max(entry), max(RequiredLevel) from item_template where class = '{}' and subclass = '{}' and RequiredLevel <= '{}'",
             ITEM_CLASS_PROJECTILE, subClass, bot->GetLevel());
 
-    Field* fields = results->Fetch();
+    Field* fields = results ? results->Fetch() : nullptr;
     if (fields)
     {
-        uint32 entry = fields[0].GetUInt32();
-        for (int i = 0; i < 5; i++)
+        uint32 entry = fields[0].GetUInt32();   // 0 when no ammo item matches
+        if (entry)
         {
-            bot->StoreNewItemInBestSlots(entry, 1000, ItemContext::NONE);
+            for (int i = 0; i < 5; i++)
+            {
+                bot->StoreNewItemInBestSlots(entry, 1000, ItemContext::NONE);
+            }
+            bot->SetAmmo(entry);
         }
-        bot->SetAmmo(entry);
     }
 }
 
@@ -1732,7 +1735,11 @@ void PlayerbotFactory::InitGuild()
 
     if (guild->GetMembersCount() < 10)
     {
-        CharacterDatabaseTransaction trans(nullptr);
-        guild->AddMember(trans, bot->GetGUID());
+        // Guild::AddMember queues SQL (guild member insert/event log) on the
+        // passed transaction - a null transaction dereferences inside the
+        // core, so supply and commit a real one.
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        if (guild->AddMember(trans, bot->GetGUID()))
+            CharacterDatabase.CommitTransaction(trans);
     }
 }
