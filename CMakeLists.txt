@@ -24,6 +24,31 @@ cmake_minimum_required(VERSION 3.18)
 set(CMAKE_DISABLE_SOURCE_CHANGES ON)
 set(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 
+# Force the 64-bit hosted MSVC toolchain for Visual Studio generators.
+#
+# With the default x86 hosted cl.exe the compiler only has ~3GB of address
+# space; building game/scripts (huge translation units + precompiled headers,
+# several compilers in parallel through /MP) exhausts it and the build dies
+# with:
+#   C3859: Failed to create virtual memory for PCH
+#   C1076: compiler limit: internal heap limit reached
+# and finally LNK1181 for worldserver because scripts.lib was never produced.
+#
+# IMPORTANT: This must be set here (in CMakeLists.txt, before project()) and
+# NOT in PreLoad.cmake with CACHE FORCE.  PreLoad.cmake runs before CMake
+# loads the cache, so a CACHE FORCE write there creates the cache entry
+# without updating CMake's internal toolset state.  On every subsequent
+# configure the consistency check then sees:
+#   internal toolset = ""  (no -T on the command line)
+#   cached  toolset = "host=x64"  (written by PreLoad.cmake last time)
+# and aborts with "generator toolset does not match the toolset used
+# previously".  By setting the cache variable here, the cache has already been
+# loaded, NOT CMAKE_GENERATOR_TOOLSET correctly reflects the cached value on
+# re-runs, and the non-FORCE set() won't override an explicit user choice.
+if(CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT CMAKE_GENERATOR_TOOLSET)
+  set(CMAKE_GENERATOR_TOOLSET "host=x64" CACHE STRING "Platform Toolset")
+endif()
+
 # Set projectname (must be done AFTER setting configurationtypes)
 project(TrinityCore)
 

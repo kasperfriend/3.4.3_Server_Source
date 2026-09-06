@@ -91,3 +91,23 @@ cmake --install build --config RelWithDebInfo --prefix C:\TrinityCore
 > standard library in transitively and the build dies in headers that are
 > otherwise fine, e.g. `SharedDefines.h: error C2039: 'unordered_map': is not a
 > member of 'std'` followed by thousands of cascading errors.
+
+### Troubleshooting
+
+**"Error: generator toolset: Does not match the toolset used previously: host=x64"**
+
+This means CMake is finding a stale `CMakeCache.txt` in your **build directory**
+that was created by an earlier configure with different settings.  Removing and
+re-cloning the *source* directory does not fix it — the cache lives in the
+build directory (the folder you passed to `-B`), not in the source tree.
+
+Fix: delete the build directory and start over:
+
+```bat
+rmdir /s /q build
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ...
+```
+
+Or, if you are using the CMake GUI, change the **build directory** path to a
+fresh, empty folder.  The source directory should point to the cloned source
+tree; the build directory must be a separate, empty folder.
