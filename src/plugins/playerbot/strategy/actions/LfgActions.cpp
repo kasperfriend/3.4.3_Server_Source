@@ -218,12 +218,29 @@ bool LfgAcceptAction::Execute(Event event)
     }
 
     WorldPacket p(event.getPacket());
+    if (p.empty())
+        return false;
 
-    uint32 dungeon;
-    uint8 state;
-    p >> dungeon >> state >> id;
+    // SMSG_LFG_PROPOSAL_UPDATE (WorldPackets::LFG::LFGProposalUpdate::Write)
+    // starts with a RideTicket (requester guid, ticket id, ticket type,
+    // timestamp, one bit), then the instance id, and only then the proposal id.
+    // The old 3.3.5 parse (u32 dungeon + u8 state + u32 id) read bytes of the
+    // requester guid as those fields and usually stored 0, so the bot never saw
+    // a pending proposal and a real player's group-finder party could stall
+    // waiting for a bot that would never answer. Mirror the writer to reach the
+    // real ProposalID.
+    p.rpos(0);
+    ObjectGuid ticketRequester;
+    uint32 ticketId = 0;
+    uint32 ticketType = 0;
+    int64 ticketTime = 0;
+    uint64 instanceId = 0;
+    uint32 proposalId = 0;
+    p >> ticketRequester >> ticketId >> ticketType >> ticketTime;
+    p.ReadBit();                                // Ticket.Unknown925
+    p >> instanceId >> proposalId;              // InstanceID, ProposalID
 
-    ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(id);
+    ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(proposalId);
     return true;
 }
 
