@@ -22,15 +22,10 @@
 #  endif()
 #endif()
 
-# Force the 64-bit hosted MSVC toolchain for Visual Studio generators.
-#
-# With the default x86 hosted cl.exe the compiler only has ~3GB of address
-# space; building game/scripts (huge translation units + precompiled headers,
-# several compilers in parallel through /MP) exhausts it and the build dies
-# with:
-#   C3859: Failed to create virtual memory for PCH
-#   C1076: compiler limit: internal heap limit reached
-# and finally LNK1181 for worldserver because scripts.lib was never produced.
-if(NOT CMAKE_GENERATOR_TOOLSET AND CMAKE_GENERATOR MATCHES "Visual Studio")
-  set(CMAKE_GENERATOR_TOOLSET "host=x64" CACHE STRING "Platform Toolset" FORCE)
-endif()
+# The 64-bit hosted MSVC toolchain is enforced in CMakeLists.txt before
+# project(), where CMake has already loaded the cache and can manage the
+# generator toolset correctly.  Setting CMAKE_GENERATOR_TOOLSET via CACHE
+# FORCE from PreLoad.cmake used to live here but it wrote the cache file
+# before CMake's internal toolset state was initialised, causing spurious
+# "generator toolset does not match the toolset used previously" errors on
+# every reconfigure.  See the comment block above project() in CMakeLists.txt.
