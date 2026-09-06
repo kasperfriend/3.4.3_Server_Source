@@ -1673,7 +1673,7 @@ void Player::Regenerate(Powers power)
 
     if (addvalue < 0.0f)
     {
-        if (curValue > integerValue)
+        if (curValue > int32(integerValue))
         {
             curValue -= integerValue;
             m_powerFraction[powerIndex] = addvalue + integerValue;
@@ -1915,7 +1915,7 @@ bool Player::IsInAreaTrigger(AreaTriggerEntry const* areaTrigger) const
     if (!areaTrigger)
         return false;
 
-    if (GetMapId() != areaTrigger->ContinentID && !GetPhaseShift().HasVisibleMapId(areaTrigger->ContinentID))
+    if (int32(GetMapId()) != areaTrigger->ContinentID && !GetPhaseShift().HasVisibleMapId(areaTrigger->ContinentID))
         return false;
 
     if (areaTrigger->PhaseID || areaTrigger->PhaseGroupID || areaTrigger->PhaseUseFlags)
@@ -3011,7 +3011,7 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
     // alistar: add pets into pet journal
     for (BattlePetSpeciesEntry const* entry : sBattlePetSpeciesStore)
     {
-        if (entry->SummonSpellID == spellId && GetSession()->GetBattlePetMgr()->GetPetCount(entry, GetGUID()) == 0)
+        if (entry->SummonSpellID == int32(spellId) && GetSession()->GetBattlePetMgr()->GetPetCount(entry, GetGUID()) == 0)
         {
             const std::array<uint32, 4>& displayIds = NonCombatPetInfo.at(entry->CreatureID);
             GetSession()->GetBattlePetMgr()->AddPet(entry->ID, displayIds[0], 3, BattlePets::BattlePetBreedQuality::Poor, spellId);
@@ -5445,7 +5445,7 @@ bool Player::UpdateCraftSkill(SpellInfo const* spellInfo)
     return false;
 }
 
-bool Player::UpdateGatherSkill(uint32 skillId, uint32 skillValue, uint32 redLevel, uint32 multiplicator /*= 1*/, WorldObject const* object /*= nullptr*/)
+bool Player::UpdateGatherSkill(uint32 skillId, uint32 skillValue, uint32 redLevel, uint32 multiplicator /*= 1*/, WorldObject const* /*object*/ /*= nullptr*/)
 {
     TC_LOG_DEBUG("entities.player.skills", "Player::UpdateGatherSkill: Player '{}' ({}), SkillID: {}, SkillLevel: {},  RedLevel: {})",
         GetName(), GetGUID().ToString(), skillId, skillValue, redLevel);
@@ -6785,8 +6785,8 @@ bool Player::RewardHonor(Unit* victim, uint32 groupsize, int32 honor, bool pvpto
 
 void Player::ModifyHonorPoints(int32 value)
 {
-    if (value > 0 && value > sWorld->getIntConfig(CONFIG_MAX_HONOR_POINTS))
-        value = sWorld->getIntConfig(CONFIG_MAX_HONOR_POINTS);
+    if (value > 0 && uint32(value) > sWorld->getIntConfig(CONFIG_MAX_HONOR_POINTS))
+        value = int32(sWorld->getIntConfig(CONFIG_MAX_HONOR_POINTS));
 
     if (value > 0)
         AddCurrency(CURRENCY_TYPE_HONOR_POINTS, value, CurrencyGainSource::PvPKillCredit); // alistar: should we put currency gain as param?
@@ -6796,8 +6796,8 @@ void Player::ModifyHonorPoints(int32 value)
 
 void Player::ModifyArenaPoints(int32 value)
 {
-    if (value > 0 && value > sWorld->getIntConfig(CONFIG_MAX_ARENA_POINTS))
-        value = sWorld->getIntConfig(CONFIG_MAX_ARENA_POINTS);
+    if (value > 0 && uint32(value) > sWorld->getIntConfig(CONFIG_MAX_ARENA_POINTS))
+        value = int32(sWorld->getIntConfig(CONFIG_MAX_ARENA_POINTS));
 
     if (value > 0)
         AddCurrency(CURRENCY_TYPE_ARENA_POINTS, value, CurrencyGainSource::Arena); // alistar: should we put currency gain as param?
@@ -9710,7 +9710,7 @@ Item* Player::GetShield(bool useable) const
     return item;
 }
 
-WeaponAttackType Player::GetAttackBySlot(uint8 slot, InventoryType inventoryType)
+WeaponAttackType Player::GetAttackBySlot(uint8 slot, InventoryType /*inventoryType*/)
 {
     switch (slot)
     {
@@ -13941,7 +13941,7 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
                 if (effect->GetAmount() > 0)
                     hasJoyousEnabled = true;
 
-        GossipMenuItems joyousItem = { menuId, 10, 10, GossipOptionNpc::None, "", (hasJoyousEnabled ? 80039 : 80040), 1, 1, LANG_UNIVERSAL, GossipOptionFlags::None };
+        GossipMenuItems joyousItem = { menuId, 10, 10, GossipOptionNpc::None, "", uint32(hasJoyousEnabled ? 80039 : 80040), 1u, 1u, uint32(LANG_UNIVERSAL), GossipOptionFlags::None };
         PlayerTalkClass->GetGossipMenu().AddMenuItem(joyousItem, joyousItem.MenuID, joyousItem.OrderIndex);
     }
 
@@ -18445,7 +18445,7 @@ void Player::_LoadAuras(PreparedQueryResult auraResult, PreparedQueryResult effe
             ChrRacesEntry const* raceEntry = sChrRacesStore.AssertEntry(GetRace());
 
             // negative effects should continue counting down after logout
-            if (remainTime != -1 && ((!spellInfo->IsPositive() && spellInfo->Id != raceEntry->ResSicknessSpellID) || 
+            if (remainTime != -1 && ((!spellInfo->IsPositive() && int32(spellInfo->Id) != raceEntry->ResSicknessSpellID) || 
                                      spellInfo->HasAttribute(SPELL_ATTR4_AURA_EXPIRES_OFFLINE))) // Resurrection sickness should not fade while logged out
             {
                 if (remainTime/IN_MILLISECONDS <= int32(timediff))
@@ -23891,7 +23891,7 @@ void Player::SetAmmo(uint32 item)
         return;
 
     // already set
-    if (m_activePlayerData->AmmoID == item)
+    if (m_activePlayerData->AmmoID == int32(item))
         return;
 
     // check ammo
@@ -24182,7 +24182,7 @@ void Player::LearnSkillRewardedSpells(uint32 skillId, uint32 skillValue, Races r
                 auto bounds = sSpellMgr->GetSkillLineAbilityMapBounds(ability->SupercedesSpell);
                 for (auto itr = bounds.first; itr != bounds.second; ++itr)
                 {
-                    if (itr->second->AcquireMethod == SKILL_LINE_ABILITY_LEARNED_ON_SKILL_LEARN && skillValue >= itr->second->MinSkillLineRank)
+                    if (itr->second->AcquireMethod == SKILL_LINE_ABILITY_LEARNED_ON_SKILL_LEARN && int32(skillValue) >= int32(itr->second->MinSkillLineRank))
                     {
                         skipCurrent = true;
                         break;
@@ -26078,7 +26078,7 @@ void Player::AutoStoreLoot(uint8 bag, uint8 slot, uint32 loot_id, LootStore cons
     Unit::ProcSkillsAndAuras(this, nullptr, PROC_FLAG_LOOTED, PROC_FLAG_NONE, PROC_SPELL_TYPE_MASK_ALL, PROC_SPELL_PHASE_NONE, PROC_HIT_NONE, nullptr, nullptr, nullptr);
 }
 
-void Player::StoreLootItem(ObjectGuid lootWorldObjectGuid, uint8 lootSlot, Loot* loot)
+void Player::StoreLootItem(ObjectGuid /*lootWorldObjectGuid*/, uint8 lootSlot, Loot* loot)
 {
     NotNormalLootItem* qitem = nullptr;
     NotNormalLootItem* ffaitem = nullptr;
@@ -26532,7 +26532,7 @@ bool Player::LearnTalent(uint32 talentId, uint8 requestedRank)
         return false;
 
     // check if we have enough talent points
-    if (static_cast<uint32>(m_activePlayerData->CharacterPoints) < (requestedRank - curtalent_maxrank + 1))
+    if (static_cast<int32>(m_activePlayerData->CharacterPoints) < (int32(requestedRank) - int32(curtalent_maxrank) + 1))
         return false;
 
     // Check talent dependencies
@@ -26698,7 +26698,7 @@ void Player::LearnPetTalent(ObjectGuid petGuid, uint32 talentId, uint32 talentRa
     }
 
     // not have required min points spent in talent tree
-    if (spentPoints < (talentInfo->TierID * MAX_PET_TALENT_RANK))
+    if (spentPoints < uint32(talentInfo->TierID * MAX_PET_TALENT_RANK))
         return;
 
     // spell not set in talent.dbc

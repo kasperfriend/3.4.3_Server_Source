@@ -60,7 +60,7 @@ ArenaTeam::~ArenaTeam()
 {
 }
 
-void ArenaTeam::SendStats(WorldSession* session)
+void ArenaTeam::SendStats(WorldSession* /*session*/)
 {
     // alistar: TODO need packets for this. It's most likely not need due to new arena system?
 #if 0
@@ -284,14 +284,20 @@ int32 ArenaTeam::GetRatingMod(uint32 ownRating, uint32 opponentRating, bool won 
 
 int32 ArenaTeam::WonAgainst(uint32 ownMMRating, uint32 opponentMMRating, int32& ratingChange)
 {
+    // Called when the team has won
+    ratingChange = GetMatchmakerRatingMod(ownMMRating, opponentMMRating, true);
+
     // Return the rating change, used to display it on the results screen
-    return GetMatchmakerRatingMod(ownMMRating, opponentMMRating, true);
+    return ratingChange;
 }
 
 int32 ArenaTeam::LostAgainst(uint32 ownMMRating, uint32 opponentMMRating, int32& ratingChange)
 {
+    // Called when the team has lost
+    ratingChange = GetMatchmakerRatingMod(ownMMRating, opponentMMRating, false);
+
     // Return the rating change, used to display it on the results screen
-    return GetMatchmakerRatingMod(ownMMRating, opponentMMRating, false);
+    return ratingChange;
 }
 
 void ArenaTeam::MemberLost(Player* player, uint32 againstMatchmakerRating, int32 matchmakerRatingChange)

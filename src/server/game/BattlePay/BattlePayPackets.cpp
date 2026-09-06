@@ -280,7 +280,7 @@ WorldPacket const* WorldPackets::BattlePay::SyncWowEntitlements::Write()
     _worldPacket << uint32(purchaseCount.size());
     _worldPacket << uint32(ProductData.size());
 
-    for (auto purchases : purchaseCount)
+    for (std::size_t i = 0; i < purchaseCount.size(); ++i)
     {
         _worldPacket << uint32(0); // productID ?
         _worldPacket << uint32(0); // flags?

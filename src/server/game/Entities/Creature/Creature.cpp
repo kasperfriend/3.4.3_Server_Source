@@ -1471,7 +1471,7 @@ bool Creature::isTappedBy(Player const* player) const
     return true;
 }
 
-bool Creature::IsSkinnedBy(Player const* player) const
+bool Creature::IsSkinnedBy(Player const* /*player*/) const
 {
     return loot.loot_type == LOOT_SKINNING;
 }

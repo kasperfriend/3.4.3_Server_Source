@@ -2381,7 +2381,7 @@ float WorldObject::ApplyEffectModifiers(SpellInfo const* spellInfo, uint8 effInd
     return value;
 }
 
-int32 WorldObject::CalcSpellDuration(SpellInfo const* spellInfo, std::vector<SpellPowerCost> const* powerCosts) const
+int32 WorldObject::CalcSpellDuration(SpellInfo const* spellInfo, std::vector<SpellPowerCost> const* /*powerCosts*/) const
 {
     uint8 comboPoints = 0;
     if (Unit const* unit = ToUnit())

@@ -39,6 +39,7 @@
 #include "Util.h"
 #include "World.h"
 #include "WorldSession.h"
+#include <algorithm>
 #include <sstream>
 
 #define PET_XP_FACTOR 0.05f
@@ -338,7 +339,7 @@ bool Pet::LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool c
         else
         {
             SetHealth(savedhealth > GetMaxHealth() ? GetMaxHealth() : savedhealth);
-            SetPower(POWER_MANA, savedmana > GetMaxPower(POWER_MANA) ? GetMaxPower(POWER_MANA) : savedmana);
+            SetPower(POWER_MANA, std::min<int32>(int32(savedmana), GetMaxPower(POWER_MANA)));
         }
     }
 
