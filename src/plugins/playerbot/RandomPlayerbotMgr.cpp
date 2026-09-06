@@ -730,14 +730,24 @@ void RandomPlayerbotMgr::OnPlayerLogin(Player* player)
         if (player == bot || player->GetPlayerbotAI())
             continue;
 
+        // the AI is attached before a bot enters the map, but guard anyway: a
+        // bot that is mid logout/teardown must not be dereferenced here
+        PlayerbotAI* ai = bot->GetPlayerbotAI();
+        if (!ai)
+            continue;
+
         Group* group = bot->GetGroup();
         if (!group)
             continue;
 
         for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
         {
+            // offline group members (players that logged out earlier) have a
+            // null source; they can never be the player that just logged in
             Player* member = gref->GetSource();
-            PlayerbotAI* ai = bot->GetPlayerbotAI();
+            if (!member)
+                continue;
+
             if (member == player && (!ai->GetMaster() || ai->GetMaster()->GetPlayerbotAI()))
             {
                 ai->SetMaster(player);

@@ -205,28 +205,55 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
 
 string RandomPlayerbotFactory::CreateRandomBotName()
 {
-    QueryResult result = CharacterDatabase.Query("SELECT MAX(name_id) FROM ai_playerbot_names");
-    if (!result)
+    QueryResult result = CharacterDatabase.Query("SELECT MAX(name_id), MIN(name_id) FROM ai_playerbot_names");
+    if (!result || !result->GetRowCount())
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random guilds");
+        TC_LOG_ERROR("playerbot", "The ai_playerbot_names table is empty - no random bot names available");
         return "";
     }
 
-    Field *fields = result->Fetch();
+    Field* fields = result->Fetch();
     uint32 maxId = fields[0].GetUInt32();
-
-    uint32 id = urand(0, maxId);
-    result = CharacterDatabase.PQuery("SELECT n.name FROM ai_playerbot_names n "
-            "LEFT OUTER JOIN characters e ON e.name = n.name "
-            "WHERE e.guid IS NULL AND n.name_id >= '{}' LIMIT 1", id);
-    if (!result)
+    uint32 minId = fields[1].GetUInt32();
+    if (!maxId || maxId < minId)
     {
-        TC_LOG_ERROR("playerbot",  "No more names left for random bots");
+        TC_LOG_ERROR("playerbot", "The ai_playerbot_names table is empty - no random bot names available");
         return "";
     }
 
-	fields = result->Fetch();
-    return fields[0].GetString();
+    // A single random probe past the last free name used to report "no names
+    // left" even when the table still had free entries (no ORDER BY and one
+    // shot per call), which spammed an error for every class of every account
+    // at each startup and silently left bot characters uncreated. Try several
+    // random offsets, then fall back to the first free name in the table.
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+        uint32 id = urand(minId, maxId);
+        result = CharacterDatabase.PQuery(
+                "SELECT n.name FROM ai_playerbot_names n "
+                "LEFT OUTER JOIN characters e ON e.name = n.name "
+                "WHERE e.guid IS NULL AND n.name_id >= '{}' "
+                "ORDER BY n.name_id LIMIT 1", id);
+        if (result)
+        {
+            fields = result->Fetch();
+            return fields[0].GetString();
+        }
+    }
+
+    result = CharacterDatabase.PQuery(
+            "SELECT n.name FROM ai_playerbot_names n "
+            "LEFT OUTER JOIN characters e ON e.name = n.name "
+            "WHERE e.guid IS NULL "
+            "ORDER BY n.name_id LIMIT 1");
+    if (result)
+    {
+        fields = result->Fetch();
+        return fields[0].GetString();
+    }
+
+    TC_LOG_ERROR("playerbot", "No more names left for random bots - add more rows to ai_playerbot_names");
+    return "";
 }
 
 
@@ -294,13 +321,29 @@ void RandomPlayerbotFactory::CreateRandomBots()
         }
 
         RandomPlayerbotFactory factory(accountId);
+
+        bool namePoolExhausted = false;
         for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES; ++cls)
         {
-            if (cls != 10 && cls != CLASS_DEATH_KNIGHT)
-                factory.CreateRandomBot(cls);
+            if (cls == 10 || cls == CLASS_DEATH_KNIGHT)
+                continue;
+
+            if (!factory.CreateRandomBot(cls))
+            {
+                // CreateRandomBot only fails when the name pool is exhausted or
+                // character creation itself fails; the pool never refills during
+                // this pass, so no later account/class can succeed either. Bail
+                // out instead of re-running the failing query for every slot
+                // (which used to flood the log at every startup).
+                namePoolExhausted = true;
+                break;
+            }
         }
 
         totalRandomBotChars += sAccountMgr->GetCharactersCount(accountId);
+
+        if (namePoolExhausted)
+            break;
     }
 
     TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
