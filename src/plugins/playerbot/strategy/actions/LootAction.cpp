@@ -268,8 +268,11 @@ bool StoreLootAction::Execute(Event event)
                 {
                     for (GroupReference *ref = group->GetFirstMember(); ref; ref = ref->next())
                     {
-                        if( ref->GetSource() != bot)
-                            sGuildTaskMgr.CheckItemTask(itemid, itemcount, ref->GetSource(), bot);
+                        // group members can drop (logout/disconnect) while the bot
+                        // loots; GetSource() then returns null
+                        Player* member = ref->GetSource();
+                        if (member && member != bot)
+                            sGuildTaskMgr.CheckItemTask(itemid, itemcount, member, bot);
                     }
                 }
             }

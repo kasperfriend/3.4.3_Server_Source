@@ -158,8 +158,15 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
 
     if (player->GetGuild() && player->GetGuild()->GetLeaderGUID() == player->GetGUID())
     {
+        // "players" holds raw pointers to live real players; skip anything that
+        // is gone or still loading so guild task updates never touch stale players
         for (vector<Player*>::iterator i = players.begin(); i != players.end(); ++i)
+        {
+            if (!*i || !(*i)->IsInWorld() || (*i)->GetSession()->IsBotSession())
+                continue;
+
             sGuildTaskMgr.Update(*i, player);
+        }
     }
 
     uint32 randomize = GetEventValue(bot, "randomize");
@@ -340,6 +347,12 @@ void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
     uint32 maxLevel = sPlayerbotAIConfig.randomBotMaxLevel;
     if (maxLevel > sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
         maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
+
+    if (sPlayerbotAIConfig.randomBotMaps.empty())
+    {
+        TC_LOG_ERROR("playerbot", "Cannot randomize bot {} - AiPlayerbot.RandomBotMaps is empty", bot->GetName());
+        return;
+    }
 
     for (int attempt = 0; attempt < 10; ++attempt)
     {
@@ -693,12 +706,12 @@ void RandomPlayerbotMgr::OnPlayerLogout(Player* player)
         }
     }
 
-    if (!player->GetPlayerbotAI())
-    {
-        vector<Player*>::iterator i = find(players.begin(), players.end(), player);
-        if (i != players.end())
-            players.erase(i);
-    }
+    // The real-player list must never outlive a player object: bot sessions log
+    // out with their PlayerbotAI still attached, so the old "no AI" filter left
+    // every logged out bot dangling in the list. Remove unconditionally.
+    vector<Player*>::iterator i = find(players.begin(), players.end(), player);
+    if (i != players.end())
+        players.erase(i);
 }
 
 void RandomPlayerbotMgr::OnPlayerLogin(Player* player)
@@ -727,7 +740,13 @@ void RandomPlayerbotMgr::OnPlayerLogin(Player* player)
         }
     }
 
-    if (player->GetPlayerbotAI())
+    // Track real players only. Bot sessions still have no PlayerbotAI at this
+    // point (their AI is attached once login completes), so the AI check alone
+    // used to add every bot to the list - and bots are never removed again at
+    // logout, leaving dangling Player pointers for GuildTaskMgr::Update and
+    // GetRandomPlayer to dereference while real players are online.
+    if (player->GetPlayerbotAI() ||
+        (player->GetSession() && player->GetSession()->IsBotSession()))
         return;
 
     players.push_back(player);
