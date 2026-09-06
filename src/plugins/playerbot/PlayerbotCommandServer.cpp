@@ -21,13 +21,20 @@ bool ReadLine(socket_ptr sock, string* buffer, string* line)
     string::iterator pos;
     while ((pos = find(buffer->begin(), buffer->end(), '\n')) == buffer->end())
     {
-        char buf[1025];
+        // a client that never sends '\n' must not grow the buffer forever
+        if (buffer->size() > 64 * 1024)
+            return false;
+
+        char buf[1024];
         boost::system::error_code error;
         size_t n = sock->read_some(boost::asio::buffer(buf), error);
-        if (n == -1 || error == boost::asio::error::eof)
+        if (error == boost::asio::error::eof)
             return false;
         else if (error)
             throw boost::system::system_error(error); // Some other error.
+
+        if (n >= sizeof(buf))
+            return false;
 
         buf[n] = 0;
         *buffer += buf;

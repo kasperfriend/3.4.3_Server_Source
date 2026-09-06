@@ -480,8 +480,9 @@ void Engine::LogAction(const char* format, ...)
 
     va_list ap;
     va_start(ap, format);
-    vsprintf(buf, format, ap);
+    vsnprintf(buf, sizeof(buf), format, ap);
     va_end(ap);
+
     lastAction += "|";
     lastAction += buf;
     if (lastAction.size() > 512)
@@ -494,7 +495,7 @@ void Engine::LogAction(const char* format, ...)
     if (testMode)
     {
         FILE* file = fopen("test.log", "a");
-        fprintf(file, buf);
+        fprintf(file, "%s", buf);
         fprintf(file, "\n");
         fclose(file);
     }
