@@ -10,6 +10,7 @@
 #include "../pchdef.h"
 #include "playerbot.h"
 #include "PlayerbotAI.h"
+#include <exception>
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotMgr.h"
 #include "PlayerbotCommandServer.h"
