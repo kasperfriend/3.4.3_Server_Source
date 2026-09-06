@@ -9,7 +9,10 @@ bool InventoryChangeFailureAction::Execute(Event event)
 {
     WorldPacket p(event.getPacket());
     p.rpos(0);
-    uint8 err;
+    // SMSG_INVENTORY_CHANGE_FAILURE leads with int32 BagResult
+    // (InventoryChangeFailure::Write); the InventoryResult enum is uint8, so a
+    // uint8 read only worked by accident via the little-endian low byte.
+    int32 err;
     p >> err;
     if (err == EQUIP_ERR_OK)
         return false;
