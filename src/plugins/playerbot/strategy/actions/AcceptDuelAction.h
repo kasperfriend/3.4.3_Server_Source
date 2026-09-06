@@ -19,8 +19,14 @@ namespace ai
             ObjectGuid playerGuid;
             p >> playerGuid;
 
-            WorldPacket* const packet = new WorldPacket(CMSG_DUEL_RESPONSE, 8);
+            // CMSG_DUEL_RESPONSE in 3.4.3 (WorldPackets::Duel::DuelResponse) carries
+            // the arbiter guid plus Accepted/Forfeited bits; the old guid-only
+            // packet truncated the read and the bot could never answer a duel.
+            WorldPacket* const packet = new WorldPacket(CMSG_DUEL_RESPONSE, 9);
             *packet << flagGuid;
+            packet->WriteBit(true);                     // Accepted
+            packet->WriteBit(false);                    // Forfeited
+            packet->FlushBits();
             bot->GetSession()->QueuePacket(packet);
 
             ai->ResetStrategies();
