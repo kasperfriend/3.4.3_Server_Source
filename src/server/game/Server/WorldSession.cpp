@@ -259,7 +259,7 @@ void WorldSession::SendPacket(WorldPacket const* packet, bool forced /*= false*/
         conIdx = packet->GetConnection();
     }
 
-    if (!m_Socket[conIdx])
+    if (!m_Socket[conIdx] && !_isBotSession)
     {
         TC_LOG_ERROR("network.opcode", "Prevented sending of {} to non existent socket {} to {}", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
         return;
