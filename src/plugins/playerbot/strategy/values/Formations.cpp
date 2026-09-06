@@ -231,7 +231,7 @@ float Formation::GetFollowAngle()
 {
     Player* master = GetMaster();
     Group* group = master ? master->GetGroup() : bot->GetGroup();
-    if (!group)
+    if (!group || group->GetMembersCount() < 2)
         return 0.0f;
 
     int index = 1;
