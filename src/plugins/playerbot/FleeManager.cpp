@@ -16,8 +16,9 @@ void FleeManager::calculateDistanceToPlayers(FleePoint *point)
 
 	for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
     {
+		// offline group members (real players that logged out) have a null source
 		Player* player = gref->GetSource();
-		if(player == bot)
+		if (!player || player == bot)
 			continue;
 
 		float d = player->GetDistance(point->x, point->y, point->z);

@@ -76,7 +76,14 @@ void ArrowFormation::FillSlotsExceptMaster()
     uint32 index = 0;
     while (gref)
     {
+        // offline members have a null source; FindSlot would call ai->IsTank on it
         Player* member = gref->GetSource();
+        if (!member)
+        {
+            gref = gref->next();
+            index++;
+            continue;
+        }
 
         if (member == bot)
             FindSlot(member)->AddLast(botUnit = new FormationUnit(index, false));

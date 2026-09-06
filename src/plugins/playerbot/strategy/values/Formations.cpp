@@ -145,8 +145,10 @@ namespace ai
             GroupReference *gref = group->GetFirstMember();
             while( gref )
             {
+                // offline members have a null source; skip them instead of
+                // handing null to the move-line code below
                 Player* member = gref->GetSource();
-                if (member != master)
+                if (member && member != master)
                     players.push_back(member);
 
                 gref = gref->next();
@@ -184,8 +186,9 @@ namespace ai
             GroupReference *gref = group->GetFirstMember();
             while( gref )
             {
+                // offline members have a null source; ai->IsTank would crash on it
                 Player* member = gref->GetSource();
-                if (member != master)
+                if (member && member != master)
                 {
                     if (ai->IsTank(member))
                         tanks.push_back(member);

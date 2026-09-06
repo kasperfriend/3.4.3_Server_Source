@@ -41,7 +41,11 @@ Unit* PartyMemberValue::FindPartyMember(FindPlayerPredicate &predicate)
     masters.push_back(master);
     for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
     {
+        // members who logged out stay in the group as offline slots; their
+        // source pointer is null and IsHeal/IsTank would dereference it
         Player* player = gref->GetSource();
+        if (!player)
+            continue;
 
         if (ai->IsHeal(player))
             healers.push_back(player);
@@ -87,7 +91,7 @@ bool PartyMemberValue::IsTargetOfSpellCast(Player* target, SpellEntryPredicate &
     for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
     {
         Player* player = gref->GetSource();
-        if (player == bot)
+        if (!player || player == bot)
             continue;
 
         if (player->IsNonMeleeSpellCast(true))
