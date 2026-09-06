@@ -126,7 +126,6 @@ void BattlepayManager::ProcessDelivery(const Purchase& purchase, bool onLogin)
         if (product == nullptr)
             continue;
 
-        const auto* item = sObjectMgr->GetItemTemplate(product->Flags);
         const auto* spellInfo = sSpellMgr->GetSpellInfo(product->DisplayId, DIFFICULTY_NONE);
 
         switch (product->Type)
@@ -646,7 +645,7 @@ void BattlepayManager::AssignDistributionToCharacter(ObjectGuid const& targetCha
     SendBattlePayDistribution(productId, purchase->Status, distributionId, targetCharGuid);
 }
 
-void BattlepayManager::Update(uint32 diff)
+void BattlepayManager::Update(uint32 /*diff*/)
 {
     TC_LOG_INFO("server.BattlePay", "BattlepayManager::Update");
     /*
@@ -774,7 +773,7 @@ void BattlepayManager::SendBattlePayBattlePetDelivered(ObjectGuid petguid, uint3
     TC_LOG_ERROR("", "Send BattlePayBattlePetDelivered guid: %lu && creatureID: {}", petguid.GetCounter(), creatureID);
 }
 
-void BattlepayManager::AddBattlePetFromBpayShop(uint32 battlePetCreatureID) const
+void BattlepayManager::AddBattlePetFromBpayShop(uint32 /*battlePetCreatureID*/) const
 {
      //if (BattlePetSpeciesEntry const* speciesEntry = BattlePets::BattlePetMgr::GetBattlePetSpeciesByCreature(battlePetCreatureID))
      //{

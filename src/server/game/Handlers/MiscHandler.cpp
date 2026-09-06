@@ -1167,7 +1167,7 @@ void WorldSession::HandleMountSetFavorite(WorldPackets::Misc::MountSetFavorite& 
     _collectionMgr->MountSetFavorite(mountSetFavorite.MountSpellID, mountSetFavorite.IsFavorite);
 }
 
-void WorldSession::HandleCloseInteraction(WorldPackets::Misc::CloseInteraction& closeInteraction)
+void WorldSession::HandleCloseInteraction(WorldPackets::Misc::CloseInteraction& /*closeInteraction*/)
 {
     // alistar: we don't want to reset the interaction data because if we decline a quest
     // we get sent into the main gossip menu and if we click on a different option that's not the quest

@@ -94,7 +94,6 @@ void WorldSession::SendMakePurchase(ObjectGuid targetCharacter, uint32 clientTok
         return;
 
     auto player = session->GetPlayer();
-    auto accountID = session->GetAccountId();
 
     Battlepay::Purchase purchase;
     purchase.ProductID = productID;
@@ -214,7 +213,7 @@ void WorldSession::HandleBattlePayAckFailedResponse(WorldPackets::BattlePay::Bat
 {
 }
 
-void WorldSession::HandleBattlePayRequestPriceInfo(WorldPackets::BattlePay::BattlePayRequestPriceInfo& packet)
+void WorldSession::HandleBattlePayRequestPriceInfo(WorldPackets::BattlePay::BattlePayRequestPriceInfo& /*packet*/)
 {
 }
 

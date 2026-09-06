@@ -77,6 +77,18 @@ target_compile_options(trinity-compile-option-interface
   INTERFACE
     /MP)
 
+# Make sure the 64-bit hosted compiler is used.
+# The x86 hosted cl.exe is limited to a ~3GB address space and fails to build
+# this tree with "C3859: Failed to create virtual memory for PCH" followed by
+# "C1076: compiler limit: internal heap limit reached", which in turn makes the
+# scripts/game libraries missing and worldserver fail with LNK1181.
+if(CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE AND
+   NOT CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE MATCHES "^(x64|X64)$")
+  message(WARNING "MSVC: 32-bit hosted toolset selected (host=${CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE}). "
+                  "This build requires the 64-bit hosted compiler - configure with -T host=x64.")
+endif()
+
+
 if((PLATFORM EQUAL 64) OR (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.0.23026.0) OR BUILD_SHARED_LIBS)
   # Enable extended object support
   target_compile_options(trinity-compile-option-interface
@@ -183,9 +195,7 @@ endmacro()
 # This will make compiler behave like in 2019 - compiling num_cpus * num_projects at the same time
 # it is neccessary because of a bug in current implementation that makes scripts build only a single
 # file at the same time after game project finishes building
-if (NOT MSVC_TOOLSET_VERSION LESS 143)
-  file(COPY "${CMAKE_CURRENT_LIST_DIR}/Directory.Build.props" DESTINATION "${CMAKE_BINARY_DIR}")
-endif()
+file(COPY "${CMAKE_CURRENT_LIST_DIR}/Directory.Build.props" DESTINATION "${CMAKE_BINARY_DIR}")
 
 DisableIncrementalLinking(CMAKE_EXE_LINKER_FLAGS_DEBUG)
 DisableIncrementalLinking(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO)

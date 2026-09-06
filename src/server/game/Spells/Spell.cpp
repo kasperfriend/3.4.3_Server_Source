@@ -5109,7 +5109,7 @@ std::pair<uint32, uint32> Spell::GetSpellCastDataAmmo()
     return { ammoDisplayID, ammoInventoryType };
 }
 
-static std::pair<int32, SpellHealPredictionType> CalcPredictedHealing(SpellInfo const* spellInfo, Unit const* unitCaster, Unit* target, uint32 castItemEntry, int32 castItemLevel, Spell* spell, bool withPeriodic)
+static std::pair<int32, SpellHealPredictionType> CalcPredictedHealing(SpellInfo const* spellInfo, Unit const* unitCaster, Unit* target, uint32 castItemEntry, int32 castItemLevel, Spell* /*spell*/, bool withPeriodic)
 {
     int32 points = 0;
     SpellHealPredictionType type = SPELL_HEAL_PREDICTION_TARGET;

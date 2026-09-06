@@ -2061,7 +2061,7 @@ void AuraEffect::HandleAuraModShapeshift(AuraApplication const* aurApp, uint8 mo
             case FORM_DEFENSIVE_STANCE:
             case FORM_BERSERKER_STANCE:
             {
-                uint32 Rage_val = 0;
+                int32 Rage_val = 0;
                 // Defensive Tactics
                 if (form == FORM_DEFENSIVE_STANCE)
                 {
@@ -5289,7 +5289,7 @@ void AuraEffect::HandleAuraOverrideSpells(AuraApplication const* aurApp, uint8 m
     }
 }
 
-void AuraEffect::HandleAuraPreventRegeneratePower(AuraApplication const* aurApp, uint8 mode, bool apply) const
+void AuraEffect::HandleAuraPreventRegeneratePower(AuraApplication const* aurApp, uint8 mode, bool /*apply*/) const
 {
     if (!(mode & (AURA_EFFECT_HANDLE_CHANGE_AMOUNT_MASK | AURA_EFFECT_HANDLE_STAT)))
         return;
@@ -5415,7 +5415,7 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
 
     CleanDamage cleanDamage = CleanDamage(0, 0, BASE_ATTACK, MELEE_HIT_NORMAL);
 
-    uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
+    [[maybe_unused]] uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
 
     // ignore negative values (can be result apply spellmods to aura damage
     uint32 damage = std::max(GetAmount(), 0);
@@ -5535,7 +5535,7 @@ void AuraEffect::HandlePeriodicHealthLeechAuraTick(Unit* target, Unit* caster) c
 
     CleanDamage cleanDamage = CleanDamage(0, 0, GetSpellInfo()->GetAttackType(), MELEE_HIT_NORMAL);
 
-    uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
+    [[maybe_unused]] uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
 
     // ignore negative values (can be result apply spellmods to aura damage
     uint32 damage = std::max(GetAmount(), 0);
@@ -5669,7 +5669,7 @@ void AuraEffect::HandlePeriodicHealAurasTick(Unit* target, Unit* caster) const
     if (GetBase()->IsPermanent() && target->IsFullHealth())
         return;
 
-    uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
+    [[maybe_unused]] uint32 stackAmountForBonuses = !GetSpellEffectInfo().EffectAttributes.HasFlag(SpellEffectAttributes::SuppressPointsStacking) ? GetBase()->GetStackAmount() : 1;
 
     // ignore negative values (can be result apply spellmods to aura damage
     uint32 damage = std::max(GetAmount(), 0);

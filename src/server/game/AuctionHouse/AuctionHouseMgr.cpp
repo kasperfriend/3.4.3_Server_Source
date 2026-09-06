@@ -141,7 +141,7 @@ uint32 AuctionPosting::GetTotalItemCount() const
 }
 
 void AuctionPosting::BuildAuctionItem(WorldPackets::AuctionHouse::AuctionItem* auctionItem,
-    bool alwaysSendItem, bool sendKey, bool censorServerInfo, bool censorBidInfo) const
+    bool /*alwaysSendItem*/, bool sendKey, bool censorServerInfo, bool censorBidInfo) const
 {
     // SMSG_AUCTION_LIST_BIDDER_ITEMS_RESULT, SMSG_AUCTION_LIST_ITEMS_RESULT (if not commodity), SMSG_AUCTION_LIST_OWNER_ITEMS_RESULT, SMSG_AUCTION_REPLICATE_RESPONSE (if not commodity)
     //auctionItem->Item - here to unify comment
@@ -1140,7 +1140,7 @@ void AuctionHouseObject::Update()
 
 void AuctionHouseObject::BuildListBuckets(WorldPackets::AuctionHouse::AuctionListItemsResult& listBucketsResult, Player const* player,
     std::wstring const& name, uint8 minLevel, uint8 maxLevel, EnumFlag<AuctionHouseFilterMask> filters, Optional<AuctionSearchClassFilters> const& classFilters,
-    std::span<uint8 const> knownPetBits, uint8 maxKnownPetLevel, uint32 offset, std::span<WorldPackets::AuctionHouse::AuctionSortDef const> sorts) const
+    std::span<uint8 const> /*knownPetBits*/, uint8 /*maxKnownPetLevel*/, uint32 offset, std::span<WorldPackets::AuctionHouse::AuctionSortDef const> sorts) const
 {
     const uint32 maxAuctions = sAuctionMgr->GetAuctionsMap(AUCTION_HOUSE_NEUTRAL)->GetAuctionsSize();
 

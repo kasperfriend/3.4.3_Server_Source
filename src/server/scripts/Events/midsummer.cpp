@@ -1054,9 +1054,9 @@ class spell_midsummer_fling_torch : public SpellScript
         // so a minimum flight duration of the torch is guaranteed
         float angle = 0.0f;
         if (GetSpellInfo()->Id == SPELL_FLING_TORCH_DUMMY)
-            angle = frand(-1.0f * M_PI, 1.0f * M_PI); // full circle
+            angle = frand(-1.0f * float(M_PI), 1.0f * float(M_PI)); // full circle
         else
-            angle = frand(-0.5f * M_PI, 0.5f * M_PI); // half circle
+            angle = frand(-0.5f * float(M_PI), 0.5f * float(M_PI)); // half circle
 
         Position pos = bunny->GetPosition();
         pos.SetOrientation(caster->GetPosition().GetAbsoluteAngle(pos));

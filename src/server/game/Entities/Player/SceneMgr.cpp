@@ -203,7 +203,7 @@ void SceneMgr::RemoveSceneInstanceId(uint32 sceneInstanceID)
     _scenesByInstance.erase(sceneInstanceID);
 }
 
-void SceneMgr::RemoveAurasDueToSceneId(uint32 sceneId)
+void SceneMgr::RemoveAurasDueToSceneId(uint32 /*sceneId*/)
 {
     
 }

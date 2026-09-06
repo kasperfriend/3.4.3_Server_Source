@@ -4508,7 +4508,7 @@ bool IsInterruptFlagIgnoredForSpell(InterruptFlag /*flag*/, Unit const* /*unit*/
 }
 
 template<>
-bool IsInterruptFlagIgnoredForSpell(SpellAuraInterruptFlags flag, Unit const* unit, SpellInfo const* auraSpellInfo, bool isChannel, SpellInfo const* interruptSource)
+bool IsInterruptFlagIgnoredForSpell(SpellAuraInterruptFlags flag, Unit const* /*unit*/, SpellInfo const* auraSpellInfo, bool isChannel, SpellInfo const* interruptSource)
 {
     switch (flag)
     {
@@ -10327,7 +10327,6 @@ void Unit::SetHealth(uint64 val)
             val = maxHealth;
     }
 
-    uint64 oldVal = GetHealth();
     SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::Health), val);
 
     // group update
@@ -10403,7 +10402,6 @@ void Unit::SetPower(Powers power, int32 val, bool withPowerUpdate /*= true*/)
     if (maxPower < val)
         val = maxPower;
 
-    int32 oldPower = m_unitData->Power[powerIndex];
     SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::Power, powerIndex), val);
 
     if (IsInWorld() && withPowerUpdate)
@@ -11768,7 +11766,7 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
     SendMessageToSet(data.Write(), true);
 }
 
-/*static*/ void Unit::Kill(Unit* attacker, Unit* victim, bool durabilityLoss /*= true*/, bool skipSettingDeathState /*= false*/)
+/*static*/ void Unit::Kill(Unit* attacker, Unit* victim, bool durabilityLoss /*= true*/, bool /*skipSettingDeathState*/ /*= false*/)
 {
     // Prevent killing unit twice (and giving reward from kill twice)
     if (!victim->GetHealth())

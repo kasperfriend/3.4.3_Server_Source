@@ -1,6 +1,15 @@
 <Project>
   <PropertyGroup>
+    <!-- Disable VS2022 build process management (compiles a single file at a
+         time in the scripts project after game finishes otherwise). -->
     <UseMultiToolTask>false</UseMultiToolTask>
     <UseMSBuildResourceManager>false</UseMSBuildResourceManager>
+
+    <!-- Always use the native 64-bit toolchain.  The 32-bit hosted cl.exe only
+         has ~3GB of address space and dies with
+           C3859: Failed to create virtual memory for PCH
+           C1076: compiler limit: internal heap limit reached
+         on the big translation units (game/scripts + huge PCHs). -->
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
 </Project>
