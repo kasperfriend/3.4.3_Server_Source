@@ -208,7 +208,7 @@ dtNavMesh::dtNavMesh() :
 
 dtNavMesh::~dtNavMesh()
 {
-	for (int i = 0; i < m_maxTiles; ++i)
+    for (int i = 0; m_tiles && i < m_maxTiles; ++i)
 	{
 		if (m_tiles[i].flags & DT_TILE_FREE_DATA)
 		{
@@ -237,10 +237,11 @@ dtStatus dtNavMesh::init(const dtNavMeshParams* params)
 	m_tiles = (dtMeshTile*)dtAlloc(sizeof(dtMeshTile)*m_maxTiles, DT_ALLOC_PERM);
 	if (!m_tiles)
 		return DT_FAILURE | DT_OUT_OF_MEMORY;
+    // Leave destructor-safe tile flags even if the following allocation fails.
+    memset(static_cast<void*>(m_tiles), 0, sizeof(dtMeshTile)*m_maxTiles);
 	m_posLookup = (dtMeshTile**)dtAlloc(sizeof(dtMeshTile*)*m_tileLutSize, DT_ALLOC_PERM);
 	if (!m_posLookup)
 		return DT_FAILURE | DT_OUT_OF_MEMORY;
-	memset(m_tiles, 0, sizeof(dtMeshTile)*m_maxTiles);
 	memset(m_posLookup, 0, sizeof(dtMeshTile*)*m_tileLutSize);
 	m_nextFree = 0;
 	for (int i = m_maxTiles-1; i >= 0; --i)

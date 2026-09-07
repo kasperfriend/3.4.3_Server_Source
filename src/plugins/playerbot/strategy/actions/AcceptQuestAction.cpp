@@ -36,6 +36,10 @@ bool AcceptQuestAction::Execute(Event event)
     }
     else if (!event.getPacket().empty())
     {
+        if (event.getPacket().GetOpcode() != CMSG_QUEST_GIVER_ACCEPT_QUEST)
+            return false;
+        event.getPacket().rpos(0);
+        event.getPacket().ResetBitPos();
         WorldPackets::Quest::QuestGiverAcceptQuest packet(WorldPacket(event.getPacket()));
         packet.Read();
         guid = packet.QuestGiverGUID;
@@ -60,9 +64,15 @@ bool AcceptQuestShareAction::Execute(Event event)
     Player* master = GetMaster();
     Player *bot = ai->GetBot();
 
-    WorldPackets::Quest::QuestPushResult packet(WorldPacket(event.getPacket()));
+    if (!master || event.getPacket().GetOpcode() != CMSG_PUSH_QUEST_TO_PARTY)
+        return false;
+    event.getPacket().rpos(0);
+    event.getPacket().ResetBitPos();
+    WorldPackets::Quest::PushQuestToParty packet(WorldPacket(event.getPacket()));
     packet.Read();
-    uint32 quest = bot->GetSharedQuestID();
+    if (bot->GetSharedQuestID() != packet.QuestID || bot->GetPlayerSharingQuest() != master->GetGUID())
+        return false; // stale share, or a quest the core did not offer to this bot
+    uint32 quest = packet.QuestID;
     Quest const* qInfo = sObjectMgr->GetQuestTemplate(quest);
 
     if (!qInfo || bot->GetPlayerSharingQuest().IsEmpty())

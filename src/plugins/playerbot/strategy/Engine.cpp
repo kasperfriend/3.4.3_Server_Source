@@ -466,7 +466,15 @@ bool Engine::ListenAndExecute(Action* action, Event event)
 
     if (actionExecutionListeners.Before(action, event))
     {
-        actionExecuted = actionExecutionListeners.AllowExecution(action, event) ? action->Execute(event) : true;
+        try
+        {
+            actionExecuted = actionExecutionListeners.AllowExecution(action, event) ? action->Execute(event) : true;
+        }
+        catch (ByteBufferException const& error)
+        {
+            TC_LOG_WARN("playerbot", "Bot action '{}' rejected malformed packet {} ({} bytes): {}",
+                action->getName(), event.getPacket().GetOpcode(), event.getPacket().size(), error.what());
+        }
     }
 
     actionExecuted = actionExecutionListeners.OverrideResult(action, actionExecuted, event);

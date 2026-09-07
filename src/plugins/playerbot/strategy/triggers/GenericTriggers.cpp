@@ -109,8 +109,7 @@ bool SpellCanBeCastTrigger::IsActive()
 
 bool RandomTrigger::IsActive()
 {
-    int vl  = rand() % (int)(1 + probability * 10 / sPlayerbotAIConfig.randomChangeMultiplier);
-    return vl == 0;
+    return urand(0, sPlayerbotAIConfig.GetRandomChangeRange(probability * 10.0) - 1) == 0;
 }
 
 bool AndTrigger::IsActive()

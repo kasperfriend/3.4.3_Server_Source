@@ -278,7 +278,8 @@ bool Pet::LoadPetFromDB(Player* owner, uint32 petEntry, uint32 petnumber, bool c
     m_charmInfo->SetPetNumber(petInfo->PetNumber, IsPermanentPetFor(owner));
 
     SetDisplayId(petInfo->DisplayId, true);
-    uint8 petlevel = petInfo->Level;
+    // Saved hunter pets can carry stale/zero levels. Stats tables index level-1.
+    uint8 petlevel = std::clamp<uint8>(petInfo->Level, 1, owner->GetLevel());
     ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
     ReplaceAllNpcFlags2(UNIT_NPC_FLAG_2_NONE);
     SetName(petInfo->Name);
@@ -1288,7 +1289,11 @@ void Pet::_LoadAuras(PreparedQueryResult auraResult, PreparedQueryResult effectR
             uint32 effectIndex = fields[3].GetUInt8();
             if (effectIndex < MAX_SPELL_EFFECTS)
             {
-                casterGuid.SetRawValue(fields[0].GetBinary());
+                if (!casterGuid.TrySetRawValue(fields[0].GetBinary()))
+                {
+                    TC_LOG_ERROR("entities.pet", "Pet {} has an aura effect with invalid caster GUID data; skipping", GetGUID().ToString());
+                    continue;
+                }
                 if (casterGuid.IsEmpty())
                     casterGuid = GetGUID();
 
@@ -1310,7 +1315,11 @@ void Pet::_LoadAuras(PreparedQueryResult auraResult, PreparedQueryResult effectR
         {
             Field* fields = auraResult->Fetch();
             // NULL guid stored - pet is the caster of the spell - see Pet::_SaveAuras
-            casterGuid.SetRawValue(fields[0].GetBinary());
+            if (!casterGuid.TrySetRawValue(fields[0].GetBinary()))
+            {
+                TC_LOG_ERROR("entities.pet", "Pet {} has an aura with invalid caster GUID data; skipping", GetGUID().ToString());
+                continue;
+            }
             if (casterGuid.IsEmpty())
                 casterGuid = GetGUID();
 

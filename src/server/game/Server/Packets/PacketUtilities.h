@@ -230,6 +230,8 @@ namespace WorldPackets
         template<typename... Args>
         T& emplace_back(Args&&... args)
         {
+            if (_storage.size() >= max_capacity::value)
+                throw PacketArrayMaxCapacityException(_storage.size() + 1, max_capacity::value);
             _storage.emplace_back(std::forward<Args>(args)...);
             return _storage.back();
         }

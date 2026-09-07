@@ -196,8 +196,13 @@ class TC_SHARED_API ByteBuffer
 
         void WriteBits(uint64 value, int32 bits)
         {
-            // remove bits that don't fit
-            value &= (UI64LIT(1) << bits) - 1;
+            if (bits < 0 || bits > 64)
+                throw ByteBufferInvalidValueException("bit count", std::to_string(bits));
+            if (!bits)
+                return;
+            // Shifting by the width of uint64 is undefined; all bits already fit.
+            if (bits < 64)
+                value &= (UI64LIT(1) << bits) - 1;
 
             if (bits > int32(_bitpos))
             {
@@ -235,6 +240,8 @@ class TC_SHARED_API ByteBuffer
 
         uint32 ReadBits(int32 bits)
         {
+            if (bits < 0 || bits > 32)
+                throw ByteBufferInvalidValueException("bit count", std::to_string(bits));
             uint32 value = 0;
             for (int32 i = bits - 1; i >= 0; --i)
                 value |= uint32(ReadBit()) << i;
@@ -458,7 +465,7 @@ class TC_SHARED_API ByteBuffer
 
         void read_skip(size_t skip)
         {
-            if (_rpos + skip > size())
+            if (_rpos > size() || skip > size() - _rpos)
                 throw ByteBufferPositionException(_rpos, skip, size());
 
             ResetBitPos();
@@ -477,7 +484,7 @@ class TC_SHARED_API ByteBuffer
         template <typename T>
         T read(size_t pos) const
         {
-            if (pos + sizeof(T) > size())
+            if (pos > size() || sizeof(T) > size() - pos)
                 throw ByteBufferPositionException(pos, sizeof(T), size());
             T val;
             std::memcpy(&val, &_storage[pos], sizeof(T));
@@ -489,6 +496,8 @@ class TC_SHARED_API ByteBuffer
         void read(T* dest, size_t count)
         {
             static_assert(std::is_trivially_copyable_v<T>, "read(T*, size_t) must be used with trivially copyable types");
+            if (_rpos > size() || count > (size() - _rpos) / sizeof(T))
+                throw ByteBufferPositionException(_rpos, count, size());
             read(reinterpret_cast<uint8*>(dest), count * sizeof(T));
 #if TRINITY_ENDIAN == TRINITY_BIGENDIAN
             for (size_t i = 0; i < count; ++i)
@@ -498,11 +507,12 @@ class TC_SHARED_API ByteBuffer
 
         void read(uint8* dest, size_t len)
         {
-            if (_rpos + len > size())
+            if (_rpos > size() || len > size() - _rpos)
                 throw ByteBufferPositionException(_rpos, len, size());
 
             ResetBitPos();
-            std::memcpy(dest, &_storage[_rpos], len);
+            if (len)
+                std::memcpy(dest, _storage.data() + _rpos, len);
             _rpos += len;
         }
 
@@ -514,15 +524,16 @@ class TC_SHARED_API ByteBuffer
 
         void ReadPackedUInt64(uint64& guid)
         {
-            guid = 0;
             ReadPackedUInt64(read<uint8>(), guid);
         }
 
         void ReadPackedUInt64(uint8 mask, uint64& value)
         {
+            uint64 decoded = 0;
             for (uint32 i = 0; i < 8; ++i)
                 if (mask & (uint8(1) << i))
-                    value |= (uint64(read<uint8>()) << (i * 8));
+                    decoded |= (uint64(read<uint8>()) << (i * 8));
+            value = decoded; // overwrite reused values, including an all-zero mask
         }
 
         //! Method for writing strings that have their length sent separately in packet
@@ -621,6 +632,7 @@ class TC_SHARED_API ByteBuffer
 
         void AppendPackedUInt64(uint64 guid)
         {
+            FlushBits(); // the mask position must follow any pending bit byte
             uint8 mask = 0;
             size_t pos = wpos();
             *this << uint8(mask);

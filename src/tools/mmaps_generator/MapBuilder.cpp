@@ -21,6 +21,7 @@
 #include "MapTree.h"
 #include "Memory.h"
 #include "MMapDefines.h"
+#include "MMapDataValidation.h"
 #include "ModelInstance.h"
 #include "PathCommon.h"
 #include "StringFormat.h"
@@ -116,7 +117,7 @@ namespace MMAP
         uint32 mapID, tileX, tileY, tileID, count = 0;
 
         printf("Discovering maps... ");
-        getDirContents(files, "maps");
+        getDirContents(files, "maps", "*.map");
         for (uint32 i = 0; i < files.size(); ++i)
         {
             mapID = uint32(atoi(files[i].substr(0, 4).c_str()));
@@ -153,14 +154,17 @@ namespace MMAP
             {
                 tileX = uint32(atoi(files[i].substr(8, 2).c_str()));
                 tileY = uint32(atoi(files[i].substr(5, 2).c_str()));
-                tileID = StaticMapTree::packTileID(tileY, tileX);
+                // Internal builder coordinates are (file Y, file X), just as
+                // in the terrain-map branch below. Swapping only VMAP tiles
+                // made VMAP-only grids look for their transposed neighbours.
+                tileID = StaticMapTree::packTileID(tileX, tileY);
 
                 tiles->insert(tileID);
                 count++;
             }
 
             files.clear();
-            getDirContents(files, "maps", Trinity::StringFormat("{:04}*", mapID));
+            getDirContents(files, "maps", Trinity::StringFormat("{:04}_*.map", mapID));
             for (uint32 i = 0; i < files.size(); ++i)
             {
                 tileY = uint32(atoi(files[i].substr(5, 2).c_str()));
@@ -256,11 +260,12 @@ namespace MMAP
                 return;
 
             dtNavMesh* navMesh = dtAllocNavMesh();
-            if (!navMesh->init(&tileInfo.m_navMeshParams))
+            if (!navMesh || dtStatusFailed(navMesh->init(&tileInfo.m_navMeshParams)))
             {
                 printf("[Map %04i] Failed creating navmesh for tile %i,%i !\n", tileInfo.m_mapId, tileInfo.m_tileX, tileInfo.m_tileY);
                 dtFreeNavMesh(navMesh);
-                return;
+                ++m_mapBuilder->m_totalTilesProcessed;
+                continue;
             }
 
             buildTile(tileInfo.m_mapId, tileInfo.m_tileX, tileInfo.m_tileY, navMesh);
@@ -499,7 +504,7 @@ namespace MMAP
     /**************************************************************************/
     void TileBuilder::buildTile(uint32 mapID, uint32 tileX, uint32 tileY, dtNavMesh* navMesh)
     {
-        if(shouldSkipTile(mapID, tileX, tileY))
+        if (shouldSkipTile(mapID, tileX, tileY, navMesh))
         {
             ++m_mapBuilder->m_totalTilesProcessed;
             return;
@@ -569,10 +574,15 @@ namespace MMAP
         //if (tileBits < 1) tileBits = 1;                                     // need at least one bit!
         //int polyBits = sizeof(dtPolyRef)*8 - SALT_MIN_BITS - tileBits;
 
-        int polyBits = DT_POLY_BITS;
-
         int maxTiles = tiles->size();
-        int maxPolysPerTile = 1 << polyBits;
+        // DT_POLY_BITS is 31 in the 64-bit build; 1 << 31 is not a
+        // representable positive int for dtNavMeshParams::maxPolys.
+        int maxPolysPerTile = INT_MAX;
+        if (!maxTiles)
+        {
+            printf("[Map %04u] No tiles discovered; not writing empty navmesh parameters.\n", mapID);
+            return;
+        }
 
         /***          calculate bounds of map         ***/
 
@@ -609,9 +619,11 @@ namespace MMAP
 
         navMesh = dtAllocNavMesh();
         printf("[Map %04u] Creating navMesh...\n", mapID);
-        if (!navMesh->init(&navMeshParams))
+        if (!navMesh || dtStatusFailed(navMesh->init(&navMeshParams)))
         {
             printf("[Map %04u] Failed creating navmesh!                \n", mapID);
+            dtFreeNavMesh(navMesh);
+            navMesh = nullptr;
             return;
         }
 
@@ -1071,27 +1083,37 @@ namespace MMAP
     }
 
     /**************************************************************************/
-    bool TileBuilder::shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY) const
+    bool TileBuilder::shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY, dtNavMesh const* navMesh) const
     {
         char fileName[255];
         sprintf(fileName, "mmaps/%04u%02i%02i.mmtile", mapID, tileY, tileX);
-        FILE* file = fopen(fileName, "rb");
+        auto file = Trinity::make_unique_ptr_with_deleter(fopen(fileName, "rb"), &fclose);
         if (!file)
             return false;
 
         MmapTileHeader header;
-        int count = fread(&header, sizeof(MmapTileHeader), 1, file);
-        fclose(file);
-        if (count != 1)
+        if (fread(&header, sizeof(header), 1, file.get()) != 1 || header.mmapMagic != MMAP_MAGIC ||
+            header.dtVersion != uint32(DT_NAVMESH_VERSION) || header.mmapVersion != MMAP_VERSION ||
+            header.size < sizeof(dtMeshHeader) || header.size > uint32(INT_MAX))
+            return false;
+        if (fseek(file.get(), 0, SEEK_END) != 0)
+            return false;
+        long length = ftell(file.get());
+        if (length < long(sizeof(header)) || uint64(length - sizeof(header)) != header.size ||
+            fseek(file.get(), sizeof(header), SEEK_SET) != 0)
             return false;
 
-        if (header.mmapMagic != MMAP_MAGIC || header.dtVersion != uint32(DT_NAVMESH_VERSION))
+        std::unique_ptr<unsigned char, decltype(&dtFree)> data(static_cast<unsigned char*>(dtAlloc(header.size, DT_ALLOC_PERM)), &dtFree);
+        if (!data || fread(data.get(), header.size, 1, file.get()) != 1 || ValidateMMapTileData(data.get(), header.size))
             return false;
 
-        if (header.mmapVersion != MMAP_VERSION)
-            return false;
-
-        return true;
+        // Incremental generation rewrites .mmap parameters. If discovery/input
+        // changes the origin, old tiles must not be retained under the new origin.
+        dtMeshHeader const* mesh = reinterpret_cast<dtMeshHeader const*>(data.get());
+        dtNavMeshParams const* params = navMesh->getParams();
+        double x = std::floor(((double(mesh->bmin[0]) + mesh->bmax[0]) * 0.5 - params->orig[0]) / params->tileWidth);
+        double y = std::floor(((double(mesh->bmin[2]) + mesh->bmax[2]) * 0.5 - params->orig[2]) / params->tileHeight);
+        return x == mesh->x && y == mesh->y;
     }
 
     rcConfig MapBuilder::GetMapSpecificConfig(uint32 mapID, float bmin[3], float bmax[3], const TileConfig &tileConfig) const

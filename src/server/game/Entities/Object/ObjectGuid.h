@@ -282,6 +282,7 @@ class TC_GAME_API ObjectGuid
         uint64 GetRawValue(std::size_t i) const { return _data[i]; }
         std::vector<uint8> GetRawValue() const;
         void SetRawValue(std::vector<uint8> const& guid);
+        bool TrySetRawValue(std::vector<uint8> const& guid);
         void SetRawValue(uint64 high, uint64 low) { _data[0] = low; _data[1] = high; }
         void Clear() { _data = { }; }
 

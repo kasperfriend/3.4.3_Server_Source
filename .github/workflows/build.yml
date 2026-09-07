@@ -43,6 +43,10 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Playerbot configuration and safety regressions
+        shell: pwsh
+        run: python -m unittest discover -s tests -p "playerbot_*_test.py" -v
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
         with:
@@ -205,6 +209,10 @@ jobs:
           }
           if (Test-Path $log) { Get-Content $log -Tail 100 }
           if ($code -ne 0) { exit $code }
+
+      - name: Verify generated worldserver configuration
+        shell: pwsh
+        run: python tests/playerbot_config_test.py --config build/bin/RelWithDebInfo/worldserver.conf.dist -v
 
       - name: Verify produced binaries
         shell: pwsh

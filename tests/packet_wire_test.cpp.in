@@ -1,0 +1,368 @@
+// Real codec tests + small action-state fakes. Codec/type blocks are extracted
+// verbatim from production, not separately maintained protocol implementations.
+#include "PlayerbotPackets.h"
+#include "Packet.h"
+#include "LootPackets.h"
+#include "Log.h"
+#include <algorithm>
+#include <array>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+using namespace std;
+namespace pb = ai::packets;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+@CODECS@
+@PACKET_TYPES@
+@LOOT_ENUMS@
+
+ObjectGuid Guid(uint64 low, uint64 high)
+{
+    ObjectGuid guid;
+    guid.SetRawValue(high, low);
+    return guid;
+}
+vector<uint8> Bytes(ByteBuffer const& buffer)
+{
+    return buffer.empty() ? vector<uint8>{} : vector<uint8>(buffer.contents(), buffer.contents() + buffer.size());
+}
+WorldPacket Prefix(WorldPacket const& packet, size_t size)
+{
+    WorldPacket result(packet.GetOpcode());
+    if (size) result.append(packet.contents(), size);
+    return result;
+}
+template<class Action> void Rejects(Action action)
+{
+    bool rejected = false;
+    try { action(); } catch (ByteBufferException const&) { rejected = true; }
+    CHECK(rejected);
+}
+
+template<class Value, class Decoder>
+void RejectAllTruncations(WorldPacket const& packet, Decoder decode)
+{
+    for (size_t end = 0; end < packet.size(); ++end)
+    {
+        Value value;
+        CHECK(!decode(Prefix(packet, end), value));
+    }
+    WorldPacket extra(packet);
+    extra << uint8(0xFF);
+    Value value;
+    CHECK(!decode(extra, value));
+    // Reading a copy must ignore an inherited byte/bit cursor and leave the
+    // source unchanged (master packets may already have been consumed).
+    WorldPacket consumed(packet);
+    consumed.ReadBit();
+    consumed.rpos(consumed.size());
+    CHECK(decode(consumed, value));
+    CHECK(consumed.rpos() == consumed.size());
+}
+
+void TestGuidsAndBits()
+{
+    ObjectGuid sparse = Guid(0x0011220033440055ULL, 0xFFEEDDCCBBAA0099ULL);
+    ByteBuffer example;
+    example << sparse;
+    CHECK(Bytes(example) == vector<uint8>({ 0x6D, 0xFD, 0x55, 0x44, 0x33, 0x22, 0x11, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }));
+    for (uint32 masks = 0; masks <= 0xFFFF; ++masks)
+    {
+        uint64 low = 0, high = 0;
+        for (uint32 i = 0; i < 8; ++i)
+        {
+            if (masks & (1u << i)) low |= uint64(i + 1) << (8 * i);
+            if (masks & (1u << (i + 8))) high |= uint64(i + 9) << (8 * i);
+        }
+        ByteBuffer packet;
+        ObjectGuid expected = Guid(low, high);
+        packet << expected;
+        CHECK(packet[0] == uint8(masks) && packet[1] == uint8(masks >> 8));
+        ObjectGuid result = Guid(~uint64(0), ~uint64(0)); // reused destinations must not OR old bits into the result
+        packet >> result;
+        CHECK(result == expected && packet.rpos() == packet.size());
+    }
+    for (size_t end = 0; end < example.size(); ++end)
+    {
+        ByteBuffer data;
+        if (end) data.append(example.contents(), end);
+        ObjectGuid before = Guid(123, 456), result = before;
+        Rejects([&] { data >> result; });
+        CHECK(result == before);
+    }
+    ByteBuffer packed;
+    packed.WriteBit(true);
+    packed.AppendPackedUInt64(0xAA);
+    CHECK(Bytes(packed) == vector<uint8>({ 0x80, 1, 0xAA }));
+    CHECK(packed.ReadBit());
+    uint64 decoded = ~uint64(0);
+    packed.ReadPackedUInt64(decoded);
+    CHECK(decoded == 0xAA);
+    ByteBuffer zero;
+    zero.ReadPackedUInt64(0, decoded);
+    CHECK(decoded == 0);
+
+    for (int initial = 0; initial < 8; ++initial)
+        for (int width = 0; width <= 64; ++width)
+        {
+            ByteBuffer bits;
+            vector<bool> expected;
+            for (int i = 0; i < initial; ++i) { bits.WriteBit(i % 2); expected.push_back(i % 2); }
+            uint64 value = 0xF0A55A00CC337E81ULL;
+            bits.WriteBits(value, width);
+            for (int i = width - 1; i >= 0; --i) expected.push_back((value >> i) & 1);
+            bits.FlushBits();
+            vector<uint8> expectedBytes((expected.size() + 7) / 8);
+            for (size_t i = 0; i < expected.size(); ++i) if (expected[i]) expectedBytes[i / 8] |= uint8(1u << (7 - i % 8));
+            CHECK(Bytes(bits) == expectedBytes);
+            for (bool bit : expected) CHECK(bits.ReadBit() == bit);
+        }
+    ByteBuffer data;
+    Rejects([&] { data.WriteBits(1, -1); });
+    Rejects([&] { data.WriteBits(1, 65); });
+    Rejects([&] { data.ReadBits(33); });
+    data << uint32(123);
+    Rejects([&] { data.read<uint32>(numeric_limits<size_t>::max() - 2); });
+    data.rpos(1);
+    Rejects([&] { data.read_skip(numeric_limits<size_t>::max()); });
+    uint32 out;
+    Rejects([&] { data.read(&out, numeric_limits<size_t>::max() / sizeof(uint32) + 1); });
+    data.rpos(numeric_limits<size_t>::max());
+    Rejects([&] { data.ReadString(2); });
+    ByteBuffer empty;
+    empty.read(static_cast<uint8*>(nullptr), 0); // do not index empty storage for a zero-byte read
+    WorldPackets::Array<uint32, 2> bounded;
+    bounded.emplace_back(1); bounded.emplace_back(2);
+    Rejects([&] { bounded.emplace_back(3); });
+    CHECK(bounded.size() == 2);
+}
+
+WorldPackets::Item::ItemInstance RichItem()
+{
+    WorldPackets::Item::ItemInstance item;
+    item.ItemID = 6948;
+    item.RandomPropertiesSeed = 0x01020304;
+    item.RandomPropertiesID = -5;
+    item.Modifications.Values.emplace_back(0x11223344, ItemModifier(3));
+    item.ItemBonus.emplace();
+    item.ItemBonus->Context = ItemContext(2);
+    item.ItemBonus->BonusListIDs = { 101, 202 };
+    return item;
+}
+void TestItemCodec()
+{
+    auto item = RichItem();
+    ByteBuffer packet;
+    packet << item;
+    CHECK(Bytes(packet) == vector<uint8>({ 0x24, 0x1B, 0, 0, 4, 3, 2, 1, 0xFB, 0xFF, 0xFF, 0xFF,
+        0x80, 4, 0x44, 0x33, 0x22, 0x11, 3, 2, 2, 0, 0, 0, 101, 0, 0, 0, 202, 0, 0, 0 }));
+    WorldPackets::Item::ItemInstance reused;
+    packet >> reused;
+    CHECK(reused.ItemID == 6948 && reused.ItemBonus->BonusListIDs == vector<int32>({ 101, 202 }));
+    WorldPackets::Item::ItemInstance plain;
+    plain.ItemID = 42;
+    ByteBuffer next;
+    next << plain;
+    next >> reused;
+    CHECK(reused.ItemID == 42 && !reused.ItemBonus && reused.Modifications.Values.empty());
+    WorldPackets::Item::ItemBonuses bonuses;
+    bonuses.BonusListIDs = { 9 };
+    ByteBuffer none;
+    none << uint8(0) << uint32(0);
+    none >> bonuses;
+    CHECK(bonuses.BonusListIDs.empty());
+    ByteBuffer bad;
+    bad << uint8(0) << uint32(0xFFFFFFFF);
+    Rejects([&] { bad >> bonuses; });
+}
+void TestServerPackets()
+{
+    WorldPackets::Spells::CastFailed cast;
+    cast.CastID = Guid(0x12345678, 0xABCDEF00112233ULL);
+    cast.SpellID = 133;
+    cast.Visual.SpellXSpellVisualID = 0x1234567;
+    cast.Reason = 73; cast.FailedArg1 = -1; cast.FailedArg2 = 0x12345678;
+    WorldPacket wire(*cast.Write());
+    pb::CastFailure result;
+    CHECK(pb::ReadCastFailure(wire, result));
+    CHECK(result.CastID == cast.CastID && result.SpellID == 133 && result.Reason == 73 && result.FailedArg2 == 0x12345678);
+    RejectAllTruncations<pb::CastFailure>(wire, pb::ReadCastFailure);
+    WorldPackets::Spells::SpellFailure failure;
+    failure.CasterUnit = Guid(0xFF00000000ULL, 0x0102030405060708ULL);
+    failure.CastID = cast.CastID; failure.SpellID = 42; failure.Reason = 0xABCD;
+    wire = *failure.Write();
+    CHECK(pb::ReadCastFailure(wire, result) && result.Caster == failure.CasterUnit && result.Reason == 0xABCD);
+    RejectAllTruncations<pb::CastFailure>(wire, pb::ReadCastFailure);
+    WorldPackets::Spells::SpellFailedOther other;
+    other.CasterUnit = failure.CasterUnit; other.CastID = cast.CastID; other.SpellID = 42; other.Reason = 0xFE;
+    wire = *other.Write();
+    CHECK(pb::ReadCastFailure(wire, result) && result.Reason == 0xFE);
+    RejectAllTruncations<pb::CastFailure>(wire, pb::ReadCastFailure);
+
+    WorldPackets::Item::ItemPushResult pushed;
+    pushed.PlayerGUID = failure.CasterUnit; pushed.ItemGUID = Guid(1234, 0xF000000000000001ULL);
+    pushed.Item = RichItem(); pushed.Quantity = 7; pushed.SlotInBag = -1; pushed.BattlePetBreedQuality = 0x12345678;
+    pushed.Pushed = true; pushed.Created = true; pushed.IsEncounterLoot = true; pushed.DisplayText = WorldPackets::Item::ItemPushResult::DISPLAY_TYPE_ENCOUNTER_LOOT;
+    wire = *pushed.Write();
+    pb::ItemPush push;
+    CHECK(pb::ReadItemPush(wire, push) && push.Quantity == 7 && push.Item.ItemID == 6948 && push.Pushed && push.Created);
+    CHECK(push.ItemGUID == pushed.ItemGUID && push.Item.ItemBonus->BonusListIDs.size() == 2);
+    RejectAllTruncations<pb::ItemPush>(wire, pb::ReadItemPush);
+
+    WorldPackets::LFG::LFGProposalUpdate proposal;
+    proposal.Ticket.RequesterGuid = failure.CasterUnit; proposal.Ticket.Id = 71;
+    proposal.Ticket.Type = WorldPackets::LFG::RideType::Lfg; proposal.Ticket.Time = time_t(0x102030405060708LL);
+    proposal.Ticket.Unknown925 = true; proposal.InstanceID = 0x1122334455667788ULL; proposal.ProposalID = 0xDEADBEEF;
+    proposal.Players.resize(2); proposal.Players[0].Roles = 2; proposal.Players[0].Accepted = true;
+    wire = *proposal.Write();
+    pb::LfgProposal parsed;
+    CHECK(pb::ReadLfgProposal(wire, parsed) && parsed.ProposalID == proposal.ProposalID && parsed.InstanceID == proposal.InstanceID);
+    CHECK(parsed.Ticket.Time.AsUnderlyingType() == proposal.Ticket.Time.AsUnderlyingType());
+    RejectAllTruncations<pb::LfgProposal>(wire, pb::ReadLfgProposal);
+
+    bool assertion = false;
+    try { WorldPackets::Movement::MoveTeleportAck wrong{WorldPacket()}; } catch (runtime_error const&) { assertion = true; }
+    CHECK(assertion);
+    WorldPackets::Movement::MoveTeleportAck correct{WorldPacket(CMSG_MOVE_TELEPORT_ACK)};
+    CHECK(correct.GetOpcode() == CMSG_MOVE_TELEPORT_ACK);
+    WorldPacket shared(CMSG_PUSH_QUEST_TO_PARTY); shared << uint32(12345);
+    WorldPackets::Quest::PushQuestToParty share{std::move(shared)}; share.Read();
+    CHECK(share.QuestID == 12345);
+    assertion = false;
+    try { WorldPackets::Quest::QuestPushResult wrong{WorldPacket(CMSG_PUSH_QUEST_TO_PARTY)}; } catch (runtime_error const&) { assertion = true; }
+    CHECK(assertion);
+}
+
+// Minimal state fakes for the actual StoreLoot/ReadyCheck action functions.
+struct Event
+{
+    WorldPacket data;
+    explicit Event(WorldPacket const& packet) : data(packet) { }
+    WorldPacket& getPacket() { return data; }
+};
+struct Group
+{
+    ObjectGuid guid;
+    uint8 category = 1;
+    bool started = true;
+    ObjectGuid GetGUID() const { return guid; }
+    uint8 GetGroupCategory() const { return category; }
+    bool IsReadyCheckStarted() const { return started; }
+};
+struct Session
+{
+    vector<WorldPacket> queued;
+    vector<pair<uint8, bool>> ready;
+    void QueuePacket(WorldPacket* packet) { unique_ptr<WorldPacket> owner(packet); queued.push_back(*packet); }
+    void HandleReadyCheckResponseOpcode(WorldPackets::Party::ReadyCheckResponseClient& response)
+    {
+        CHECK(response.GetOpcode() == CMSG_READY_CHECK_RESPONSE && response.PartyIndex.has_value());
+        ready.emplace_back(*response.PartyIndex, response.IsReady);
+    }
+};
+struct Bot
+{
+    ObjectGuid guid, lootOwner;
+    Session session;
+    Group group;
+    bool alive = true;
+    Session* GetSession() { return &session; }
+    ObjectGuid GetLootGUID() const { return lootOwner; }
+    ObjectGuid GetGUID() const { return guid; }
+    bool IsAlive() const { return alive; }
+    Group* GetGroup() { return &group; }
+    Group* GetGroup(uint8 index) { return index == group.category ? &group : nullptr; }
+};
+struct AI
+{
+    vector<string> messages;
+    void ChangeStrategy(char const*, uint32) { }
+    void TellMaster(char const* text) { messages.push_back(text); }
+};
+constexpr uint32 BOT_STATE_NON_COMBAT = 1;
+struct AvailableLoot { vector<ObjectGuid> removed; void Remove(ObjectGuid const& id) { removed.push_back(id); } } available;
+#define AI_VALUE(type, name) (&available)
+namespace ai
+{
+    struct BuyFailedAction { AI* ai; bool Execute(Event event); };
+@BUY_FAILED@
+    struct StoreLootAction { Bot* bot; bool Execute(Event event); bool IsLootAllowed(uint32) { return true; } };
+    struct ReadyCheckAction { Bot* bot; AI* ai; bool ready = true; bool Execute(Event); bool ReadyCheck() { return ready; } };
+    struct FinishReadyCheckAction : ReadyCheckAction { bool Execute(Event); };
+@STORE_LOOT@
+@READY_CHECK@
+@READY_FINISH@
+}
+void TestLootAndReadyActions()
+{
+    Bot bot;
+    bot.guid = Guid(1, 2); bot.group.guid = Guid(0x1111, 0xFFFF0001);
+    bot.lootOwner = Guid(0x11112222, 0xF00000000000FFFFULL);
+    ObjectGuid lootObject = Guid(0x443322, 0x123456);
+    WorldPackets::Loot::LootResponse response;
+    response.Owner = bot.lootOwner; response.LootObj = lootObject; response.Acquired = true; response.Coins = 123;
+    response.Items.resize(1);
+    response.Items[0].Loot = RichItem(); response.Items[0].Quantity = 7; response.Items[0].LootListID = 1;
+    response.Items[0].UIType = LOOT_SLOT_TYPE_ALLOW_LOOT;
+    response.Currencies.resize(1);
+    response.Currencies[0].CurrencyID = 42; response.Currencies[0].Quantity = 19; response.Currencies[0].LootListID = 2;
+    WorldPacket wire(*response.Write());
+    pb::LootResponse parsed;
+    CHECK(pb::ReadLootResponse(wire, parsed));
+    CHECK(parsed.Items.size() == 1 && parsed.Items[0].Item.ItemBonus->BonusListIDs.size() == 2 && parsed.Currencies[0].Quantity == 19);
+    RejectAllTruncations<pb::LootResponse>(wire, pb::ReadLootResponse);
+    ai::StoreLootAction action{ &bot };
+    for (size_t end = 0; end < wire.size(); ++end)
+    {
+        CHECK(!action.Execute(Event(Prefix(wire, end))));
+        CHECK(bot.session.queued.empty() && available.removed.empty());
+    }
+    CHECK(action.Execute(Event(wire)));
+    CHECK(bot.session.queued.size() == 3 && available.removed.back() == bot.lootOwner);
+    WorldPackets::Loot::LootMoney money{WorldPacket(bot.session.queued[0])}; money.Read();
+    CHECK(!money.IsSoftInteract && Bytes(bot.session.queued[0]) == vector<uint8>({ 0 }));
+    WorldPackets::Loot::LootItem items{WorldPacket(bot.session.queued[1])}; items.Read();
+    CHECK(items.Loot.size() == 1 && items.Loot[0].Object == lootObject && items.Loot[0].LootListID == 1 && !items.IsSoftInteract);
+    WorldPackets::Loot::LootRelease release{WorldPacket(bot.session.queued[2])}; release.Read();
+    CHECK(release.Unit == bot.lootOwner);
+    bot.session.queued.clear(); available.removed.clear();
+    bot.lootOwner.Clear();
+    CHECK(!action.Execute(Event(wire)) && bot.session.queued.empty()); // stale window
+    WorldPacket huge(CMSG_LOOT_ITEM); huge << uint32(0xFFFFFFFF) << uint8(0);
+    WorldPackets::Loot::LootItem oversized{std::move(huge)};
+    Rejects([&] { oversized.Read(); });
+
+    WorldPackets::Party::ReadyCheckStarted started;
+    started.PartyIndex = 1; started.PartyGUID = bot.group.guid; started.InitiatorGUID = Guid(20, 30); started.Duration = Milliseconds(30000);
+    wire = *started.Write();
+    pb::ReadyCheck ready;
+    CHECK(pb::ReadReadyCheck(wire, ready) && ready.PartyIndex == 1 && ready.Party == bot.group.guid);
+    RejectAllTruncations<pb::ReadyCheck>(wire, pb::ReadReadyCheck);
+    AI ai;
+    WorldPackets::Item::BuyFailed purchase;
+    purchase.VendorGUID = Guid(9, 8); purchase.Muid = 6948; purchase.Reason = BUY_ERR_NOT_ENOUGHT_MONEY;
+    ai::BuyFailedAction buy{ &ai };
+    CHECK(buy.Execute(Event(*purchase.Write())) && ai.messages.back() == "Not enough money");
+    ai::ReadyCheckAction check{ &bot, &ai };
+    CHECK(check.Execute(Event(wire)) && bot.session.ready.back() == pair<uint8, bool>(1, true));
+    check.ready = false;
+    CHECK(check.Execute(Event(wire)) && bot.session.ready.back() == pair<uint8, bool>(1, false));
+    CHECK(bot.session.queued.empty()); // never CMSG_DO_READY_CHECK
+    WorldPackets::Party::ReadyCheckCompleted done;
+    done.PartyIndex = 1; done.PartyGUID = bot.group.guid;
+    wire = *done.Write();
+    RejectAllTruncations<pb::ReadyCheck>(wire, pb::ReadReadyCheck);
+    size_t count = bot.session.ready.size();
+    ai::FinishReadyCheckAction finish; finish.bot = &bot; finish.ai = &ai;
+    CHECK(finish.Execute(Event(wire)) && bot.session.ready.size() == count);
+}
+int main()
+{
+    try
+    {
+        TestGuidsAndBits(); TestItemCodec(); TestServerPackets(); TestLootAndReadyActions();
+        cout << "Wire masks, exact bytes, packet round trips, truncation and action state tests passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

@@ -107,6 +107,14 @@ void WorldSession::HandleAutostoreLootItemOpcode(WorldPackets::Loot::LootItem& p
             continue;
         }
 
+        // Modern clients echo LootObj, older callers may use the owner. Never
+        // apply a stale request to a different currently open loot object.
+        if (!req.LootListID || (req.Object != loot->GetGUID() && req.Object != lguid))
+        {
+            player->SendLootError(req.Object, lguid, LOOT_ERROR_NO_LOOT);
+            continue;
+        }
+
         player->StoreLootItem(lguid, req.LootListID - 1, loot);
 
         // If player is removing the last LootItem, delete the empty container.

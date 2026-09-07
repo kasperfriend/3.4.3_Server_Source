@@ -66,18 +66,23 @@ if(WORLDSERVER_DYNAMIC_SCRIPT_MODULES_DEPENDENCIES)
   add_dependencies(worldserver ${WORLDSERVER_DYNAMIC_SCRIPT_MODULES_DEPENDENCIES})
 endif()
 
-if(COPY_CONF AND WIN32)
-  if("${CMAKE_MAKE_PROGRAM}" MATCHES "MSBuild")
-    add_custom_command(TARGET worldserver
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/worldserver.conf.dist ${CMAKE_BINARY_DIR}/bin/$(ConfigurationName)/
-    )
-  elseif(MINGW)
-    add_custom_command(TARGET worldserver
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/worldserver.conf.dist ${CMAKE_BINARY_DIR}/bin/
-    )
-  endif()
+if(COPY_CONF)
+  # All playerbot settings are in the main template. Generate a copy beside
+  # the executable for every configuration/generator (including Ninja/MSVC).
+  # Watch the source so config-only edits refresh the copy without relinking;
+  # never overwrite the user's live worldserver.conf.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/worldserver.conf.dist")
+  file(GENERATE
+    OUTPUT "$<TARGET_FILE_DIR:worldserver>/worldserver.conf.dist"
+    INPUT "${CMAKE_CURRENT_SOURCE_DIR}/worldserver.conf.dist")
+
+  # Also restore the template on a rebuild if it was moved/renamed since configure.
+  add_custom_command(TARGET worldserver POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/worldserver.conf.dist"
+      "$<TARGET_FILE_DIR:worldserver>/worldserver.conf.dist"
+    VERBATIM)
 endif()
 
 install(TARGETS worldserver DESTINATION "${CMAKE_INSTALL_PREFIX}")

@@ -1,0 +1,241 @@
+#include "ObjectGuid.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <cstdint>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <stdexcept>
+using namespace std;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+template<class... T> void Log(T const&...) { }
+#define TC_LOG_ERROR(...) Log(__VA_ARGS__)
+ObjectGuid const ObjectGuid::Empty{};
+string ObjectGuid::ToString() const { return "test player"; }
+@RAW_GUID@
+constexpr uint32 MAX_SPECIALIZATIONS = 2, MAX_TALENT_RANK = 5, MAX_GLYPH_SLOT_INDEX = 6;
+constexpr uint32 DIFFICULTY_NONE = 0, CONFIG_MAX_PLAYER_LEVEL = 0, PLAYERSPELL_UNCHANGED = 0;
+constexpr uint32 INVENTORY_SLOT_ITEM_START = 23, INVENTORY_SLOT_ITEM_END = 39, BANK_SLOT_BAG_START = 67, BANK_SLOT_BAG_END = 74;
+constexpr uint32 AT_LOGIN_RESURRECT = 1, PLAYER_LOCAL_FLAG_RELEASE_TIMER = 1, SPELL_EFFECT_LEARN_SPELL = 36;
+enum class PlayerCreateMode : int8 { Normal = 0, NPE = 1 };
+namespace SpellAuraInterruptFlags2 { constexpr uint32 ChangeTalent = 1; }
+struct Field
+{
+    double value = 0;
+    uint32 GetUInt32() const { return uint32(value); }
+    uint16 GetUInt16() const { CHECK(value >= 0 && value <= 65535); return uint16(value); }
+    uint8 GetUInt8() const { CHECK(value >= 0 && value <= 255); return uint8(value); }
+    float GetFloat() const { return float(value); }
+};
+struct Result
+{
+    vector<vector<Field>> rows;
+    size_t row = 0;
+    Field* Fetch() { return rows.at(row).data(); }
+    Field const& operator[](size_t index) const { return rows.at(row).at(index); }
+    bool NextRow() { return ++row < rows.size(); }
+};
+using PreparedQueryResult = shared_ptr<Result>;
+PreparedQueryResult Rows(initializer_list<vector<Field>> rows) { return make_shared<Result>(Result{ rows, 0 }); }
+struct SpellEffectInfo { uint32 TriggerSpell = 0; bool IsEffect(uint32) const { return false; } };
+struct SpellInfo { uint32 Id = 100; vector<SpellEffectInfo> effects; auto const& GetEffects() const { return effects; } };
+struct SpellMgr
+{
+    SpellInfo info;
+    SpellInfo const* GetSpellInfo(uint32 id, uint32) { return id ? &info : nullptr; }
+    template<class T> static bool IsSpellValid(SpellInfo const* info, T*, bool) { return info != nullptr; }
+} spellMgr;
+auto sSpellMgr = &spellMgr;
+struct TalentEntry
+{
+    uint32 ID = 1;
+    array<uint32, MAX_TALENT_RANK> SpellRank{ 100, 101, 102, 103, 104 };
+    uint32 OverridesSpellID = 0, SpellID = 100;
+};
+struct TalentStore
+{
+    TalentEntry talent;
+    TalentEntry const* LookupEntry(uint32 id) { return id == 1 ? &talent : nullptr; }
+} sTalentStore;
+struct GlyphStore { void const* LookupEntry(uint32 id) const { return id >= 10 && id <= 20 ? this : nullptr; } } sGlyphPropertiesStore;
+struct World { uint32 getIntConfig(uint32) const { return 80; } } world;
+auto sWorld = &world;
+struct TalentState { uint8 State = 0, Rank = 0; };
+using PlayerTalentMap = map<uint32, TalentState>;
+struct WorldLocation
+{
+    uint32 mapId = 0xFFFFFFFF;
+    float x = 0, y = 0, z = 0, o = 0;
+    void WorldRelocate(uint32 id, float a, float b, float c, float d) { mapId = id; x = a; y = b; z = c; o = d; }
+    uint32 GetMapId() const { return mapId; }
+    bool IsPositionValid() const { return isfinite(x) && isfinite(y) && isfinite(z) && isfinite(o) && abs(x) < 17066 && abs(y) < 17066; }
+};
+struct MapEntry { bool instance = false; bool Instanceable() const { return instance; } };
+struct MapStore
+{
+    MapEntry outdoor, instance{ true };
+    MapEntry const* LookupEntry(uint32 id) { return id == 0 ? &outdoor : id == 33 ? &instance : nullptr; }
+} sMapStore;
+struct SavedFields
+{
+    uint8 level = 1, inventorySlots = 16, bankSlots = 7, activeTalentGroup = 0, bonusTalentGroups = 0;
+    PlayerCreateMode createMode = PlayerCreateMode::Normal;
+};
+struct Player
+{
+    ObjectGuid guid;
+    uint8 level = 1, slots = 0, bank = 0;
+    uint32 learns = 0, resets = 0, activates = 0;
+    bool alive = true, resurrect = false, releaseTimer = false;
+    WorldLocation _corpseLocation;
+    PlayerCreateMode m_createMode = PlayerCreateMode::Normal;
+    struct Spec { uint8 Active = 0, BonusGroups = 0; array<PlayerTalentMap, 2> talents; array<array<uint16, 6>, 2> glyphs{}; } _specializationInfo;
+    ObjectGuid GetGUID() const { return guid; }
+    void SetLevel(uint8 value, bool) { CHECK(value >= 1 && value <= 80); level = value; }
+    void SetInventorySlotCount(uint8 value) { CHECK(value <= 16); slots = value; }
+    void SetBankBagSlotCount(uint8 value) { CHECK(value <= 7); bank = value; }
+    uint8 GetActiveTalentGroup() const { return _specializationInfo.Active; }
+    void SetActiveTalentGroup(uint8 value) { _specializationInfo.Active = value; }
+    uint8 GetBonusTalentGroupCount() const { return _specializationInfo.BonusGroups; }
+    void SetBonusTalentGroupCount(uint8);
+    PlayerTalentMap& GetPlayerTalentMap(uint8 group) { return _specializationInfo.talents.at(group); }
+    auto& GetGlyphs(uint8 group) { return _specializationInfo.glyphs.at(group); }
+    void SetGlyph(uint8 slot, uint32 id) { GetGlyphs(GetActiveTalentGroup()).at(slot) = uint16(id); }
+    void ResetTalents(bool) { CHECK(GetActiveTalentGroup() < MAX_SPECIALIZATIONS); ++resets; }
+    void ActivateTalentGroup(uint8 group) { CHECK(group <= GetBonusTalentGroupCount()); SetActiveTalentGroup(group); ++activates; }
+    void LearnSpell(uint32, bool) { ++learns; }
+    void RemoveSpell(uint32, bool) { }
+    void AddOverrideSpell(uint32, uint32) { }
+    void RemoveAurasWithInterruptFlags(uint32) { }
+    bool AddTalent(TalentEntry const*, uint8, uint8, bool);
+    void _LoadTalents(PreparedQueryResult);
+    void _LoadGlyphs(PreparedQueryResult);
+    bool IsAlive() const { return alive; }
+    bool HasAtLoginFlag(uint32) const { return resurrect; }
+    void SpawnCorpseBones(bool) { }
+    void ResurrectPlayer(float) { alive = true; }
+    void SetPlayerLocalFlag(uint32) { releaseTimer = true; }
+    void RemovePlayerLocalFlag(uint32) { releaseTimer = false; }
+    void RemoveAtLoginFlag(uint32) { resurrect = false; }
+    void LoadCorpse(PreparedQueryResult);
+    void LoadState(SavedFields const& fields)
+    {
+@STATE_LEVEL@
+@STATE_BAGS@
+@STATE_MODE@
+@STATE_GROUPS@
+    }
+};
+@ADD_TALENT@
+@LOAD_TALENTS@
+@LOAD_GLYPHS@
+@BONUS_GROUPS@
+@CORPSE@
+
+namespace WorldPackets::Character { enum class LoginFailureReason { DuplicateCharacter }; }
+namespace ObjectAccessor
+{
+    set<ObjectGuid> online;
+    bool FindConnectedPlayer(ObjectGuid guid) { return online.count(guid) != 0; }
+}
+struct LoginQueryHolder { ObjectGuid guid; ObjectGuid GetGuid() const { return guid; } };
+struct WorldSession
+{
+    ObjectGuid m_playerLoading;
+    bool hasPlayer = false, isBot = false, disconnected = false;
+    uint32 constructed = 0, aborted = 0;
+    bool GetPlayer() const { return hasPlayer; }
+    bool IsBotSession() const { return isBot; }
+    bool PlayerDisconnected() const { return disconnected; }
+    uint32 GetAccountId() const { return 1; }
+    void AbortLogin(WorldPackets::Character::LoginFailureReason) { ++aborted; m_playerLoading.Clear(); }
+    void HandlePlayerLogin(LoginQueryHolder const&);
+};
+@LOGIN_ENTRY@
+    ++constructed; hasPlayer = true; m_playerLoading.Clear(); // sentinel for actual allocation/load work
+}
+void TestLoginCompletionGuards()
+{
+    ObjectGuid guid;
+    guid.SetRawValue(uint64(HighGuid::Player) << 58, 42);
+    LoginQueryHolder holder{ guid };
+    WorldSession success;
+    success.m_playerLoading = guid;
+    success.HandlePlayerLogin(holder);
+    success.HandlePlayerLogin(holder);
+    CHECK(success.constructed == 1);
+    WorldSession cancelled;
+    cancelled.HandlePlayerLogin(holder);
+    CHECK(cancelled.constructed == 0);
+    WorldSession gone;
+    gone.m_playerLoading = guid; gone.disconnected = true;
+    gone.HandlePlayerLogin(holder);
+    CHECK(gone.constructed == 0 && gone.m_playerLoading.IsEmpty());
+    WorldSession bot;
+    bot.m_playerLoading = guid; bot.disconnected = true; bot.isBot = true;
+    bot.HandlePlayerLogin(holder);
+    CHECK(bot.constructed == 1); // socket-less bots are not disconnected clients
+    ObjectAccessor::online.insert(guid);
+    WorldSession duplicate;
+    duplicate.m_playerLoading = guid;
+    duplicate.HandlePlayerLogin(holder);
+    CHECK(duplicate.constructed == 0 && duplicate.aborted == 1);
+    ObjectAccessor::online.clear();
+}
+int main()
+{
+    try
+    {
+        TestLoginCompletionGuards();
+        Player player;
+        SavedFields state;
+        state.level = 0; state.inventorySlots = 255; state.bankSlots = 255;
+        state.createMode = PlayerCreateMode(-1); state.activeTalentGroup = 255; state.bonusTalentGroups = 255;
+        player.LoadState(state);
+        CHECK(player.level == 1 && player.slots == 16 && player.bank == 7);
+        CHECK(player.m_createMode == PlayerCreateMode::Normal && player.GetActiveTalentGroup() == 0 && player.GetBonusTalentGroupCount() == 1);
+        state.level = 255; state.activeTalentGroup = 1; state.bonusTalentGroups = 1; state.createMode = PlayerCreateMode::NPE;
+        player.LoadState(state);
+        CHECK(player.level == 80 && player.GetActiveTalentGroup() == 1 && player.m_createMode == PlayerCreateMode::NPE);
+        player.SetBonusTalentGroupCount(0);
+        CHECK(player.GetActiveTalentGroup() == 0 && player.resets == 1 && player.activates == 1);
+        player.SetActiveTalentGroup(255);
+        player.SetBonusTalentGroupCount(255);
+        CHECK(player.GetActiveTalentGroup() == 0 && player.GetBonusTalentGroupCount() == 1);
+
+        CHECK(!player.AddTalent(nullptr, 0, 0, false));
+        CHECK(!player.AddTalent(&sTalentStore.talent, 255, 0, false));
+        CHECK(!player.AddTalent(&sTalentStore.talent, 0, 255, false));
+        player._LoadTalents(Rows({ { { 1 }, { 300 }, { 0 } }, { { 1 }, { 0 }, { 300 } }, { { 999 }, { 0 }, { 0 } }, { { 1 }, { 4 }, { 1 } } }));
+        CHECK(player.GetPlayerTalentMap(0).empty() && player.GetPlayerTalentMap(1).at(1).Rank == 4);
+        CHECK(player.learns == 0); // inactive-group talents must not be learned into active spellbook
+        player._LoadTalents(Rows({ { { 1 }, { 1 }, { 0 } } }));
+        CHECK(player.learns == 1);
+        player._LoadGlyphs(Rows({ { { 0 }, { 0 }, { 10 } }, { { 1 }, { 0 }, { 11 } }, { { 255 }, { 0 }, { 12 } },
+                                 { { 0 }, { 255 }, { 12 } }, { { 0 }, { 1 }, { 70000 } } }));
+        CHECK(player.GetGlyphs(0)[0] == 10 && player.GetGlyphs(1)[0] == 11 && player.GetGlyphs(0)[1] == 0);
+
+        player.alive = false;
+        player.LoadCorpse(Rows({ { { 999 }, { 1 }, { 2 }, { 3 }, { 0 } } }));
+        CHECK(!player.alive && player._corpseLocation.GetMapId() == 0xFFFFFFFF && !player.releaseTimer);
+        player.LoadCorpse(Rows({ { { 0 }, { 1 }, { 2 }, { 3 }, { 0 } } }));
+        CHECK(player.releaseTimer && player._corpseLocation.GetMapId() == 0);
+        player.LoadCorpse(Rows({ { { 33 }, { 1 }, { 2 }, { 3 }, { 0 } } }));
+        CHECK(!player.releaseTimer);
+        player.LoadCorpse(Rows({ { { 0 }, { numeric_limits<double>::quiet_NaN() }, { 0 }, { 0 }, { 0 } } }));
+        CHECK(player._corpseLocation.GetMapId() == 0xFFFFFFFF);
+
+        ObjectGuid raw;
+        raw.SetRawValue(2, 1);
+        for (size_t size : { 0u, 8u, 15u, 17u })
+        {
+            CHECK(!raw.TrySetRawValue(vector<uint8>(size, 0)));
+            CHECK(raw.GetRawValue(0) == 1 && raw.GetRawValue(1) == 2);
+        }
+        CHECK(raw.TrySetRawValue(vector<uint8>(16, 0)) && raw.IsEmpty());
+        cout << "Saved character bounds, grouped glyphs/talents, corpse and raw GUID validation passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

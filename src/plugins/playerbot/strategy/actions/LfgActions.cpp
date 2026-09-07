@@ -3,6 +3,7 @@
 #include "strategy/actions/LfgActions.h"
 #include "../../AiFactory.h"
 #include "../../PlayerbotAIConfig.h"
+#include "../../PlayerbotPackets.h"
 #include "../ItemVisitors.h"
 #include "../../RandomPlayerbotMgr.h"
 #include "DungeonFinding/LFGMgr.h"
@@ -195,7 +196,7 @@ bool LfgAcceptAction::Execute(Event event)
     uint32 id = AI_VALUE(uint32, "lfg proposal");
     if (id)
     {
-        if (urand(0, 1 + 10 / sPlayerbotAIConfig.randomChangeMultiplier))
+        if (urand(0, sPlayerbotAIConfig.GetRandomChangeRange(10.0)))
             return false;
 
         if (bot->IsInCombat() || bot->isDead() || bot->IsFalling())
@@ -217,30 +218,13 @@ bool LfgAcceptAction::Execute(Event event)
         return true;
     }
 
-    WorldPacket p(event.getPacket());
-    if (p.empty())
+    packets::LfgProposal proposal;
+    if (!packets::ReadLfgProposal(event.getPacket(), proposal))
         return false;
-
-    // SMSG_LFG_PROPOSAL_UPDATE (WorldPackets::LFG::LFGProposalUpdate::Write)
-    // starts with a RideTicket (requester guid, ticket id, ticket type,
-    // timestamp, one bit), then the instance id, and only then the proposal id.
-    // The old 3.3.5 parse (u32 dungeon + u8 state + u32 id) read bytes of the
-    // requester guid as those fields and usually stored 0, so the bot never saw
-    // a pending proposal and a real player's group-finder party could stall
-    // waiting for a bot that would never answer. Mirror the writer to reach the
-    // real ProposalID.
-    p.rpos(0);
-    ObjectGuid ticketRequester;
-    uint32 ticketId = 0;
-    uint32 ticketType = 0;
-    int64 ticketTime = 0;
-    uint64 instanceId = 0;
-    uint32 proposalId = 0;
-    p >> ticketRequester >> ticketId >> ticketType >> ticketTime;
-    p.ReadBit();                                // Ticket.Unknown925
-    p >> instanceId >> proposalId;              // InstanceID, ProposalID
-
-    ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(proposalId);
+    WorldPackets::LFG::RideTicket const* ticket = sLFGMgr->GetTicket(bot->GetGUID());
+    if (!ticket || ticket->Id != proposal.Ticket.Id || ticket->RequesterGuid != proposal.Ticket.RequesterGuid || ticket->Type != proposal.Ticket.Type)
+        return false; // group members can legitimately share the leader's ticket
+    ai->GetAiObjectContext()->GetValue<uint32>("lfg proposal")->Set(proposal.ProposalID);
     return true;
 }
 

@@ -58,7 +58,9 @@ uint8 const WorldSocket::EncryptionKeySeed[16] = { 0xE9, 0x75, 0x3C, 0x50, 0x90,
 
 WorldSocket::WorldSocket(boost::asio::ip::tcp::socket&& socket) : Socket(std::move(socket)),
     _type(CONNECTION_TYPE_REALM), _key(0), _OverSpeedPings(0),
-    _worldSession(nullptr), _authed(false), _canRequestHotfixes(true), _sendBufferSize(4096), _compressionStream(nullptr)
+    _worldSession(nullptr), _authPhase(AuthPhase::AwaitAuth),
+    _authenticationDeadline(std::chrono::steady_clock::now() + std::chrono::seconds(60)),
+    _canRequestHotfixes(true), _sendBufferSize(4096), _compressionStream(nullptr)
 {
     Trinity::Crypto::GetRandomBytes(_serverChallenge);
     _sessionKey.fill(0);
@@ -200,13 +202,20 @@ void WorldSocket::InitializeHandler(boost::system::error_code const& error, std:
 
 bool WorldSocket::Update()
 {
+    if (IsOpen() && IsAuthenticationTimedOut(std::chrono::steady_clock::now()))
+    {
+        TC_LOG_ERROR("network", "WorldSocket: authentication handshake timed out for {}", GetRemoteIpAddress().to_string());
+        CloseSocket();
+        return false;
+    }
+
     EncryptablePacket* queued;
     MessageBuffer buffer(_sendBufferSize);
     while (_bufferQueue.Dequeue(queued))
     {
         uint32 packetSize = queued->size() + 2 /*opcode*/;
         if (packetSize > MinSizeForCompression && queued->NeedsEncryption())
-            packetSize = deflateBound(_compressionStream, packetSize) + sizeof(CompressedWorldPacket);
+            packetSize = deflateBound(_compressionStream, packetSize) + sizeof(CompressedWorldPacket) + sizeof(uint16);
 
         // Flush current buffer if too small for next packet
         if (buffer.GetRemainingSpace() < packetSize + sizeof(PacketHeader))
@@ -250,10 +259,14 @@ void WorldSocket::HandleSendAuthSession()
 
 void WorldSocket::OnClose()
 {
+    std::unique_ptr<WorldSession> abandoned;
     {
         std::lock_guard<std::mutex> sessionGuard(_worldSessionLock);
         _worldSession = nullptr;
+        abandoned = std::move(_pendingWorldSession);
     }
+    // WorldSession destruction can close sockets again; never do it under
+    // _worldSessionLock. Completed sessions are owned/cleaned up by World.
 }
 
 void WorldSocket::ReadHandler()
@@ -321,7 +334,6 @@ void WorldSocket::SetWorldSession(WorldSession* session)
 {
     std::lock_guard<std::mutex> sessionGuard(_worldSessionLock);
     _worldSession = session;
-    _authed = true;
 }
 
 bool WorldSocket::ReadHeaderHandler()
@@ -331,9 +343,19 @@ bool WorldSocket::ReadHeaderHandler()
     IncomingPacketHeader* header = reinterpret_cast<IncomingPacketHeader*>(_headerBuffer.GetReadPointer());
     uint16 encryptedOpcode = header->EncryptedOpcode;
 
+    // The encrypted opcode was already read with the header. A smaller size
+    // would write two bytes into a 0/1-byte payload and underflow remaining space.
+    if (header->Size < sizeof(encryptedOpcode))
+    {
+        TC_LOG_ERROR("network", "WorldSocket: client {} sent a frame smaller than its opcode ({})", GetRemoteIpAddress().to_string(), header->Size);
+        return false;
+    }
+
     if (!header->IsValidSize())
     {
-        _authCrypt.PeekDecryptRecv(reinterpret_cast<uint8*>(&header->EncryptedOpcode), sizeof(encryptedOpcode));
+        if (_authPhase != AuthPhase::Encrypted ||
+            !_authCrypt.PeekDecryptRecv(reinterpret_cast<uint8*>(&header->EncryptedOpcode), sizeof(encryptedOpcode)))
+            return false;
 
         // CMSG_HOTFIX_REQUEST can be much larger than normal packets, allow receiving it once per session
         if (header->EncryptedOpcode != CMSG_HOTFIX_REQUEST || header->Size > 0x100000 || !_canRequestHotfixes)
@@ -394,11 +416,9 @@ WorldSocket::ReadDataHandlerResult WorldSocket::ReadDataHandler()
         case CMSG_AUTH_SESSION:
         {
             LogOpcodeText(opcode, sessionGuard);
-            if (_authed)
+            if (_authPhase != AuthPhase::AwaitAuth)
             {
-                // locking just to safely log offending user is probably overkill but we are disconnecting him anyway
-                if (sessionGuard.try_lock())
-                    TC_LOG_ERROR("network", "WorldSocket::ProcessIncoming: received duplicate CMSG_AUTH_SESSION from {}", _worldSession->GetPlayerInfo());
+                TC_LOG_ERROR("network", "WorldSocket: duplicate/out-of-order authentication from {}", GetRemoteIpAddress().to_string());
                 return ReadDataHandlerResult::Error;
             }
 
@@ -408,17 +428,16 @@ WorldSocket::ReadDataHandlerResult WorldSocket::ReadDataHandler()
                 TC_LOG_ERROR("network", "WorldSocket::ReadDataHandler(): client {} sent malformed CMSG_AUTH_SESSION", GetRemoteIpAddress().to_string());
                 return ReadDataHandlerResult::Error;
             }
+            _authPhase = AuthPhase::Authenticating;
             HandleAuthSession(authSession);
             return ReadDataHandlerResult::WaitingForQuery;
         }
         case CMSG_AUTH_CONTINUED_SESSION:
         {
             LogOpcodeText(opcode, sessionGuard);
-            if (_authed)
+            if (_authPhase != AuthPhase::AwaitAuth)
             {
-                // locking just to safely log offending user is probably overkill but we are disconnecting him anyway
-                if (sessionGuard.try_lock())
-                    TC_LOG_ERROR("network", "WorldSocket::ProcessIncoming: received duplicate CMSG_AUTH_CONTINUED_SESSION from {}", _worldSession->GetPlayerInfo());
+                TC_LOG_ERROR("network", "WorldSocket: duplicate/out-of-order continued authentication from {}", GetRemoteIpAddress().to_string());
                 return ReadDataHandlerResult::Error;
             }
 
@@ -428,6 +447,7 @@ WorldSocket::ReadDataHandlerResult WorldSocket::ReadDataHandler()
                 TC_LOG_ERROR("network", "WorldSocket::ReadDataHandler(): client {} sent malformed CMSG_AUTH_CONTINUED_SESSION", GetRemoteIpAddress().to_string());
                 return ReadDataHandlerResult::Error;
             }
+            _authPhase = AuthPhase::Authenticating;
             HandleAuthContinuedSession(authSession);
             return ReadDataHandlerResult::WaitingForQuery;
         }
@@ -465,7 +485,8 @@ WorldSocket::ReadDataHandlerResult WorldSocket::ReadDataHandler()
         }
         case CMSG_ENTER_ENCRYPTED_MODE_ACK:
             LogOpcodeText(opcode, sessionGuard);
-            HandleEnterEncryptedModeAck();
+            if (!HandleEnterEncryptedModeAck())
+                return ReadDataHandlerResult::Error;
             break;
         case CMSG_HOTFIX_REQUEST:
             _canRequestHotfixes = false;
@@ -479,9 +500,9 @@ WorldSocket::ReadDataHandlerResult WorldSocket::ReadDataHandler()
 
             LogOpcodeText(opcode, sessionGuard);
 
-            if (!_worldSession)
+            if (!_worldSession || _authPhase != AuthPhase::Encrypted)
             {
-                TC_LOG_ERROR("network.opcode", "ProcessIncoming: Client not authed opcode = {}", uint32(opcode));
+                TC_LOG_ERROR("network.opcode", "ProcessIncoming: Client not fully authed opcode = {}", uint32(opcode));
                 return ReadDataHandlerResult::Error;
             }
 
@@ -683,6 +704,9 @@ void WorldSocket::HandleAuthSession(std::shared_ptr<WorldPackets::Auth::AuthSess
 
 void WorldSocket::HandleAuthSessionCallback(std::shared_ptr<WorldPackets::Auth::AuthSession> authSession, PreparedQueryResult result)
 {
+    if (!IsOpen() || _authPhase != AuthPhase::Authenticating)
+        return;
+
     // Stop if the account is not found
     if (!result)
     {
@@ -697,6 +721,16 @@ void WorldSocket::HandleAuthSessionCallback(std::shared_ptr<WorldPackets::Auth::
     {
         SendAuthResponseError(ERROR_BAD_VERSION);
         TC_LOG_ERROR("network", "WorldSocket::HandleAuthSession: Missing auth seed for realm build {} ({}).", realm.Build, GetRemoteIpAddress().to_string());
+        DelayedCloseSocket();
+        return;
+    }
+
+    // Imported/stale account key blobs are an authentication error, not an
+    // excuse to abort through Field::GetBinarySizeChecked.
+    if (result->Fetch()[1].GetBinary().size() != 64)
+    {
+        TC_LOG_ERROR("network", "WorldSocket: account authentication key has invalid length; rejecting login from {}", GetRemoteIpAddress().to_string());
+        SendAuthResponseError(ERROR_DENIED);
         DelayedCloseSocket();
         return;
     }
@@ -875,9 +909,9 @@ void WorldSocket::HandleAuthSessionCallback(std::shared_ptr<WorldPackets::Auth::
     // At this point, we can safely hook a successful login
     sScriptMgr->OnAccountLogin(account.Game.Id);
 
-    _authed = true;
-    _worldSession = new WorldSession(account.Game.Id, std::move(authSession->RealmJoinTicket), account.BattleNet.Id, shared_from_this(), account.Game.Security,
+    _pendingWorldSession = std::make_unique<WorldSession>(account.Game.Id, std::move(authSession->RealmJoinTicket), account.BattleNet.Id, shared_from_this(), account.Game.Security,
         account.Game.Expansion, mutetime, account.Game.OS, account.Game.TimezoneOffset, account.BattleNet.Locale, account.Game.Recruiter, account.Game.IsRectuiter);
+    _worldSession = _pendingWorldSession.get();
 
     // Initialize Warden system only if it is enabled by config
     if (wardenActive)
@@ -892,9 +926,11 @@ void WorldSocket::HandleAuthSessionCallback(std::shared_ptr<WorldPackets::Auth::
 
 void WorldSocket::LoadSessionPermissionsCallback(PreparedQueryResult result)
 {
-    // RBAC must be loaded before adding session to check for skip queue permission
-    _worldSession->GetRBACData()->LoadFromDBCallback(result);
-
+    if (!IsOpen() || _authPhase != AuthPhase::Authenticating || !_pendingWorldSession)
+        return;
+    // RBAC must be loaded before adding session to check for skip queue permission.
+    _pendingWorldSession->GetRBACData()->LoadFromDBCallback(result);
+    _authPhase = AuthPhase::AwaitEncryptionAck;
     SendPacketAndLogOpcode(*WorldPackets::Auth::EnterEncryptedMode(_encryptKey, true).Write());
 }
 
@@ -923,6 +959,9 @@ void WorldSocket::HandleAuthContinuedSession(std::shared_ptr<WorldPackets::Auth:
 
 void WorldSocket::HandleAuthContinuedSessionCallback(std::shared_ptr<WorldPackets::Auth::AuthContinuedSession> authSession, PreparedQueryResult result)
 {
+    if (!IsOpen() || _authPhase != AuthPhase::Authenticating)
+        return;
+
     if (!result)
     {
         SendAuthResponseError(ERROR_DENIED);
@@ -936,6 +975,13 @@ void WorldSocket::HandleAuthContinuedSessionCallback(std::shared_ptr<WorldPacket
     uint32 accountId = uint32(key.Fields.AccountId);
     Field* fields = result->Fetch();
     std::string login = fields[0].GetString();
+    if (fields[1].GetBinary().size() != SESSION_KEY_LENGTH)
+    {
+        TC_LOG_ERROR("network", "WorldSocket: continued-session key has invalid length for account {}", accountId);
+        SendAuthResponseError(ERROR_DENIED);
+        DelayedCloseSocket();
+        return;
+    }
     _sessionKey = fields[1].GetBinary<SESSION_KEY_LENGTH>();
 
     Trinity::Crypto::HMAC_SHA256 hmac(_sessionKey);
@@ -961,6 +1007,7 @@ void WorldSocket::HandleAuthContinuedSessionCallback(std::shared_ptr<WorldPacket
     // only first 16 bytes of the hmac are used
     memcpy(_encryptKey.data(), encryptKeyGen.GetDigest().data(), 16);
 
+    _authPhase = AuthPhase::AwaitEncryptionAck;
     SendPacketAndLogOpcode(*WorldPackets::Auth::EnterEncryptedMode(_encryptKey, true).Write());
     AsyncRead();
 }
@@ -1003,13 +1050,22 @@ void WorldSocket::HandleConnectToFailed(WorldPackets::Auth::ConnectToFailed& con
     }
 }
 
-void WorldSocket::HandleEnterEncryptedModeAck()
+bool WorldSocket::HandleEnterEncryptedModeAck()
 {
+    std::lock_guard<std::mutex> sessionGuard(_worldSessionLock);
+    if (_authPhase != AuthPhase::AwaitEncryptionAck ||
+        (_type == CONNECTION_TYPE_REALM && (!_pendingWorldSession || _worldSession != _pendingWorldSession.get())))
+    {
+        TC_LOG_ERROR("network", "WorldSocket: unexpected encryption acknowledgement from {}", GetRemoteIpAddress().to_string());
+        return false;
+    }
+    _authPhase = AuthPhase::Encrypted; // consume exactly once, before publishing
     _authCrypt.Init(_encryptKey);
     if (_type == CONNECTION_TYPE_REALM)
-        sWorld->AddSession(_worldSession);
+        sWorld->AddSession(_pendingWorldSession.release());
     else
         sWorld->AddInstanceSocket(shared_from_this(), _key);
+    return true;
 }
 
 void WorldSocket::SendAuthResponseError(uint32 code)

@@ -8,6 +8,7 @@
 #include "../../RandomPlayerbotMgr.h"
 #include "../../GuildTaskMgr.h"
 #include "../values/ItemUsageValue.h"
+#include <limits>
 
 using namespace ai;
 
@@ -17,7 +18,7 @@ bool TradeStatusAction::Execute(Event event)
 {
     Player* trader = bot->GetTrader();
     Player* master = GetMaster();
-    if (!trader)
+    if (!trader || !master || !bot->GetTradeData() || !trader->GetTradeData() || event.getPacket().GetOpcode() != SMSG_TRADE_STATUS)
         return false;
 
     if (trader != master)
@@ -41,6 +42,8 @@ bool TradeStatusAction::Execute(Event event)
     if (status == TRADE_STATUS_ACCEPTED)
     {
         WorldPackets::Trade::AcceptTrade acceptTrade{WorldPacket(CMSG_ACCEPT_TRADE)};
+        // The core rejects a default/old index once either side changes an item.
+        acceptTrade.StateIndex = trader->GetTradeData()->GetServerStateIndex();
 
         if (CheckTrade())
         {
@@ -63,8 +66,9 @@ bool TradeStatusAction::Execute(Event event)
 
             if (sRandomPlayerbotMgr.IsRandomBot(bot))
             {
-                int32 lootAmount = sRandomPlayerbotMgr.GetLootAmount(bot);
-                sRandomPlayerbotMgr.SetLootAmount(bot, max(0, lootAmount - botMoney * 10));
+                uint32 lootAmount = sRandomPlayerbotMgr.GetLootAmount(bot);
+                uint64 spent = uint64(botMoney) * 10;
+                sRandomPlayerbotMgr.SetLootAmount(bot, spent >= lootAmount ? 0 : uint32(lootAmount - spent));
             }
             return true;
         }
@@ -109,7 +113,7 @@ bool TradeStatusAction::CheckTrade()
         return true;
 
     Player* master = GetMaster();
-    if (!bot->GetTradeData() || !master->GetTradeData())
+    if (!master || !bot->GetTradeData() || !master->GetTradeData())
         return false;
 
     for (uint32 slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot)
@@ -120,7 +124,9 @@ bool TradeStatusAction::CheckTrade()
             // a template deleted while the trade window is open must not crash
             // the bot tick; treat the item as not sellable
             ItemTemplate const* proto = item->GetTemplate();
-            if (!proto || !auctionbot.GetSellPrice(proto))
+            if (!proto)
+                return false;
+            if (!auctionbot.GetSellPrice(proto))
             {
                 ostringstream out;
                 out << chat->formatItem(proto) << " - This is not for sale";
@@ -149,9 +155,9 @@ bool TradeStatusAction::CheckTrade()
     }
 
     int32 botItemsMoney = CalculateCost(bot->GetTradeData(), true);
-    int32 botMoney = bot->GetTradeData()->GetMoney() + botItemsMoney;
+    int64 botMoney = int64(bot->GetTradeData()->GetMoney()) + botItemsMoney;
     int32 playerItemsMoney = CalculateCost(master->GetTradeData(), false);
-    int32 playerMoney = master->GetTradeData()->GetMoney() + playerItemsMoney;
+    int64 playerMoney = int64(master->GetTradeData()->GetMoney()) + playerItemsMoney;
 
     if (!botMoney && !playerMoney)
         return true;
@@ -162,8 +168,8 @@ bool TradeStatusAction::CheckTrade()
         return false;
     }
 
-    int32 discount = min(botItemsMoney, (int32)sRandomPlayerbotMgr.GetTradeDiscount(bot));
-    botMoney = max(0, botMoney - discount);
+    int64 discount = std::min<int64>(botItemsMoney, sRandomPlayerbotMgr.GetTradeDiscount(bot));
+    botMoney = std::max<int64>(0, botMoney - discount);
 
     if (playerMoney >= botMoney)
     {
@@ -195,7 +201,7 @@ int32 TradeStatusAction::CalculateCost(TradeData* data, bool sell)
     if (!data)
         return 0;
 
-    uint32 sum = 0;
+    double sum = 0.0;
     for (uint32 slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot)
     {
         Item* item = data->GetItem((TradeSlots)slot);
@@ -207,17 +213,17 @@ int32 TradeStatusAction::CalculateCost(TradeData* data, bool sell)
             continue;
 
         if (proto->GetQuality() < ITEM_QUALITY_NORMAL)
-            return 0;
+            continue; // one grey item must not zero the entire basket's price
 
         if (sell)
         {
-            sum += item->GetCount() * auctionbot.GetSellPrice(proto) * sRandomPlayerbotMgr.GetSellMultiplier(bot);
+            sum += double(item->GetCount()) * auctionbot.GetSellPrice(proto) * sRandomPlayerbotMgr.GetSellMultiplier(bot);
         }
         else
         {
-            sum += item->GetCount() * auctionbot.GetBuyPrice(proto) * sRandomPlayerbotMgr.GetBuyMultiplier(bot);
+            sum += double(item->GetCount()) * auctionbot.GetBuyPrice(proto) * sRandomPlayerbotMgr.GetBuyMultiplier(bot);
         }
     }
 
-    return sum;
+    return std::isfinite(sum) && sum > 0.0 ? int32(std::min(sum, double(std::numeric_limits<int32>::max()))) : 0;
 }

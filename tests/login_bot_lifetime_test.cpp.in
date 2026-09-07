@@ -1,0 +1,237 @@
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <list>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using namespace std;
+using uint8 = uint8_t;
+using uint32 = uint32_t;
+using Minutes = chrono::minutes;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+template<class... T> void Log(T const&...) { }
+#define TC_LOG_ERROR(...) Log(__VA_ARGS__)
+#define TC_LOG_INFO(...) Log(__VA_ARGS__)
+#define TC_LOG_DEBUG(...) Log(__VA_ARGS__)
+struct ObjectGuid
+{
+    uint32 value = 0;
+    bool IsPlayer() const { return value != 0; }
+    bool IsEmpty() const { return value == 0; }
+    string ToString() const { return to_string(value); }
+    bool operator<(ObjectGuid const& other) const { return value < other.value; }
+};
+constexpr uint32 CONFIG_EXPANSION = 0, SEC_PLAYER = 0, LOCALE_enUS = 0;
+struct World { uint32 getIntConfig(uint32) const { return 2; } } world;
+auto sWorld = &world;
+struct Config { bool enabled = true; } sPlayerbotAIConfig;
+namespace AccountMgr { bool GetName(uint32, string& name) { name = "bot account"; return true; } }
+struct Cache { uint32 GetCharacterAccountIdByGuid(ObjectGuid guid) const { return guid.value ? 1 : 0; } } cache;
+auto sCharacterCache = &cache;
+struct Player;
+struct PlayerbotHolder;
+struct PlayerbotMgr;
+struct WorldSession;
+vector<PlayerbotHolder*> holders;
+map<ObjectGuid, Player*> connected;
+set<ObjectGuid> pendingBotLogins;
+int sessionsAlive = 0, loginCallbacks = 0;
+WorldSession* newest = nullptr;
+struct PlayerbotAI
+{
+    Player* master = nullptr;
+    void TellMaster(char const*) { }
+    void HandleTeleportAck() { }
+};
+struct Player
+{
+    ObjectGuid guid;
+    WorldSession* session = nullptr;
+    unique_ptr<PlayerbotAI> ai;
+    PlayerbotMgr* mgr = nullptr;
+    bool inWorld = true, far = false;
+    ObjectGuid GetGUID() const { return guid; }
+    string GetName() const { return "test bot"; }
+    WorldSession* GetSession() { return session; }
+    PlayerbotAI* GetPlayerbotAI() { return ai.get(); }
+    PlayerbotMgr* GetPlayerbotMgr() { return mgr; }
+    void SetPlayerbotMgr(PlayerbotMgr* value) { mgr = value; }
+    bool IsInWorld() const { return inWorld; }
+    bool IsBeingTeleportedFar() const { return far; }
+    bool IsBeingTeleported() const { return far; }
+};
+namespace ObjectAccessor
+{
+    Player* FindConnectedPlayer(ObjectGuid guid) { auto it = connected.find(guid); return it == connected.end() ? nullptr : it->second; }
+    Player* FindPlayer(ObjectGuid guid) { auto player = FindConnectedPlayer(guid); return player && player->inWorld ? player : nullptr; }
+}
+struct WorldSession
+{
+    bool botSession = false, loading = false, ready = false, redirect = false, disconnected = false, handling = false;
+    ObjectGuid requested;
+    unique_ptr<Player> player;
+    function<void()> callback;
+    uint32 farAcks = 0;
+    template<class... T> explicit WorldSession(T&&...) { ++sessionsAlive; newest = this; }
+    ~WorldSession();
+    void SetBotSession(bool value) { botSession = value; }
+    bool IsBotSession() const { return botSession; }
+    bool PlayerDisconnected() const { return disconnected; }
+    void LoginBotPlayer(ObjectGuid guid) { requested = guid; loading = true; }
+    bool PlayerLoading() const { return loading; }
+    Player* GetPlayer() { return player.get(); }
+    void HandleBotPackets();
+    void HandleMoveWorldportAck() { CHECK(player); player->far = false; player->inWorld = true; ++farAcks; }
+    void LogoutPlayer(bool);
+};
+using PlayerBotMap = map<ObjectGuid, Player*>;
+struct PlayerbotHolder
+{
+    PlayerBotMap playerBots;
+    map<ObjectGuid, unique_ptr<WorldSession>> botSessions;
+    map<ObjectGuid, WorldSession*> pendingBots;
+    bool failAI = false;
+    PlayerbotHolder() { holders.push_back(this); }
+    virtual ~PlayerbotHolder() { LogoutAllBots(); holders.erase(find(holders.begin(), holders.end(), this)); }
+    void UpdateSessions(uint32);
+    void AddPlayerBot(ObjectGuid, uint32);
+    void LogoutAllBots();
+    void LogoutPlayerBot(ObjectGuid);
+    Player* GetPlayerBot(ObjectGuid) const;
+    void RemovePlayerBotEntry(ObjectGuid guid) { playerBots.erase(guid); }
+    virtual void OnBotLogin(Player* bot)
+    {
+        bot->ai = make_unique<PlayerbotAI>();
+        if (failAI) throw runtime_error("AI init failed");
+        playerBots[bot->guid] = bot;
+    }
+};
+WorldSession::~WorldSession()
+{
+    if (handling) { cerr << "Session destroyed during its callback\n"; std::abort(); }
+    LogoutPlayer(false);
+    --sessionsAlive;
+}
+void WorldSession::LogoutPlayer(bool)
+{
+    if (!player) return;
+    for (auto holder : holders) holder->RemovePlayerBotEntry(player->guid);
+    connected.erase(player->guid);
+    player.reset();
+}
+void WorldSession::HandleBotPackets()
+{
+    handling = true;
+    if (loading && ready)
+    {
+        ++loginCallbacks;
+        loading = false;
+        player = make_unique<Player>(); player->guid = requested; player->session = this;
+        player->inWorld = !redirect; player->far = redirect;
+        connected[requested] = player.get();
+    }
+    if (callback) { auto run = std::move(callback); run(); }
+    handling = false;
+}
+@UPDATE_SESSIONS@
+@ADD_BOT@
+@LOGOUT_ALL@
+@LOGOUT_BOT@
+@GET_BOT@
+struct PlayerbotMgr : PlayerbotHolder
+{
+    uint32 updates = 0;
+    void UpdateAI(uint32) { ++updates; }
+};
+struct RandomPlayerbotMgr
+{
+    set<ObjectGuid> players;
+    void UpdatePlayerbotSessions(uint32);
+    void ShutdownPlayerbotSessions();
+    Player* GetRandomPlayer();
+};
+uint32 urand(uint32 lo, uint32 hi) { CHECK(lo <= hi); return lo; }
+@PLAYER_SESSIONS@
+@PLAYER_SHUTDOWN@
+@RANDOM_PLAYER@
+list<string> ParseCommand(char const* args)
+{
+    list<string> messages;
+    auto ListBots = [](Player*) { return string("roster"); };
+    Player* master = nullptr;
+@COMMAND_PARSE@
+    return { cmdStr, charnameStr };
+}
+int main()
+{
+    try
+    {
+        PlayerbotHolder first, second;
+        first.AddPlayerBot({ 42 }, 1);
+        WorldSession* pending = newest;
+        CHECK(sessionsAlive == 1 && pendingBotLogins.size() == 1);
+        second.AddPlayerBot({ 42 }, 2);
+        CHECK(newest == pending && second.pendingBots.empty());
+        first.LogoutPlayerBot({ 42 }); // owner leaves during async load
+        CHECK(sessionsAlive == 0 && loginCallbacks == 0 && pendingBotLogins.empty());
+
+        first.AddPlayerBot({ 42 }, 1);
+        newest->ready = true;
+        first.UpdateSessions(1);
+        CHECK(first.GetPlayerBot({ 42 }) && first.pendingBots.empty() && first.botSessions.size() == 1);
+        newest->callback = [session = newest] { session->LogoutPlayer(false); };
+        first.UpdateSessions(1);
+        CHECK(first.playerBots.empty() && first.botSessions.empty() && sessionsAlive == 0);
+
+        first.failAI = true;
+        first.AddPlayerBot({ 43 }, 1); newest->ready = true;
+        first.UpdateSessions(1);
+        CHECK(first.pendingBots.empty() && first.botSessions.empty() && connected.empty() && pendingBotLogins.empty());
+        CHECK(sessionsAlive == 0);
+        first.failAI = false;
+        first.AddPlayerBot({ 44 }, 1); newest->ready = true; newest->redirect = true;
+        first.UpdateSessions(1);
+        CHECK(first.GetPlayerBot({ 44 }) && newest->farAcks == 1);
+        first.AddPlayerBot({ 45 }, 1); // still loading when owner logs out
+        first.LogoutAllBots();
+        CHECK(sessionsAlive == 0 && connected.empty() && pendingBotLogins.empty());
+
+        {
+            WorldSession humanSession;
+            Player human; human.guid = { 100 }; human.session = &humanSession;
+            human.mgr = new PlayerbotMgr();
+            connected[human.guid] = &human;
+            RandomPlayerbotMgr random;
+            random.players.insert(human.guid); random.players.insert(human.guid);
+            CHECK(random.players.size() == 1 && random.GetRandomPlayer() == &human);
+            random.UpdatePlayerbotSessions(1);
+            CHECK(human.mgr->updates == 1);
+            humanSession.disconnected = true;
+            random.UpdatePlayerbotSessions(1);
+            CHECK(human.mgr->updates == 1);
+            random.ShutdownPlayerbotSessions();
+            CHECK(!human.mgr && random.players.empty());
+            random.players.insert({ 999 });
+            CHECK(random.GetRandomPlayer() == nullptr);
+            random.UpdatePlayerbotSessions(1);
+            CHECK(random.players.empty());
+            connected.clear();
+        }
+        CHECK(sessionsAlive == 0);
+        CHECK(ParseCommand(nullptr).front().find("usage:") == 0);
+        CHECK(ParseCommand("   ").front().find("usage:") == 0);
+        CHECK(ParseCommand("list").front() == "roster");
+        string literal = "add First,Second";
+        CHECK(ParseCommand(literal.c_str()) == list<string>({ "add", "First,Second" }) && literal == "add First,Second");
+        cout << "Pending/active bot ownership, cancellation, failed init, redirection and owner registry passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

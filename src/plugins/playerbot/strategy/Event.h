@@ -31,6 +31,6 @@ namespace ai
         string param;
         WorldPacket packet;
         ObjectGuid object;
-        Player* owner;
+        Player* owner = nullptr;
 	};
 }

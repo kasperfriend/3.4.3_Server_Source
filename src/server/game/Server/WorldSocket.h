@@ -29,6 +29,7 @@
 #include <array>
 #include <boost/asio/ip/tcp.hpp>
 #include <mutex>
+#include <memory>
 
 typedef struct z_stream_s z_stream;
 class EncryptablePacket;
@@ -72,7 +73,7 @@ struct PacketHeader
     uint32 Size;
     uint8 Tag[12];
 
-    bool IsValidSize() { return Size < 0x10000; }
+    bool IsValidSize() const { return Size >= sizeof(uint16) && Size < 0x10000; }
 };
 
 struct IncomingPacketHeader : PacketHeader
@@ -146,7 +147,11 @@ private:
     void LoadSessionPermissionsCallback(PreparedQueryResult result);
     void HandleConnectToFailed(WorldPackets::Auth::ConnectToFailed& connectToFailed);
     bool HandlePing(WorldPackets::Auth::Ping& ping);
-    void HandleEnterEncryptedModeAck();
+    bool HandleEnterEncryptedModeAck();
+    bool IsAuthenticationTimedOut(TimePoint now) const
+    {
+        return _authPhase != AuthPhase::Encrypted && now >= _authenticationDeadline;
+    }
 
     ConnectionType _type;
     uint64 _key;
@@ -161,7 +166,13 @@ private:
 
     std::mutex _worldSessionLock;
     WorldSession* _worldSession;
-    bool _authed;
+    // Own a realm session until the encryption handshake hands it to World.
+    // A disconnect before that point must not leak it or leave callbacks a
+    // dangling pointer. Instance sockets never own the shared WorldSession.
+    std::unique_ptr<WorldSession> _pendingWorldSession;
+    enum class AuthPhase { AwaitAuth, Authenticating, AwaitEncryptionAck, Encrypted };
+    AuthPhase _authPhase;
+    TimePoint _authenticationDeadline;
     bool _canRequestHotfixes;
 
     MessageBuffer _headerBuffer;

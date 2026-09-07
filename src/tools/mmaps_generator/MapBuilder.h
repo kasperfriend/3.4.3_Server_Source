@@ -128,7 +128,7 @@ namespace MMAP
                 float bmax[3],
                 dtNavMesh* navMesh);
 
-            bool shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY) const;
+            bool shouldSkipTile(uint32 mapID, uint32 tileX, uint32 tileY, dtNavMesh const* navMesh) const;
 
         private:
             bool m_bigBaseUnit;

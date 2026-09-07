@@ -1,0 +1,202 @@
+#include "PlayerbotPackets.h"
+#include "Packet.h"
+#include "LootPackets.h"
+#include "Log.h"
+#include <array>
+#include <map>
+#include <cmath>
+#include <limits>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <iostream>
+#include <stdexcept>
+using namespace std;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+@CODECS@
+@PACKET_TYPES@
+class Player { };
+class PlayerbotAI;
+namespace ai
+{
+@EVENT@
+    struct Trigger
+    {
+        string name;
+        Trigger(PlayerbotAI*, string name) : name(name) { }
+        virtual ~Trigger() = default;
+        string getName() const { return name; }
+        virtual Event Check() { return {}; }
+        virtual void Reset() { }
+        virtual void ExternalEvent(WorldPacket&, Player* = nullptr) { }
+    };
+@PACKET_TRIGGER@
+@LAST_SPELL@
+    struct ExternalEventHelper
+    {
+        vector<uint32> received;
+        bool throwNext = false;
+        void HandlePacket(map<uint16, string>&, WorldPacket const& packet)
+        {
+            if (throwNext) { throwNext = false; throw ByteBufferException(); }
+            WorldPacket data(packet);
+            received.push_back(data.read<uint32>());
+        }
+    };
+}
+using namespace ai;
+@PACKET_HELPER@
+@HELPER_HANDLE@
+@HELPER_ADD_HANDLER@
+@HELPER_ADD_PACKET@
+
+constexpr int CURRENT_MELEE_SPELL = 0, CURRENT_GENERIC_SPELL = 1, CURRENT_CHANNELED_SPELL = 2;
+using CurrentSpellTypes = int;
+struct SpellInfo { uint32 Id = 133; bool positive = false; bool IsPositive() const { return positive; } };
+struct Spell { SpellInfo* m_spellInfo; };
+struct Session
+{
+    bool nearAck = false, farAck = false;
+    ObjectGuid mover;
+    void HandleMoveTeleportAck(WorldPackets::Movement::MoveTeleportAck& packet)
+    {
+        CHECK(packet.GetOpcode() == CMSG_MOVE_TELEPORT_ACK);
+        nearAck = true; mover = packet.MoverGUID;
+    }
+    void HandleMoveWorldportAck() { farAck = true; }
+};
+struct Motion { void Clear() { } };
+struct Bot
+{
+    bool near = true;
+    Session session;
+    Motion motion;
+    ObjectGuid guid;
+    array<Spell*, 3> spells{};
+    uint32 interruptions = 0;
+    Session* GetSession() { return &session; }
+    Motion* GetMotionMaster() { return &motion; }
+    ObjectGuid GetGUID() const { return guid; }
+    bool IsBeingTeleportedNear() const { return near; }
+    bool IsBeingTeleportedFar() const { return !near; }
+    Spell* GetCurrentSpell(int index) { return spells[index]; }
+    void InterruptSpell(int index)
+    {
+        ++interruptions;
+        spells[index]->m_spellInfo = nullptr; // invalidate access after cancellation
+        spells[index] = nullptr;
+    }
+};
+struct Context
+{
+    struct Holder { LastSpellCast value; LastSpellCast& Get() { return value; } } holder;
+    template<typename T> Holder* GetValue(char const*) { return &holder; }
+};
+class PlayerbotAI
+{
+public:
+    Bot* bot;
+    Context* aiObjectContext;
+    uint32 delay = 0, queriedSpell = 0;
+    int32 cooldown = 500;
+    void SpellInterrupted(uint32);
+    void InterruptSpell();
+    void HandleTeleportAck();
+    int32 CalculateGlobalCooldown(uint32 id) { queriedSpell = id; return cooldown; }
+    void SetNextCheckDelay(uint32 value) { delay = value; }
+};
+time_t testNow = 100;
+#define time(...) ::testNow
+@SPELL_INTERRUPTED@
+#undef time
+@INTERRUPT_SPELL@
+@TELEPORT_ACK@
+
+constexpr uint32 ITEM_QUALITY_NORMAL = 1, TRADE_SLOT_TRADED_COUNT = 6;
+using TradeSlots = uint32;
+struct ItemTemplate { uint32 quality = 1; uint32 GetQuality() const { return quality; } };
+struct Item { ItemTemplate proto; uint32 count = 1; ItemTemplate const* GetTemplate() const { return &proto; } uint32 GetCount() const { return count; } };
+struct TradeData { array<Item*, 6> items{}; Item* GetItem(uint32 slot) { return items[slot]; } };
+struct Prices { int32 price = 10; int32 GetSellPrice(ItemTemplate const*) const { return price; } int32 GetBuyPrice(ItemTemplate const*) const { return price; } } auctionbot;
+struct Multipliers { double value = 1; double GetSellMultiplier(Bot*) { return value; } double GetBuyMultiplier(Bot*) { return value; } } sRandomPlayerbotMgr;
+struct TradeStatusAction { Bot* bot = nullptr; int32 CalculateCost(TradeData*, bool); };
+@TRADE_COST@
+int main()
+{
+    try
+    {
+        CHECK(Event().getOwner() == nullptr && Event("timer").getOwner() == nullptr);
+        PacketHandlingHelper helper;
+        helper.AddHandler(SMSG_LOOT_RESPONSE, "loot");
+        WorldPacket first(SMSG_LOOT_RESPONSE); first << uint32(10); first.ReadBit(); first.rpos(first.size());
+        WorldPacket second(SMSG_LOOT_RESPONSE); second << uint32(20);
+        helper.AddPacket(first); helper.AddPacket(second);
+        ExternalEventHelper receiver;
+        helper.Handle(receiver);
+        CHECK(receiver.received == vector<uint32>({ 10, 20 }));
+        helper.AddPacket(first); helper.AddPacket(second);
+        receiver.throwNext = true;
+        try { helper.Handle(receiver); CHECK(false); } catch (ByteBufferException const&) { }
+        helper.Handle(receiver);
+        CHECK(receiver.received == vector<uint32>({ 10, 20, 20 })); // malformed dequeued, not retried forever
+
+        WorldPacketTrigger trigger(nullptr, "loot");
+        trigger.ExternalEvent(first);
+        trigger.ExternalEvent(second);
+        trigger.Reset(); // a trigger that was not checked must keep its data
+        CHECK(trigger.Check().getPacket().read<uint32>(0) == 10);
+        CHECK(!trigger.Check()); // do not consume twice before Reset
+        trigger.Reset();
+        CHECK(trigger.Check().getPacket().read<uint32>(0) == 20);
+        trigger.Reset();
+        CHECK(!trigger.Check());
+
+        vector<thread> workers;
+        for (int i = 0; i < 4; ++i)
+            workers.emplace_back([&helper] { for (int n = 0; n < 100; ++n) { WorldPacket p(SMSG_LOOT_RESPONSE); p << uint32(99); helper.AddPacket(p); } });
+        for (auto& worker : workers) worker.join();
+        receiver.received.clear();
+        helper.Handle(receiver);
+        CHECK(receiver.received.size() == 256);
+        for (uint32 value : receiver.received) CHECK(value == 99);
+
+        Item grey, valuable;
+        grey.proto.quality = 0;
+        valuable.count = 2;
+        TradeData trade;
+        trade.items[0] = &grey; trade.items[1] = &valuable;
+        TradeStatusAction priced;
+        CHECK(priced.CalculateCost(&trade, true) == 20);
+        valuable.count = numeric_limits<uint32>::max();
+        auctionbot.price = numeric_limits<int32>::max();
+        CHECK(priced.CalculateCost(&trade, true) == numeric_limits<int32>::max());
+        sRandomPlayerbotMgr.value = numeric_limits<double>::quiet_NaN();
+        CHECK(priced.CalculateCost(&trade, true) == 0);
+        Bot bot;
+        bot.guid.SetRawValue(0xFEDCBA9876543210ULL, 0x1234567890ABCDEFULL);
+        Context context;
+        PlayerbotAI ai{ &bot, &context };
+        ai.HandleTeleportAck();
+        CHECK(bot.session.nearAck && bot.session.mover == bot.guid);
+        bot.near = false;
+        ai.HandleTeleportAck();
+        CHECK(bot.session.farAck && ai.delay == 1000);
+        context.holder.value.Set(133, bot.guid, 100);
+        ai.SpellInterrupted(133);
+        CHECK(ai.delay == 500 && ai.queriedSpell == 133 && context.holder.value.id == 0);
+        context.holder.value.Set(133, bot.guid, 99);
+        ai.SpellInterrupted(133);
+        CHECK(ai.delay == 0);
+        context.holder.value.Set(133, bot.guid, 102); // clock rollback must not wrap elapsed time
+        ai.SpellInterrupted(133);
+        CHECK(ai.delay == 500);
+        SpellInfo info;
+        Spell spell{ &info };
+        bot.spells[CURRENT_GENERIC_SPELL] = &spell;
+        context.holder.value.Set(133, bot.guid, 100);
+        ai.InterruptSpell();
+        CHECK(bot.interruptions == 1 && ai.delay == 500 && context.holder.value.id == 0);
+        cout << "Packet ordering, queue recovery, triggers, teleport ACK and interruption state passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

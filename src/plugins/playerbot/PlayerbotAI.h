@@ -10,6 +10,8 @@
 #include "PlayerbotSecurity.h"
 #include "Entities/Player/Player.h"
 #include <stack>
+#include <deque>
+#include <mutex>
 
 class Player;
 class PlayerbotMgr;
@@ -83,7 +85,8 @@ public:
 
 private:
     map<uint16, string> handlers;
-    stack<WorldPacket> queue;
+    std::deque<WorldPacket> queue;
+    std::mutex queueMutex;
 };
 
 class ChatCommandHolder

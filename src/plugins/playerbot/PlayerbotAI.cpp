@@ -13,6 +13,8 @@
 #include "LootObjectStack.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotAI.h"
+#include "PlayerbotPackets.h"
+#include <ctime>
 #include "PlayerbotFactory.h"
 #include "PlayerbotSecurity.h"
 #include "Groups/Group.h"
@@ -24,7 +26,6 @@ using namespace std;
 
 vector<string>& split(const string &s, char delim, vector<string> &elems);
 vector<string> split(const string &s, char delim);
-uint64 extractGuid(WorldPacket& packet);
 std::string &trim(std::string &s);
 
 uint32 PlayerbotChatHandler::extractQuestId(string str)
@@ -41,17 +42,40 @@ void PacketHandlingHelper::AddHandler(uint16 opcode, string handler)
 
 void PacketHandlingHelper::Handle(ExternalEventHelper &helper)
 {
-    while (!queue.empty())
+    // Other map workers may broadcast group packets to this bot concurrently.
+    // Detach/dequeue under the lock, but never hold it while dispatching events.
+    for (uint32 processed = 0; processed < 256; ++processed)
     {
-        helper.HandlePacket(handlers, queue.top());
-        queue.pop();
+        WorldPacket packet;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+            if (queue.empty())
+                break;
+            packet = std::move(queue.front());
+            queue.pop_front();
+        }
+        helper.HandlePacket(handlers, packet);
     }
 }
 
 void PacketHandlingHelper::AddPacket(const WorldPacket& packet)
 {
-	if (handlers.find(packet.GetOpcode()) != handlers.end())
-        queue.push(WorldPacket(packet));
+    if (handlers.find(packet.GetOpcode()) == handlers.end())
+        return;
+    if (packet.size() > 1024 * 1024)
+    {
+        TC_LOG_WARN("playerbot", "Ignoring oversized bot event packet {} ({} bytes)", packet.GetOpcode(), packet.size());
+        return;
+    }
+    std::lock_guard<std::mutex> lock(queueMutex);
+    if (queue.size() >= 256)
+    {
+        TC_LOG_WARN("playerbot", "Bot packet event queue full; discarding oldest event");
+        queue.pop_front();
+    }
+    queue.push_back(packet);
+    queue.back().rpos(0);
+    queue.back().ResetBitPos();
 }
 
 
@@ -86,7 +110,6 @@ PlayerbotAI::PlayerbotAI(Player* bot) :
     masterIncomingPacketHandlers.AddHandler(CMSG_QUEST_GIVER_COMPLETE_QUEST, "complete quest");
     masterIncomingPacketHandlers.AddHandler(CMSG_QUEST_GIVER_ACCEPT_QUEST, "accept quest");
     masterIncomingPacketHandlers.AddHandler(CMSG_ACTIVATE_TAXI, "activate taxi");
-    masterIncomingPacketHandlers.AddHandler(CMSG_ACTIVATE_TAXI, "activate taxi");
     masterIncomingPacketHandlers.AddHandler(CMSG_MOVE_SPLINE_DONE, "taxi done");
     masterIncomingPacketHandlers.AddHandler(CMSG_PARTY_UNINVITE, "uninvite");
     masterIncomingPacketHandlers.AddHandler(CMSG_PUSH_QUEST_TO_PARTY, "quest share");
@@ -94,8 +117,7 @@ PlayerbotAI::PlayerbotAI(Player* bot) :
     masterIncomingPacketHandlers.AddHandler(CMSG_DF_TELEPORT, "lfg teleport");
 
     botOutgoingPacketHandlers.AddHandler(SMSG_PARTY_INVITE, "group invite");
-    botOutgoingPacketHandlers.AddHandler(BUY_ERR_NOT_ENOUGHT_MONEY, "not enough money");
-    botOutgoingPacketHandlers.AddHandler(BUY_ERR_REPUTATION_REQUIRE, "not enough reputation");
+    botOutgoingPacketHandlers.AddHandler(SMSG_BUY_FAILED, "buy failed");
     botOutgoingPacketHandlers.AddHandler(SMSG_GROUP_NEW_LEADER, "group set leader");
     botOutgoingPacketHandlers.AddHandler(SMSG_MOVE_UPDATE_RUN_SPEED, "check mount state");
     botOutgoingPacketHandlers.AddHandler(SMSG_RESURRECT_REQUEST, "resurrect request");
@@ -111,8 +133,8 @@ PlayerbotAI::PlayerbotAI(Player* bot) :
     botOutgoingPacketHandlers.AddHandler(SMSG_LFG_PROPOSAL_UPDATE, "lfg proposal");
 
     masterOutgoingPacketHandlers.AddHandler(SMSG_PARTY_COMMAND_RESULT, "party command");
-    masterOutgoingPacketHandlers.AddHandler(CMSG_DO_READY_CHECK, "ready check");
-    masterOutgoingPacketHandlers.AddHandler(CMSG_READY_CHECK_RESPONSE, "ready check finished");
+    botOutgoingPacketHandlers.AddHandler(SMSG_READY_CHECK_STARTED, "ready check");
+    botOutgoingPacketHandlers.AddHandler(SMSG_READY_CHECK_COMPLETED, "ready check finished");
 }
 
 PlayerbotAI::~PlayerbotAI()
@@ -200,7 +222,7 @@ void PlayerbotAI::HandleTeleportAck()
 	bot->GetMotionMaster()->Clear();
 	if (bot->IsBeingTeleportedNear())
 	{
-		WorldPackets::Movement::MoveTeleportAck p = WorldPackets::Movement::MoveTeleportAck(WorldPacket());
+        WorldPackets::Movement::MoveTeleportAck p{WorldPacket(CMSG_MOVE_TELEPORT_ACK)};
 		p.MoverGUID = bot->GetGUID();
 		bot->GetSession()->HandleMoveTeleportAck(p);
 	}
@@ -292,73 +314,24 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
     switch (packet.GetOpcode())
     {
     case SMSG_MOVE_SET_CAN_FLY:
-        {
-            WorldPacket p(packet);
-            ObjectGuid guid;
-            p >> guid;
-            if (guid != bot->GetGUID())
-                return;
-
-            bot->m_movementInfo.SetMovementFlags((MovementFlags)(MOVEMENTFLAG_FLYING|MOVEMENTFLAG_CAN_FLY));
-            return;
-        }
     case SMSG_MOVE_UNSET_CAN_FLY:
-        {
-            WorldPacket p(packet);
-            ObjectGuid guid;
-            p >> guid;
-            if (guid != bot->GetGUID())
-                return;
-            bot->m_movementInfo.RemoveMovementFlag(MOVEMENTFLAG_FLYING);
-            return;
-        }
+        // Unit::SetCanFly has already updated authoritative movement flags.
+        // CAN_FLY does not imply FLYING, and must not erase other movement state.
+        return;
     case SMSG_CAST_FAILED:
-        {
-            WorldPacket p(packet);
-            p.rpos(0);
-
-            // SMSG_CAST_FAILED in 3.4.3 (WorldPackets::Spell::CastFailed::Write)
-            // starts with the cast id as a packed ObjectGuid, then the spell id,
-            // visual, reason and two failure args as int32s. The classic 3.3.5
-            // header this used to read (cast count u8, spell id u32, result u8)
-            // consumed six bytes out of the packed cast id guid, so the result
-            // never matched and failed casts were never reported. Mirror the
-            // writer; only the spell id and the result matter here.
-            ObjectGuid castId;
-            p >> castId;                // CastID
-            int32 spellId = 0;
-            p >> spellId;               // SpellID
-            p.read_skip<int32>();       // SpellCastVisual
-            int32 result = 0;
-            p >> result;                // SpellCastResult
-            if (result != SPELL_CAST_OK)
-            {
-                SpellInterrupted(spellId > 0 ? uint32(spellId) : 0);
-                botOutgoingPacketHandlers.AddPacket(packet);
-            }
-            return;
-        }
     case SMSG_SPELL_FAILURE:
         {
-            WorldPacket p(packet);
-            p.rpos(0);
-
-            // SMSG_SPELL_FAILURE in 3.4.3 (WorldPackets::Spell::SpellFailure::Write)
-            // is caster guid and cast id (both packed ObjectGuids), int32 spell
-            // id, the visual and a uint16 reason. The old read of a uint8 cast
-            // count consumed the first byte of the packed cast id guid and then
-            // read the spell id out of the middle of that guid, interrupting a
-            // random spell. Only the caster and the spell id are needed here.
-            ObjectGuid casterGuid;
-            p >> casterGuid;
-            if (casterGuid != bot->GetGUID())
+            packets::CastFailure failure;
+            if (!packets::ReadCastFailure(packet, failure))
                 return;
-
-            ObjectGuid castId;
-            p >> castId;                // CastID
-            int32 spellId = 0;
-            p >> spellId;               // SpellID
-            SpellInterrupted(spellId > 0 ? uint32(spellId) : 0);
+            if (packet.GetOpcode() == SMSG_SPELL_FAILURE && failure.Caster != bot->GetGUID())
+                return;
+            if (packet.GetOpcode() == SMSG_SPELL_FAILURE || failure.Reason != SPELL_CAST_OK)
+            {
+                SpellInterrupted(failure.SpellID > 0 ? uint32(failure.SpellID) : 0);
+                if (packet.GetOpcode() == SMSG_CAST_FAILED)
+                    botOutgoingPacketHandlers.AddPacket(packet);
+            }
             return;
         }
     case SMSG_SPELL_DELAYED:
@@ -385,24 +358,16 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
 void PlayerbotAI::SpellInterrupted(uint32 spellid)
 {
     LastSpellCast& lastSpell = aiObjectContext->GetValue<LastSpellCast&>("last spell cast")->Get();
-    if (lastSpell.id != spellid)
+    if (!spellid || lastSpell.id != spellid)
         return;
 
+    time_t started = lastSpell.time;
+    int32 cooldown = CalculateGlobalCooldown(lastSpell.id);
     lastSpell.Reset();
 
     time_t now = time(0);
-    if (now <= lastSpell.time)
-        return;
-
-    uint32 castTimeSpent = 1000 * (now - lastSpell.time);
-
-    int32 globalCooldown = CalculateGlobalCooldown(lastSpell.id);
-    if (castTimeSpent < globalCooldown)
-        SetNextCheckDelay(globalCooldown - castTimeSpent);
-    else
-        SetNextCheckDelay(0);
-
-    lastSpell.id = 0;
+    double elapsed = now > started ? std::difftime(now, started) * 1000.0 : 0.0;
+    SetNextCheckDelay(cooldown > 0 && elapsed < cooldown ? uint32(cooldown - elapsed) : 0);
 }
 
 int32 PlayerbotAI::CalculateGlobalCooldown(uint32 spellid)
@@ -1074,23 +1039,12 @@ void PlayerbotAI::InterruptSpell()
         if (spell->m_spellInfo->IsPositive())
             continue;
 
+        // The core cancel path emits the real 3.4.3 SpellFailure and
+        // SpellFailedOther packets, with cast GUID and visual/reason fields.
+        // Do not fabricate a second pair with the obsolete 3.3.5 byte layout.
+        uint32 spellId = spell->m_spellInfo->Id;
         bot->InterruptSpell((CurrentSpellTypes)type);
-
-        WorldPacket data(SMSG_SPELL_FAILURE, 8 + 1 + 4 + 1);
-        data << bot->GetGUID();
-        data << uint8(1);
-        data << uint32(spell->m_spellInfo->Id);
-        data << uint8(0);
-        bot->SendMessageToSet(&data, true);
-
-        data.Initialize(SMSG_SPELL_FAILED_OTHER, 8 + 1 + 4 + 1);
-        data << bot->GetGUID();
-        data << uint8(1);
-        data << uint32(spell->m_spellInfo->Id);
-        data << uint8(0);
-        bot->SendMessageToSet(&data, true);
-
-        SpellInterrupted(spell->m_spellInfo->Id);
+        SpellInterrupted(spellId);
     }
 
     SpellInterrupted(lastSpell.id);

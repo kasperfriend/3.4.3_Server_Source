@@ -5,7 +5,6 @@
 
 using namespace ai;
 
-uint64 extractGuid(WorldPacket& packet);
 
 bool CheckMountStateAction::Execute(Event event)
 {

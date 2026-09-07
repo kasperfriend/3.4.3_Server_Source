@@ -246,7 +246,11 @@ void Group::LoadGroupFromDB(Field* fields)
     m_lootThreshold = ItemQualities(fields[3].GetUInt8());
 
     for (uint8 i = 0; i < TARGET_ICONS_COUNT; ++i)
-        m_targetIcons[i].SetRawValue(fields[4 + i].GetBinary());
+        if (!m_targetIcons[i].TrySetRawValue(fields[4 + i].GetBinary()))
+        {
+            m_targetIcons[i].Clear();
+            TC_LOG_ERROR("sql.sql", "Group {} has an invalid target icon GUID in slot {}; clearing in memory", m_guid.ToString(), i);
+        }
 
     m_groupFlags  = GroupFlags(fields[12].GetUInt16());
     if (m_groupFlags & GROUP_FLAG_RAID)

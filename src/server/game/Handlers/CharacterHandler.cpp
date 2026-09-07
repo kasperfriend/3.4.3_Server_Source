@@ -1079,6 +1079,21 @@ void WorldSession::HandleLoadScreenOpcode(WorldPackets::Character::LoadingScreen
 void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
 {
     ObjectGuid playerGuid = holder.GetGuid();
+    // Query completions can arrive after a disconnect/abort, or after another
+    // completion already entered the character. Never create a second Player.
+    if (GetPlayer() || m_playerLoading != playerGuid || !playerGuid.IsPlayer())
+        return;
+    if (!IsBotSession() && PlayerDisconnected())
+    {
+        m_playerLoading.Clear();
+        return;
+    }
+    if (ObjectAccessor::FindConnectedPlayer(playerGuid))
+    {
+        TC_LOG_ERROR("entities.player.loading", "Character {} is already connected; rejecting duplicate login for account {}", playerGuid.ToString(), GetAccountId());
+        AbortLogin(WorldPackets::Character::LoginFailureReason::DuplicateCharacter);
+        return;
+    }
 
     Player* pCurrChar = new Player(this);
      // for send server info and strings (config)
@@ -1089,6 +1104,7 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder const& holder)
     {
         SetPlayer(nullptr);
         KickPlayer("WorldSession::HandlePlayerLogin Player::LoadFromDB failed"); // disconnect client, player no set to session and it will not deleted or saved at kick
+        pCurrChar->CleanupsBeforeDelete();
         delete pCurrChar;                                   // delete it manually
         m_playerLoading.Clear();
         return;

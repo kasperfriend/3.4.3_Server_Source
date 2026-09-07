@@ -787,6 +787,8 @@ bool Battlenet::Session::ReadHeaderLengthHandler()
 {
     uint16 len = *reinterpret_cast<uint16*>(_headerLengthBuffer.GetReadPointer());
     EndianConvertReverse(len);
+    if (!len)
+        return false;
     _headerBuffer.Resize(len);
     return true;
 }
@@ -797,6 +799,13 @@ bool Battlenet::Session::ReadHeaderHandler()
     if (!header.ParseFromArray(_headerBuffer.GetReadPointer(), _headerBuffer.GetActiveSize()))
         return false;
 
+    // Bound untrusted protobuf lengths before resizing. A client can send a
+    // valid tiny header advertising gigabytes of body without authenticating.
+    if (header.size() > 1024 * 1024)
+    {
+        TC_LOG_ERROR("session", "{} sent an oversized RPC payload ({} bytes)", GetClientInfo(), header.size());
+        return false;
+    }
     _packetBuffer.Resize(header.size());
     return true;
 }
@@ -804,8 +813,8 @@ bool Battlenet::Session::ReadHeaderHandler()
 bool Battlenet::Session::ReadDataHandler()
 {
     Header header;
-    bool parseSuccess = header.ParseFromArray(_headerBuffer.GetReadPointer(), _headerBuffer.GetActiveSize());
-    ASSERT(parseSuccess);
+    if (!header.ParseFromArray(_headerBuffer.GetReadPointer(), _headerBuffer.GetActiveSize()))
+        return false;
 
     if (header.service_id() != 0xFE)
     {

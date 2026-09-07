@@ -21,6 +21,7 @@ public:
     bool Initialize();
     bool IsInRandomAccountList(uint32 id);
     bool IsInRandomQuestItemList(uint32 id);
+    uint32 GetRandomChangeRange(double scale) const;
 
     bool enabled;
     bool allowGuildBots;

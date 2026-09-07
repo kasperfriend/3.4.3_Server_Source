@@ -52,29 +52,6 @@ char *strstri(const char *haystack, const char *needle)
 
 
 
-uint64 extractGuid(WorldPacket& packet)
-{
-    uint8 mask;
-    packet >> mask;
-    uint64 guid = 0;
-    uint8 bit = 0;
-    uint8 testMask = 1;
-    while (true)
-    {
-        if (mask & testMask)
-        {
-            uint8 word;
-            packet >> word;
-            guid += (word << bit);
-        }
-        if (bit == 7)
-            break;
-        ++bit;
-        testMask <<= 1;
-    }
-    return guid;
-}
-
 // std::not1 / std::ptr_fun were deprecated in C++11 and removed in C++17;
 // this tree is built as C++20, so use plain lambdas instead.
 std::string &ltrim(std::string &s) {

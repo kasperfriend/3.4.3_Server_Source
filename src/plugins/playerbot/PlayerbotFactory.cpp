@@ -1,6 +1,7 @@
 #include "../pchdef.h"
 #include "playerbot.h"
 #include "PlayerbotFactory.h"
+#include "DisableMgr.h"
 #include "../../server/game/Guilds/GuildMgr.h"
 #include "Entities/Item/ItemTemplate.h"
 #include "PlayerbotAIConfig.h"
@@ -57,6 +58,10 @@ void PlayerbotFactory::CleanRandomize()
 
 void PlayerbotFactory::Prepare()
 {
+    // SetLevel alone leaves health, mana, skills and talent points at the old
+    // level. Keep the requested level in the core's valid range before GiveLevel.
+    level = std::clamp<uint32>(level, 1, sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL));
+
     if (!itemQuality)
     {
         if (level <= 10)
@@ -75,7 +80,7 @@ void PlayerbotFactory::Prepare()
         bot->ResurrectPlayer(1.0f, false);
 
     bot->CombatStop(true);
-    bot->SetLevel(level);
+    bot->GiveLevel(uint8(level));
     bot->SetPlayerFlagEx(PLAYER_FLAGS_EX_HIDE_HELM);
     bot->SetPlayerFlagEx(PLAYER_FLAGS_EX_HIDE_CLOAK);
 }
@@ -94,7 +99,7 @@ void PlayerbotFactory::Randomize(bool incremental)
     TC_LOG_INFO("playerbot",  "Initializing quests...");
     InitQuests();
     // quest rewards boost bot level, so reduce back
-    bot->SetLevel(level);
+    bot->GiveLevel(uint8(level));
     ClearInventory();
     bot->SetXP(0);
     CancelAuras();
@@ -165,14 +170,19 @@ void PlayerbotFactory::InitPet()
             return;
 
         Map* map = bot->GetMap();
-        if (!map)
+        if (!map || !bot->IsInWorld() || bot->IsBeingTeleported() || !bot->IsPositionValid())
             return;
 
-		vector<uint32> ids;
-	    CreatureTemplateContainer const& creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
-	    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer.begin(); i != creatureTemplateContainer.end(); ++i)
-	    {
-	        CreatureTemplate const& co = i->second;
+        // No visible pet does not mean an empty stable: a pet may be dismissed,
+        // temporarily unsummoned, or still loading. Never replace that pet.
+        if (PetStable const* stable = bot->GetPetStable())
+            if (stable->CurrentPet || stable->GetUnslottedHunterPet())
+                return;
+
+        vector<uint32> ids;
+        for (auto const& pair : sObjectMgr->GetCreatureTemplates())
+        {
+            CreatureTemplate const& co = pair.second;
             CreatureDifficulty const* creatureDifficulty = co.GetDifficulty(DIFFICULTY_NONE);
             if (!creatureDifficulty || !co.IsTameable(false, creatureDifficulty))
                 continue;
@@ -180,70 +190,72 @@ void PlayerbotFactory::InitPet()
             if (creatureDifficulty->MinLevel > bot->GetLevel())
                 continue;
 
-			PetLevelInfo const* petInfo = sObjectMgr->GetPetLevelInfo(co.Entry, bot->GetLevel());
-            if (!petInfo)
-                continue;
-
-			ids.push_back(i->first);
-		}
+            // Hunter stats use pet_levelstats entry 1, not the wild creature's
+            // entry. Let the core tame helper initialize stats and fallback data.
+            ids.push_back(pair.first);
+        }
 
         if (ids.empty())
         {
-            TC_LOG_ERROR("playerbot",  "No pets available for bot {} ({} level)", bot->GetName().c_str(), bot->GetLevel());
+            TC_LOG_ERROR("playerbot", "No pets available for bot {} ({} level)", bot->GetName(), bot->GetLevel());
             return;
         }
 
-		for (int i = 0; i < 100; i++)
-		{
-			int index = urand(0, ids.size() - 1);
-			CreatureTemplate const* co = sObjectMgr->GetCreatureTemplate(ids[index]);
+        for (int attempt = 0; attempt < 100 && !ids.empty(); ++attempt)
+        {
+            uint32 index = urand(0, ids.size() - 1);
+            uint32 entry = ids[index];
+            ids.erase(ids.begin() + index);
 
-            PetLevelInfo const* petInfo = sObjectMgr->GetPetLevelInfo(co->Entry, bot->GetLevel());
-            if (!petInfo)
+            // This initializes the stable's CurrentPet and pet number BEFORE
+            // publishing/saving the pet. Ignoring InitTamedPet failure used to
+            // reach Pet::SavePetToDB's stable/pet-number assertion.
+            pet = bot->CreateTamedPetFrom(entry, 0);
+            if (!pet)
                 continue;
 
-            uint32 guid = map->GenerateLowGuid<HighGuid::Pet>();
-            pet = new Pet(bot, HUNTER_PET);
-            if (!pet->Create(guid, map, ids[index], 0))
+            if (!map->AddToMap(pet->ToCreature()))
             {
+                // The tame helper reserved the current slot but the pet never
+                // entered the world; undo only that reservation before deleting.
+                PetStable* stable = bot->GetPetStable();
+                if (stable && stable->CurrentPet &&
+                    stable->CurrentPet->PetNumber == pet->GetCharmInfo()->GetPetNumber())
+                    stable->CurrentPet.reset();
                 delete pet;
-                pet = NULL;
+                pet = nullptr;
                 continue;
             }
 
-            pet->Relocate(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ(), bot->GetOrientation());
-            pet->SetFaction(bot->GetFaction());
-            pet->SetLevel(bot->GetLevel());
-            bot->SetPetGUID(pet->GetGUID());
-            bot->GetMap()->AddToMap(pet->ToCreature());
             bot->SetMinion(pet, true);
             pet->InitTalentForLevel();
-            bot->PetSpellInitialize();
-            bot->InitTamedPet(pet, bot->GetLevel(), 0);
-
-            TC_LOG_DEBUG("playerbot",   "Bot {}: assign pet {} ({} level)", bot->GetName().c_str(), co->Entry, bot->GetLevel());
             pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+            bot->PetSpellInitialize();
+            TC_LOG_DEBUG("playerbot", "Bot {}: assigned pet {} ({} level)", bot->GetName(), entry, bot->GetLevel());
             break;
         }
     }
 
     if (!pet)
     {
-        TC_LOG_ERROR("playerbot",  "Cannot create pet for bot {}", bot->GetName().c_str());
+        TC_LOG_ERROR("playerbot", "Cannot create pet for bot {}", bot->GetName());
         return;
     }
 
-    for (PetSpellMap::const_iterator itr = pet->m_spells.begin(); itr != pet->m_spells.end(); ++itr)
+    for (auto const& pair : pet->m_spells)
     {
-        if(itr->second.state == PETSPELL_REMOVED)
+        if (pair.second.state == PETSPELL_REMOVED)
             continue;
 
-        uint32 spellId = itr->first;
-        const SpellInfo* spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
-        if (spellInfo->IsPassive())
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(pair.first, DIFFICULTY_NONE);
+        if (!spellInfo)
+        {
+            TC_LOG_ERROR("playerbot", "Bot {} pet {} has missing spell {}; skipping autocast",
+                bot->GetGUID().ToString(), pet->GetEntry(), pair.first);
             continue;
-
-        pet->ToggleAutocast(spellInfo, true);
+        }
+        if (!spellInfo->IsPassive())
+            pet->ToggleAutocast(spellInfo, true);
     }
 }
 
@@ -253,8 +265,17 @@ void PlayerbotFactory::ClearSpells()
     for(PlayerSpellMap::iterator itr = bot->GetSpellMap().begin(); itr != bot->GetSpellMap().end(); ++itr)
     {
         uint32 spellId = itr->first;
-        const SpellInfo* spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
-        if(itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || spellInfo->IsPassive())
+        if (itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled)
+            continue;
+
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
+        if (!spellInfo)
+        {
+            TC_LOG_ERROR("playerbot", "Bot {} has missing spell {} during spell reset; skipping",
+                bot->GetGUID().ToString(), spellId);
+            continue;
+        }
+        if (spellInfo->IsPassive())
             continue;
 
         spells.push_back(spellId);
@@ -274,12 +295,21 @@ void PlayerbotFactory::InitSpells()
 
 void PlayerbotFactory::InitTalents()
 {
-    uint32 point = urand(0, 100);
     uint8 cls = bot->GetClass();
-    uint32 p1 = sPlayerbotAIConfig.specProbability[cls][0];
-    uint32 p2 = p1 + sPlayerbotAIConfig.specProbability[cls][1];
+    if (cls >= MAX_CLASSES)
+        return;
 
-    uint32 specNo = (point < p1 ? 0 : (point < p2 ? 1 : 2));
+    // These are relative weights, not cumulative percentages. Read all three
+    // and use doubles so large weights cannot overflow a uint32 sum.
+    double weights[3] = {
+        double(sPlayerbotAIConfig.specProbability[cls][0]),
+        double(sPlayerbotAIConfig.specProbability[cls][1]),
+        double(sPlayerbotAIConfig.specProbability[cls][2])
+    };
+    if (weights[0] + weights[1] + weights[2] == 0.0)
+        weights[0] = weights[1] = weights[2] = 1.0;
+
+    uint32 specNo = urandweighted(3, weights);
     InitTalents(specNo);
 
     if (BotFreeTalentPoints(bot))
@@ -575,7 +605,7 @@ bool PlayerbotFactory::CanEquipItem(ItemTemplate const* proto, uint32 desiredQua
         delta = urand(2, 4);
 
     if (desiredQuality > ITEM_QUALITY_NORMAL &&
-            (requiredLevel > level || requiredLevel < level - delta))
+            (requiredLevel > level || requiredLevel < (level > delta ? level - delta : 0)))
         return false;
 
     for (uint32 gap = 60; gap <= 80; gap += 10)
@@ -1200,50 +1230,58 @@ ObjectGuid PlayerbotFactory::GetRandomBot()
     return guids[index];
 }
 
-void AddPrevQuests(uint32 questId, list<uint32>& questIds)
+static void AddQuestChain(uint32 questId, list<uint32>& questIds, set<uint32>& visited)
 {
-    Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
-    if (!quest)
-        return;
-
-    if (int32 prevQuestId = quest->GetPrevQuestId())
+    // Walk iteratively so broken/cyclic PrevQuestId chains cannot overflow the
+    // stack. A shared visited set also prevents rewarding common ancestors twice.
+    list<uint32> chain;
+    while (questId && visited.insert(questId).second)
     {
-        uint32 prevId = uint32(std::abs(prevQuestId));
-        AddPrevQuests(prevId, questIds);
-        questIds.push_back(prevId);
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
+        if (!quest || DisableMgr::IsDisabledFor(DISABLE_TYPE_QUEST, questId, nullptr))
+            break;
+
+        chain.push_front(questId);
+        questId = uint32(std::abs(int64(quest->GetPrevQuestId())));
     }
+
+    questIds.splice(questIds.end(), chain);
 }
 
 void PlayerbotFactory::InitQuests()
 {
     ObjectMgr::QuestContainer const& questTemplates = sObjectMgr->GetQuestTemplates();
     list<uint32> questIds;
+    set<uint32> visited;
     for (ObjectMgr::QuestContainer::const_iterator i = questTemplates.begin(); i != questTemplates.end(); ++i)
     {
         uint32 questId = i->first;
         Quest const* quest = &i->second;
 
         if (!quest->GetAllowableClasses() ||
-                quest->GetQuestMinLevel() > int32(bot->GetLevel()) ||
-                quest->IsDailyOrWeekly() || quest->IsRepeatable() || quest->IsMonthly())
+                quest->GetQuestMinLevel() > int32(level) ||
+                quest->IsDailyOrWeekly() || quest->IsRepeatable() || quest->IsMonthly() ||
+                DisableMgr::IsDisabledFor(DISABLE_TYPE_QUEST, questId, bot))
             continue;
 
-        AddPrevQuests(questId, questIds);
-        questIds.push_back(questId);
+        AddQuestChain(questId, questIds, visited);
     }
 
-    for (list<uint32>::iterator i = questIds.begin(); i != questIds.end(); ++i)
+    for (uint32 questId : questIds)
     {
-        uint32 questId = *i;
-        Quest const *quest = sObjectMgr->GetQuestTemplate(questId);
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
 
-        // AddPrevQuests pushed this id from another quest's PrevQuestId chain;
-        // the referenced template may have been deleted, leaving a broken chain
-        if (!quest)
+        // Disabled quests bypass ObjectMgr's post-load validation and may still
+        // contain invalid spell/item/mail rewards. Never force-reward them,
+        // including quests reached through another quest's prerequisite chain.
+        if (!quest || DisableMgr::IsDisabledFor(DISABLE_TYPE_QUEST, questId, bot))
             continue;
 
-        if (!bot->SatisfyQuestClass(quest, false) ||
-                !bot->SatisfyQuestRace(quest, false))
+        // Apply these checks to prerequisites as well as the class quests.
+        // Use the requested level, not levels temporarily gained from rewards.
+        if (quest->GetQuestMinLevel() > int32(level) ||
+                quest->IsDailyOrWeekly() || quest->IsRepeatable() || quest->IsMonthly() ||
+                !bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
             continue;
 
         bot->RemoveActiveQuest(questId, false);
@@ -1564,7 +1602,9 @@ void PlayerbotFactory::InitInventoryTrade()
     {
     case ITEM_QUALITY_NORMAL:
         count = proto->GetMaxStackSize();
-        stacks = urand(1, 7) / auctionbot.GetRarityPriceMultiplier(proto);
+        // A tiny positive pricing multiplier must not turn this into billions
+        // of StoreItem calls (or an out-of-range floating-to-integer conversion).
+        stacks = uint32(std::min(7.0, urand(1, 7) / auctionbot.GetRarityPriceMultiplier(proto)));
         break;
     case ITEM_QUALITY_UNCOMMON:
         stacks = 1;

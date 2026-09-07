@@ -1,0 +1,260 @@
+// Production framing/state methods with real MessageBuffer storage and small
+// socket/crypto/database fakes. No listener, credentials, or database required.
+#include "MessageBuffer.h"
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <chrono>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using namespace std;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+#define ASSERT(condition, ...) CHECK(condition)
+template<class... T> void Log(T const&...) { }
+#define TC_LOG_ERROR(...) Log(__VA_ARGS__)
+constexpr uint16 CMSG_HOTFIX_REQUEST = 123;
+constexpr uint16 SMSG_COMPRESSED_PACKET = 456;
+constexpr int CONNECTION_TYPE_REALM = 0, CONNECTION_TYPE_INSTANCE = 1;
+struct Address { string to_string() const { return "test peer"; } };
+#pragma pack(push, 1)
+@HEADER@
+@INCOMING_HEADER@
+@COMPRESSED_HEADER@
+#pragma pack(pop)
+struct WorldPacket
+{
+    vector<uint8> data;
+    uint16 opcode = 17;
+    bool encrypt = true;
+    uint32 size() const { return uint32(data.size()); }
+    bool empty() const { return data.empty(); }
+    uint8 const* contents() const { return data.data(); }
+    uint16 GetOpcode() const { return opcode; }
+    bool NeedsEncryption() const { return encrypt; }
+};
+using EncryptablePacket = WorldPacket;
+using Bytef = uint8;
+uint32 adler32(uint32, Bytef const*, size_t) { return 0; }
+uint32 deflateBound(void*, uint32 length) { return length + 100; }
+struct Session
+{
+    static int alive;
+    struct Rbac { int loads = 0; void LoadFromDBCallback(int) { ++loads; } } rbac;
+    function<void()> onDestroy;
+    Session() { ++alive; }
+    ~Session() { --alive; if (onDestroy) onDestroy(); }
+    Rbac* GetRBACData() { return &rbac; }
+};
+int Session::alive = 0;
+using WorldSession = Session;
+using PreparedQueryResult = int;
+namespace WorldPackets::Auth
+{
+    struct EnterEncryptedMode
+    {
+        EnterEncryptedMode(array<uint8, 16> const&, bool) { }
+        WorldPacket const* Write() const { static WorldPacket packet; return &packet; }
+    };
+}
+struct World
+{
+    vector<unique_ptr<Session>> sessions;
+    uint32 instanceLinks = 0;
+    void AddSession(Session* session) { CHECK(session); sessions.emplace_back(session); }
+    void AddInstanceSocket(int, uint64) { ++instanceLinks; }
+} world;
+auto sWorld = &world;
+struct Crypto
+{
+    uint32 initialized = 0;
+    bool allowPeek = true;
+    void Init(array<uint8, 16> const&) { ++initialized; }
+    bool PeekDecryptRecv(uint8*, size_t) { return allowPeek; }
+    bool EncryptSend(uint8*, size_t, uint8 (&tag)[12]) { fill(begin(tag), end(tag), 0); return true; }
+};
+struct WorldSocket
+{
+    @AUTH_PHASE@
+    AuthPhase _authPhase = AuthPhase::AwaitAuth;
+    using TimePoint = chrono::steady_clock::time_point;
+    TimePoint _authenticationDeadline{};
+    @AUTH_TIMEOUT@
+    bool _canRequestHotfixes = true, open = true;
+    int _type = CONNECTION_TYPE_REALM;
+    uint64 _key = 123;
+    mutex _worldSessionLock;
+    Session* _worldSession = nullptr;
+    unique_ptr<Session> _pendingWorldSession;
+    array<uint8, 16> _encryptKey{};
+    Crypto _authCrypt;
+    MessageBuffer _headerBuffer{ sizeof(IncomingPacketHeader) }, _packetBuffer;
+    MessageBuffer input;
+    vector<vector<uint8>> frames;
+    enum class ReadDataHandlerResult { Ok, Error, WaitingForQuery };
+    Address GetRemoteIpAddress() const { return {}; }
+    bool IsOpen() const { return open; }
+    void CloseSocket() { open = false; OnClose(); }
+    void AsyncRead() { input.Normalize(); }
+    MessageBuffer& GetReadBuffer() { return input; }
+    int shared_from_this() { return 1; }
+    void SendPacketAndLogOpcode(WorldPacket const&) { }
+    ReadDataHandlerResult ReadDataHandler()
+    {
+        frames.emplace_back(_packetBuffer.GetReadPointer(), _packetBuffer.GetReadPointer() + _packetBuffer.GetActiveSize());
+        _packetBuffer.Reset();
+        return ReadDataHandlerResult::Ok;
+    }
+    bool ReadHeaderHandler();
+    void ReadHandler();
+    bool HandleEnterEncryptedModeAck();
+    void LoadSessionPermissionsCallback(PreparedQueryResult);
+    void OnClose();
+    void* _compressionStream = nullptr;
+    static constexpr uint32 MinSizeForCompression = 0x400;
+    MessageBuffer* writing = nullptr;
+    uint32 CompressPacket(uint8* destination, WorldPacket const& packet)
+    {
+        uint32 count = deflateBound(nullptr, packet.size() + sizeof(uint16));
+        CHECK(writing && writing->GetRemainingSpace() >= count);
+        memset(destination, 0xAB, count); // worst-case compressor fills its bound
+        return count;
+    }
+    void WritePacketToBuffer(EncryptablePacket const&, MessageBuffer&);
+    uint32 RequiredSize(EncryptablePacket const* queued)
+    {
+@COMPRESSED_SIZE@
+        return packetSize + sizeof(PacketHeader);
+    }
+};
+@WORLD_READ_HEADER@
+@WORLD_READ@
+@ENCRYPTED_ACK@
+@PERMISSIONS_CALLBACK@
+@ON_CLOSE@
+@WORLD_WRITE@
+
+vector<uint8> Frame(uint32 size, uint16 opcode = 17)
+{
+    IncomingPacketHeader header{};
+    header.Size = size; header.EncryptedOpcode = opcode;
+    vector<uint8> bytes(sizeof(header));
+    memcpy(bytes.data(), &header, sizeof(header));
+    for (uint32 i = 2; i < size; ++i) bytes.push_back(uint8(i));
+    return bytes;
+}
+void Feed(WorldSocket& socket, vector<uint8> const& bytes, size_t fragment)
+{
+    for (size_t i = 0; i < bytes.size() && socket.IsOpen(); i += fragment)
+    {
+        size_t count = min(fragment, bytes.size() - i);
+        socket.input.Resize(socket.input.GetActiveSize() + count);
+        socket.input.Write(bytes.data() + i, count);
+        socket.ReadHandler();
+    }
+}
+void TestWorldFraming()
+{
+    for (uint32 size : { 0u, 1u })
+    {
+        WorldSocket socket;
+        Feed(socket, Frame(size), 1);
+        CHECK(!socket.IsOpen() && socket.frames.empty());
+        CHECK(socket._packetBuffer.GetActiveSize() == 0);
+    }
+    auto first = Frame(2), second = Frame(19);
+    first.insert(first.end(), second.begin(), second.end());
+    for (size_t fragment = 1; fragment <= first.size(); ++fragment)
+    {
+        WorldSocket socket;
+        Feed(socket, first, fragment);
+        CHECK(socket.IsOpen() && socket.frames.size() == 2);
+        CHECK(socket.frames[0].size() == 2 && socket.frames[1].size() == 19);
+    }
+    for (bool authenticated : { false, true })
+    {
+        WorldSocket socket;
+        socket._authPhase = authenticated ? WorldSocket::AuthPhase::Encrypted : WorldSocket::AuthPhase::AwaitAuth;
+        IncomingPacketHeader header{};
+        header.Size = 0x100000; header.EncryptedOpcode = CMSG_HOTFIX_REQUEST;
+        socket._headerBuffer.Write(&header, sizeof(header));
+        CHECK(socket.ReadHeaderHandler() == authenticated);
+        socket._headerBuffer.Reset(); socket._packetBuffer.Reset();
+        header.Size = 0x100001;
+        socket._headerBuffer.Write(&header, sizeof(header));
+        CHECK(!socket.ReadHeaderHandler());
+    }
+}
+void TestHandshake()
+{
+    WorldSocket socket;
+    auto started = chrono::steady_clock::now();
+    socket._authenticationDeadline = started + chrono::seconds(60);
+    CHECK(!socket.IsAuthenticationTimedOut(started + chrono::seconds(59)));
+    CHECK(socket.IsAuthenticationTimedOut(started + chrono::seconds(60)));
+    CHECK(!socket.HandleEnterEncryptedModeAck());
+    CHECK(world.sessions.empty() && socket._authCrypt.initialized == 0);
+    socket._authPhase = WorldSocket::AuthPhase::Authenticating;
+    socket._pendingWorldSession = make_unique<Session>();
+    socket._worldSession = socket._pendingWorldSession.get();
+    CHECK(!socket.HandleEnterEncryptedModeAck()); // RBAC/encryption challenge still pending
+    socket.LoadSessionPermissionsCallback(1);
+    CHECK(socket._pendingWorldSession->rbac.loads == 1);
+    CHECK(socket.HandleEnterEncryptedModeAck());
+    CHECK(!socket._pendingWorldSession && world.sessions.size() == 1);
+    CHECK(!socket.IsAuthenticationTimedOut(started + chrono::hours(1)));
+    CHECK(!socket.HandleEnterEncryptedModeAck() && world.sessions.size() == 1 && socket._authCrypt.initialized == 1);
+    socket.CloseSocket();
+    CHECK(Session::alive == 1); // World, not the socket, owns the completed session
+    world.sessions.clear();
+    CHECK(Session::alive == 0);
+
+    WorldSocket abandoned;
+    abandoned._authPhase = WorldSocket::AuthPhase::Authenticating;
+    abandoned._pendingWorldSession = make_unique<Session>();
+    abandoned._worldSession = abandoned._pendingWorldSession.get();
+    abandoned._pendingWorldSession->onDestroy = [&] { abandoned.OnClose(); }; // catches a destruction-under-lock deadlock
+    abandoned.CloseSocket();
+    abandoned.LoadSessionPermissionsCallback(1); // late completion must not dereference freed state
+    CHECK(Session::alive == 0 && !abandoned._worldSession);
+    CHECK(!abandoned.HandleEnterEncryptedModeAck());
+
+    WorldSocket instance;
+    instance._type = CONNECTION_TYPE_INSTANCE;
+    CHECK(!instance.HandleEnterEncryptedModeAck());
+    instance._authPhase = WorldSocket::AuthPhase::AwaitEncryptionAck;
+    CHECK(instance.HandleEnterEncryptedModeAck());
+    CHECK(!instance.HandleEnterEncryptedModeAck() && world.instanceLinks == 1);
+}
+void TestCompressionBound()
+{
+    for (uint32 size : { 0u, 10u, 1023u, 1024u, 1025u, 4096u, 60000u })
+        for (bool encrypt : { false, true })
+        {
+            WorldSocket socket;
+            EncryptablePacket packet;
+            packet.data.resize(size, 0xCD); packet.encrypt = encrypt;
+            MessageBuffer buffer(socket.RequiredSize(&packet));
+            socket.writing = &buffer;
+            socket.WritePacketToBuffer(packet, buffer);
+            CHECK(buffer.GetActiveSize() <= buffer.GetBufferSize());
+            PacketHeader header;
+            memcpy(&header, buffer.GetBasePointer(), sizeof(header));
+            CHECK(header.Size + sizeof(header) == buffer.GetActiveSize());
+        }
+}
+
+int main()
+{
+    try
+    {
+        TestWorldFraming(); TestHandshake(); TestCompressionBound();
+        cout << "Connection framing, auth ordering/ownership, disconnect and compression capacity passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

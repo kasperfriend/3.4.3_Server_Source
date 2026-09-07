@@ -32,7 +32,7 @@
 #include "World.h"
 #include <G3D/g3dmath.h>
 
-TerrainInfo::TerrainInfo(uint32 mapId) : _mapId(mapId), _parentTerrain(nullptr), _cleanupTimer(randtime(CleanupInterval / 2, CleanupInterval))
+TerrainInfo::TerrainInfo(uint32 mapId) : _mapId(mapId), _parentTerrain(nullptr), _referenceCountFromMap{}, _cleanupTimer(randtime(CleanupInterval / 2, CleanupInterval))
 {
 }
 
@@ -156,15 +156,21 @@ void TerrainInfo::AddChildTerrain(std::shared_ptr<TerrainInfo> childTerrain)
 
 void TerrainInfo::LoadMapAndVMap(int32 gx, int32 gy)
 {
+    if (gx < 0 || gx >= MAX_NUMBER_OF_GRIDS || gy < 0 || gy >= MAX_NUMBER_OF_GRIDS)
+        return;
+
     if (++_referenceCountFromMap[gx][gy] != 1)    // check if already loaded
         return;
 
     std::lock_guard<std::mutex> lock(_loadMutex);
-    LoadMapAndVMapImpl(gx, gy);
+    // Height/area queries may have loaded this grid before a Map references it.
+    if (!_loadedGrids[GetBitsetIndex(gx, gy)])
+        LoadMapAndVMapImpl(gx, gy);
 }
 
 void TerrainInfo::LoadMMapInstance(uint32 mapId, uint32 instanceId)
 {
+    std::lock_guard<std::mutex> lock(_loadMutex);
     LoadMMapInstanceImpl(mapId, instanceId);
 
     for (std::shared_ptr<TerrainInfo> const& childTerrain : _childTerrain)
@@ -185,6 +191,9 @@ void TerrainInfo::LoadMapAndVMapImpl(int32 gx, int32 gy)
 
 void TerrainInfo::LoadMMapInstanceImpl(uint32 mapId, uint32 instanceId)
 {
+    if (!DisableMgr::IsPathfindingEnabled(mapId))
+        return;
+
     MMAP::MMapFactory::createOrGetMMapManager()->loadMapInstance(sWorld->GetDataPath(), _mapId, mapId, instanceId);
 }
 
@@ -280,6 +289,9 @@ void TerrainInfo::UnloadMMapInstanceImpl(uint32 mapId, uint32 instanceId)
 
 GridMap* TerrainInfo::GetGrid(uint32 mapId, float x, float y, bool loadIfMissing /*= true*/)
 {
+    if (!Trinity::IsValidMapCoord(x, y))
+        return nullptr;
+
     // half opt method
     int32 gx = (int)(CENTER_GRID_ID - x / SIZE_OF_GRIDS);                   //grid x
     int32 gy = (int)(CENTER_GRID_ID - y / SIZE_OF_GRIDS);                   //grid y
@@ -288,7 +300,8 @@ GridMap* TerrainInfo::GetGrid(uint32 mapId, float x, float y, bool loadIfMissing
     if (!_loadedGrids[GetBitsetIndex(gx, gy)] && loadIfMissing)
     {
         std::lock_guard<std::mutex> lock(_loadMutex);
-        LoadMapAndVMapImpl(gx, gy);
+        if (!_loadedGrids[GetBitsetIndex(gx, gy)])
+            LoadMapAndVMapImpl(gx, gy);
     }
 
     GridMap* grid = _gridMap[gx][gy].get();

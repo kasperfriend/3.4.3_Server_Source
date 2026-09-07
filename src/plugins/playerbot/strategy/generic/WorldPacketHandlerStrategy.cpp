@@ -87,6 +87,7 @@ void WorldPacketHandlerStrategy::InitTriggers(std::list<TriggerNode*> &triggers)
 
 WorldPacketHandlerStrategy::WorldPacketHandlerStrategy(PlayerbotAI* ai) : PassTroughStrategy(ai)
 {
+    supported.push_back("buy failed");
     supported.push_back("loot roll");
     supported.push_back("check mount state");
     supported.push_back("quest objective completed");

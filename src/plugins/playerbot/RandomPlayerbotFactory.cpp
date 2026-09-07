@@ -15,6 +15,9 @@ map<uint8, vector<uint8> > RandomPlayerbotFactory::availableRaces;
 
 RandomPlayerbotFactory::RandomPlayerbotFactory(uint32 accountId) : accountId(accountId)
 {
+    if (!availableRaces.empty())
+        return;
+
     availableRaces[CLASS_WARRIOR].push_back(RACE_HUMAN);
     availableRaces[CLASS_WARRIOR].push_back(RACE_NIGHTELF);
     availableRaces[CLASS_WARRIOR].push_back(RACE_GNOME);
@@ -133,9 +136,7 @@ bool RandomPlayerbotFactory::CreateRandomBot(uint8 cls)
 {
     TC_LOG_DEBUG("playerbot", "Creating new random bot for class {}", cls);
 
-    // the class loop runs CLASS_WARRIOR..MAX_CLASSES; class ids without an
-    // entry (Death Knight handled by the caller, and id 12-14 which hold no
-    // playable class) have an empty race list - bail instead of indexing it
+    // Reject unsupported explicit class requests before selecting a race.
     map<uint8, vector<uint8> >::const_iterator raceItr = availableRaces.find(cls);
     if (raceItr == availableRaces.end() || raceItr->second.empty())
     {
@@ -257,12 +258,24 @@ string RandomPlayerbotFactory::CreateRandomBotName()
 }
 
 
+static string RandomBotAccountPattern(string const& prefix)
+{
+    // Config validation excludes quotes and SQL wildcards except '_', which is
+    // a legal account-name character. Escape it explicitly for LIKE; using '='
+    // as escape character is independent of MySQL's NO_BACKSLASH_ESCAPES mode.
+    string pattern;
+    for (char c : prefix)
+        pattern += c == '_' ? "=_" : string(1, c);
+    return pattern + '%';
+}
+
 void RandomPlayerbotFactory::CreateRandomBots()
 {
+    string accountPattern = RandomBotAccountPattern(sPlayerbotAIConfig.randomBotAccountPrefix);
     if (sPlayerbotAIConfig.deleteRandomBotAccounts)
     {
         TC_LOG_INFO("playerbot",  "Deleting random bot accounts...");
-        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username like '{}%'", sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
+        QueryResult results = LoginDatabase.PQuery("SELECT id FROM account where username LIKE '{}' ESCAPE '='", accountPattern);
         if (results)
         {
             do
@@ -296,9 +309,10 @@ void RandomPlayerbotFactory::CreateRandomBots()
         TC_LOG_DEBUG("playerbot",  "Account {} created for random bots", accountName.c_str());
     }
 
-    LoginDatabase.PExecute("UPDATE account SET expansion = '{}' where username like '{}%'", 2, sPlayerbotAIConfig.randomBotAccountPrefix.c_str());
+    LoginDatabase.PExecute("UPDATE account SET expansion = '{}' where username LIKE '{}' ESCAPE '='", 2, accountPattern);
 
     int totalRandomBotChars = 0;
+    bool stopCreating = false;
     for (int accountNumber = 0; accountNumber < sPlayerbotAIConfig.randomBotAccountCount; ++accountNumber)
     {
         ostringstream out; out << sPlayerbotAIConfig.randomBotAccountPrefix << accountNumber;
@@ -314,7 +328,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
         sPlayerbotAIConfig.randomBotAccounts.push_back(accountId);
 
         int count = sAccountMgr->GetCharactersCount(accountId);
-        if (count >= 10)
+        if (count >= 10 || stopCreating)
         {
             totalRandomBotChars += count;
             continue;
@@ -322,28 +336,26 @@ void RandomPlayerbotFactory::CreateRandomBots()
 
         RandomPlayerbotFactory factory(accountId);
 
-        bool namePoolExhausted = false;
-        for (uint8 cls = CLASS_WARRIOR; cls < MAX_CLASSES; ++cls)
+        bool creationFailed = false;
+        for (uint8 cls = CLASS_WARRIOR; cls <= CLASS_DRUID && count < 10; ++cls)
         {
-            if (cls == 10 || cls == CLASS_DEATH_KNIGHT)
+            if (cls == CLASS_MONK || cls == CLASS_DEATH_KNIGHT)
                 continue;
 
             if (!factory.CreateRandomBot(cls))
             {
-                // CreateRandomBot only fails when the name pool is exhausted or
-                // character creation itself fails; the pool never refills during
-                // this pass, so no later account/class can succeed either. Bail
-                // out instead of re-running the failing query for every slot
-                // (which used to flood the log at every startup).
-                namePoolExhausted = true;
+                // Stop this creation pass on exhausted names or invalid creation
+                // data instead of repeating the same failure for every account.
+                creationFailed = true;
                 break;
             }
+            ++count;
         }
 
         totalRandomBotChars += sAccountMgr->GetCharactersCount(accountId);
 
-        if (namePoolExhausted)
-            break;
+        if (creationFailed)
+            stopCreating = true; // still register existing characters on later accounts
     }
 
     TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);

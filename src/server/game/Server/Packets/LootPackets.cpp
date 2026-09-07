@@ -71,6 +71,10 @@ void WorldPackets::Loot::LootItem::Read()
     uint32 Count;
     _worldPacket >> Count;
 
+    // A request needs at least two GUID masks plus one slot byte. Bound
+    // attacker-controlled counts before allocating, not after deserialization.
+    if (Count > (_worldPacket.size() - _worldPacket.rpos()) / 3)
+        throw ByteBufferPositionException(_worldPacket.rpos(), Count, _worldPacket.size());
     Loot.resize(Count);
     for (uint32 i = 0; i < Count; ++i)
     {
@@ -87,6 +91,10 @@ void WorldPackets::Loot::MasterLootItem::Read()
     _worldPacket >> Count;
     _worldPacket >> Target;
 
+    // A request needs at least two GUID masks plus one slot byte. Bound
+    // attacker-controlled counts before allocating, not after deserialization.
+    if (Count > (_worldPacket.size() - _worldPacket.rpos()) / 3)
+        throw ByteBufferPositionException(_worldPacket.rpos(), Count, _worldPacket.size());
     Loot.resize(Count);
     for (uint32 i = 0; i < Count; ++i)
     {

@@ -39,6 +39,8 @@ class RandomPlayerbotMgr : public PlayerbotHolder
         void OnPlayerLogout(Player* player);
         void OnPlayerLogin(Player* player);
         Player* GetRandomPlayer();
+        void UpdatePlayerbotSessions(uint32 elapsed);
+        void ShutdownPlayerbotSessions();
         void PrintStats();
         double GetBuyMultiplier(Player* bot);
         double GetSellMultiplier(Player* bot);
@@ -64,7 +66,7 @@ class RandomPlayerbotMgr : public PlayerbotHolder
         uint32 GetZoneLevel(uint16 mapId, float teleX, float teleY, float teleZ);
 
     private:
-        vector<Player*> players;
+        std::set<ObjectGuid> players;
         int processTicks;
         map<uint8, vector<WorldLocation> > locsPerLevelCache;
 };
