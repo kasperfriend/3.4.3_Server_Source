@@ -129,7 +129,11 @@ namespace
 
         try
         {
-            if (PlayerbotAI* ai = player->GetPlayerbotAI())
+            PlayerbotAI* ai = player->GetPlayerbotAI();
+            // capture the master before the AI (which stores it) is deleted
+            Player* master = ai ? ai->GetMaster() : nullptr;
+
+            if (ai)
             {
                 player->SetPlayerbotAI(nullptr);
                 delete ai;
@@ -139,6 +143,16 @@ namespace
             {
                 player->SetPlayerbotMgr(nullptr);
                 delete mgr;
+            }
+
+            // purge holder map entries pointing at this destroyed player: a bot
+            // removed from the world without the normal logout flow would
+            // otherwise leave a dangling pointer the managers keep dereferencing
+            sRandomPlayerbotMgr.RemovePlayerBotEntry(player->GetGUID());
+            if (master)
+            {
+                if (PlayerbotMgr* masterMgr = master->GetPlayerbotMgr())
+                    masterMgr->RemovePlayerBotEntry(player->GetGUID());
             }
         }
         catch (std::exception const& e)

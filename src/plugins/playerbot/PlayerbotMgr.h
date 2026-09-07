@@ -34,6 +34,11 @@ public:
     void LogoutAllBots();
     void OnBotLogin(Player * const bot);
 
+    // erase a bot map entry without touching its Player object - used by the
+    // player-delete hook when the object is being destroyed outside the
+    // normal logout flow, so no manager ever dereferences it again
+    void RemovePlayerBotEntry(ObjectGuid guid) { playerBots.erase(guid); }
+
     list<string> HandlePlayerbotCommand(char const* args, Player* master = NULL);
     string ProcessBotCommand(string cmd, ObjectGuid guid, bool admin, uint32 masterAccountId, uint32 masterGuildId);
     uint32 GetAccountId(string name);
