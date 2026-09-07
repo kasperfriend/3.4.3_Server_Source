@@ -127,16 +127,27 @@ namespace
         if (!player)
             return;
 
-        if (PlayerbotAI* ai = player->GetPlayerbotAI())
+        try
         {
-            player->SetPlayerbotAI(nullptr);
-            delete ai;
-        }
+            if (PlayerbotAI* ai = player->GetPlayerbotAI())
+            {
+                player->SetPlayerbotAI(nullptr);
+                delete ai;
+            }
 
-        if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+            if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+            {
+                player->SetPlayerbotMgr(nullptr);
+                delete mgr;
+            }
+        }
+        catch (std::exception const& e)
         {
-            player->SetPlayerbotMgr(nullptr);
-            delete mgr;
+            TC_LOG_ERROR("playerbot", "Player delete hook for {} failed: {}", player->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Player delete hook for {} failed with an unknown exception", player->GetName());
         }
     }
 

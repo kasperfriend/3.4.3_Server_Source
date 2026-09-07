@@ -31,7 +31,7 @@ Unit* PartyMemberToHeal::Calculate()
     if (!group)
         return NULL;
 
-    bool isRaid = bot->GetGroup()->isRaidGroup();
+    bool isRaid = group->isRaidGroup();
     MinValueCalculator calc(100);
     for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
     {

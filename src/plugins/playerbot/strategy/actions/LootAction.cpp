@@ -70,7 +70,18 @@ bool OpenLootAction::DoLoot(LootObject& lootObject)
 
     if (creature)
     {
-        SkillType skill = SkillType(creature->GetCreatureTemplate()->GetDifficulty(DIFFICULTY_NONE)->GetRequiredLootSkill());
+        // the creature template (and its difficulty row) can vanish on a reload
+        // while the bot still sees this lootable unit - bail out instead of
+        // dereferencing the missing entry
+        CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+        if (!creatureTemplate)
+            return false;
+
+        CreatureDifficulty const* difficulty = creatureTemplate->GetDifficulty(DIFFICULTY_NONE);
+        if (!difficulty)
+            return false;
+
+        SkillType skill = SkillType(difficulty->GetRequiredLootSkill());
         if (!CanOpenLock(skill, lootObject.reqSkillValue))
             return false;
 

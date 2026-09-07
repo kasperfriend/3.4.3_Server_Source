@@ -82,17 +82,23 @@ uint8 BalancePercentValue::Calculate()
             level *= 5;
         else
         {
-            switch (creature->GetCreatureTemplate()->Classification)
+            // template can be missing after a reload for creatures that were
+            // already on the map; treat them as regular mobs instead of crashing
+            CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+            if (creatureTemplate)
             {
-                case CreatureClassifications::Rare:
-                    level *= 2;
-                    break;
-                case CreatureClassifications::Elite:
-                case CreatureClassifications::RareElite:
-                    level *= 3;
-                    break;
-                default:
-                    break;
+                switch (creatureTemplate->Classification)
+                {
+                    case CreatureClassifications::Rare:
+                        level *= 2;
+                        break;
+                    case CreatureClassifications::Elite:
+                    case CreatureClassifications::RareElite:
+                        level *= 3;
+                        break;
+                    default:
+                        break;
+                }
             }
         }
         attackerLevel += level;
