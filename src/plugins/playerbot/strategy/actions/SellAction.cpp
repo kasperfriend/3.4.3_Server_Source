@@ -30,7 +30,8 @@ public:
 
     virtual bool Visit(Item* item)
     {
-        if (item->GetTemplate()->GetQuality() != ITEM_QUALITY_POOR)
+        ItemTemplate const* proto = item->GetTemplate();
+        if (!proto || proto->GetQuality() != ITEM_QUALITY_POOR)
             return true;
 
         return SellItemsVisitor::Visit(item);
@@ -86,12 +87,21 @@ void SellAction::Sell(Item* item)
     ObjectGuid itemguid = item->GetGUID();
     uint32 count = item->GetCount();
 
+    // the template can be gone while the bot still carries the item; the core
+    // sell handler would reject it anyway, so do not dereference null here
+    ItemTemplate const* proto = item->GetTemplate();
+    if (!proto)
+        return;
+
+    ostringstream out; out << chat->formatItem(proto) << " sold";
+
     WorldPackets::Item::SellItem sell{WorldPacket(CMSG_SELL_ITEM)};
     sell.VendorGUID = vendor->GetGUID();
     sell.ItemGUID = itemguid;
     sell.Amount = count;
     bot->GetSession()->HandleSellItemOpcode(sell);
 
-    ostringstream out; out << chat->formatItem(item->GetTemplate()) << " sold";
-    ai->TellMaster(out);
+    // build the chat line before the sell: a successful full sell moves the
+    // item into the buyback slot, so referencing it afterwards is fragile
+    ai->TellMaster(out.str());
 }

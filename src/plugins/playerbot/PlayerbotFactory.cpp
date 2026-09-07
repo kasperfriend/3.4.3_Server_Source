@@ -1237,6 +1237,11 @@ void PlayerbotFactory::InitQuests()
         uint32 questId = *i;
         Quest const *quest = sObjectMgr->GetQuestTemplate(questId);
 
+        // AddPrevQuests pushed this id from another quest's PrevQuestId chain;
+        // the referenced template may have been deleted, leaving a broken chain
+        if (!quest)
+            continue;
+
         if (!bot->SatisfyQuestClass(quest, false) ||
                 !bot->SatisfyQuestRace(quest, false))
             continue;
