@@ -16,8 +16,14 @@ void LoadList(string value, T &list)
     vector<string> ids = split(value, ',');
     for (vector<string>::iterator i = ids.begin(); i != ids.end(); i++)
     {
-        uint32 id = atoi((*i).c_str());
-        if (!id)
+        if (i->empty())
+            continue;
+
+        // only skip tokens that are not numbers at all: 0 is a legal id here
+        // (map 0 = Eastern Kingdoms in AiPlayerbot.RandomBotMaps = "0,1,530,571")
+        char* end = nullptr;
+        uint32 id = strtoul(i->c_str(), &end, 10);
+        if (end == i->c_str())
             continue;
 
         list.push_back(id);

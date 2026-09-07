@@ -1285,21 +1285,37 @@ void PlayerbotFactory::InitAmmo()
     if (!subClass)
         return;
 
-    QueryResult results = WorldDatabase.PQuery("select max(entry), max(RequiredLevel) from item_template where class = '{}' and subclass = '{}' and RequiredLevel <= '{}'",
-            ITEM_CLASS_PROJECTILE, subClass, bot->GetLevel());
-
-    Field* fields = results ? results->Fetch() : nullptr;
-    if (fields)
+    // Item templates in this core are built from DB2/hotfix data (ObjectMgr::LoadItemTemplates);
+    // there is no world item_template table with class/subclass/RequiredLevel columns to query -
+    // a bad reference raises ER_NO_SUCH_TABLE/ER_BAD_FIELD_ERROR which ABORTs the server via
+    // MySQLConnection::_HandleMySQLErrno. Search the in-memory store instead: pick the ammo with
+    // the highest usable RequiredLevel, tie-broken on the higher entry, same as the old SQL did.
+    uint32 entry = 0;
+    int32 bestLevel = -1;
+    for (auto const& pair : sObjectMgr->GetItemTemplateStore())
     {
-        uint32 entry = fields[0].GetUInt32();   // 0 when no ammo item matches
-        if (entry)
+        ItemTemplate const& proto = pair.second;
+        if (proto.GetClass() != ITEM_CLASS_PROJECTILE || proto.GetSubClass() != subClass)
+            continue;
+
+        int32 requiredLevel = proto.GetBaseRequiredLevel();
+        if (requiredLevel > (int32)bot->GetLevel())
+            continue;
+
+        if (requiredLevel > bestLevel || (requiredLevel == bestLevel && pair.first > entry))
         {
-            for (int i = 0; i < 5; i++)
-            {
-                bot->StoreNewItemInBestSlots(entry, 1000, ItemContext::NONE);
-            }
-            bot->SetAmmo(entry);
+            bestLevel = requiredLevel;
+            entry = pair.first;
         }
+    }
+
+    if (entry)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            bot->StoreNewItemInBestSlots(entry, 1000, ItemContext::NONE);
+        }
+        bot->SetAmmo(entry);
     }
 }
 
