@@ -115,11 +115,15 @@ bool QuestObjectiveCompletedAction::Execute(Event event)
     p.rpos(0);
 
     // SMSG_QUEST_UPDATE_ADD_CREDIT in 3.4.3 (WorldPackets::Quest::QuestUpdateAddCredit)
-    // is a fixed 21-byte packet (victim guid, quest id, object id, count,
-    // required, objective type); the classic 3.3.5 order this action used to
-    // read needs 24 bytes, so it always overran and the objective report never
-    // reached the master. Read the modern layout instead.
-    p.read_skip<ObjectGuid>();          // VictimGUID
+    // is victim guid, quest id, object id, count, required, objective type; the
+    // classic 3.3.5 order this action used to read needed more bytes and always
+    // overran, so the objective report never reached the master. Read the
+    // modern layout instead. The victim guid is serialized in the packed
+    // ObjectGuid format, so it must be consumed with operator>> - skipping a
+    // fixed sizeof(ObjectGuid) walks past the guid into the int32 fields and
+    // the reads below then run past the end of the packet.
+    ObjectGuid victimGuid;
+    p >> victimGuid;                    // VictimGUID
     p.read_skip<int32>();               // QuestID
     int32 objectId = 0;
     p >> objectId;                      // credit entry; negative for game objects

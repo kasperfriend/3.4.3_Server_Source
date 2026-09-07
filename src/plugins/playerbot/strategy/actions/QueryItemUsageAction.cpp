@@ -38,7 +38,10 @@ bool QueryItemUsageAction::Execute(Event event)
         data.read_skip<int32>();                // BattlePetBreedID
         data.read_skip<uint32>();               // BattlePetBreedQuality
         data.read_skip<int32>();                // BattlePetLevel
-        data.read_skip<ObjectGuid>();           // ItemGUID
+        ObjectGuid itemGuid;
+        data >> itemGuid;                       // ItemGUID (packed ObjectGuid - a
+                                                // fixed-size read_skip would walk
+                                                // into the trailing bit block)
 
         bool pushed = data.ReadBit();           // Pushed (e.g. quest reward, trade)
         bool created = data.ReadBit();          // Created (crafted)

@@ -11,13 +11,17 @@ bool TellCastFailedAction::Execute(Event event)
     p.rpos(0);
 
     // SMSG_CAST_FAILED in 3.4.3 (WorldPackets::Spell::CastFailed::Write) starts
-    // with the cast id as an ObjectGuid, then spell id / visual / reason as
-    // int32s. The classic 3.3.5 header this action used to read (cast count u8,
-    // spell id u32, reason u8) mis-parsed the modern packet into a garbage
+    // with the cast id as a packed ObjectGuid, then spell id / visual / reason
+    // as int32s. The classic 3.3.5 header this action used to read (cast count
+    // u8, spell id u32, reason u8) mis-parsed the modern packet into a garbage
     // spell id and reason; the garbage id could resolve to no SpellInfo and the
     // report then dereferenced null in formatSpell/Spell. Read the modern
-    // layout instead and bail out when the spell cannot be resolved.
-    p.read_skip<ObjectGuid>();      // CastID
+    // layout instead and bail out when the spell cannot be resolved. The cast
+    // id must be consumed with operator>>: ObjectGuid is serialized in the
+    // packed format here, so a fixed-size read_skip over sizeof(ObjectGuid)
+    // overshoots the guid and the int32 reads then run past the packet end.
+    ObjectGuid castId;
+    p >> castId;                    // CastID
     int32 spellId = 0;
     p >> spellId;
     p.read_skip<int32>();           // SpellCastVisual
