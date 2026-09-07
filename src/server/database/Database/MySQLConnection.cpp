@@ -101,6 +101,15 @@ uint32 MySQLConnection::Open()
     //unsigned int timeout = 10;
 
     mysql_options(mysqlInit, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+
+    // Cap the time spent establishing a connection: the platform default TCP
+    // connect timeout (tens of seconds on Windows) multiplied by reconnect
+    // attempts on the synchronous connection stalls the world thread long
+    // enough for the FreezeDetector to kill the server while MySQL is merely
+    // unreachable
+    unsigned int connectTimeoutSec = 10;
+    mysql_options(mysqlInit, MYSQL_OPT_CONNECT_TIMEOUT, (char const*)&connectTimeoutSec);
+
     //mysql_options(mysqlInit, MYSQL_OPT_READ_TIMEOUT, (char const*)&timeout);
     #ifdef _WIN32
     if (m_connectionInfo.host == ".")                                           // named pipe use option (Windows)
@@ -189,29 +198,32 @@ bool MySQLConnection::PrepareStatements()
 
 bool MySQLConnection::Execute(char const* sql)
 {
-    if (!m_Mysql)
-        return false;
-
+    // retries are bounded: a flapping server that reconnects and then
+    // immediately drops every query would otherwise retry through recursion
+    // until the call stack overflows
+    for (uint8 retries = 0; ; )
     {
+        // a dropped connection does not recover on its own: attempt the full
+        // reconnect cycle (bounded by the sync fast-fail window) before giving up
+        if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
+            return false;
+
         uint32 _s = getMSTime();
 
-        if (mysql_query(m_Mysql, sql))
+        if (!mysql_query(m_Mysql, sql))
         {
-            uint32 lErrno = mysql_errno(m_Mysql);
-
-            TC_LOG_INFO("sql.sql", "SQL: {}", sql);
-            TC_LOG_ERROR("sql.sql", "[{}] {}", lErrno, mysql_error(m_Mysql));
-
-            if (_HandleMySQLErrno(lErrno))  // If it returns true, an error was handled successfully (i.e. reconnection)
-                return Execute(sql);       // Try again
-
-            return false;
-        }
-        else
             TC_LOG_DEBUG("sql.sql", "[{} ms] SQL: {}", getMSTimeDiff(_s, getMSTime()), sql);
-    }
+            return true;
+        }
 
-    return true;
+        uint32 lErrno = mysql_errno(m_Mysql);
+        TC_LOG_INFO("sql.sql", "SQL: {}", sql);
+        TC_LOG_ERROR("sql.sql", "[{}] {}", lErrno, mysql_error(m_Mysql));
+
+        // one retry, and only if the error was handled (i.e. reconnection)
+        if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            return false;
+    }
 }
 
 static auto mysql_bind_param_no_deprecated(MYSQL_STMT* stmt, MYSQL_BIND* bnd)
@@ -235,103 +247,125 @@ static auto mysql_bind_param_no_deprecated(MYSQL_STMT* stmt, MYSQL_BIND* bnd)
 
 bool MySQLConnection::Execute(PreparedStatementBase* stmt)
 {
-    if (!m_Mysql)
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     uint32 index = stmt->GetIndex();
 
-    MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
-    ASSERT(m_mStmt);            // Can only be null if preparation failed, server side error or bad query
-
-    m_mStmt->BindParameters(stmt);
-
-    MYSQL_STMT* msql_STMT = m_mStmt->GetSTMT();
-    MYSQL_BIND* msql_BIND = m_mStmt->GetBind();
-
     uint32 _s = getMSTime();
 
-    if (mysql_bind_param_no_deprecated(msql_STMT, msql_BIND))
+    // bounded retries with statement refetch: after a reconnection the old
+    // statement handles are invalid, so a flat retry must re-resolve them;
+    // unlimited retry-via-recursion would stack overflow on a flapping server
+    for (uint8 retries = 0; ; )
     {
-        uint32 lErrno = mysql_errno(m_Mysql);
-        TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+        MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
+        // can be null after a failed (re-)prepare - skip instead of crashing
+        if (!m_mStmt)
+            return false;
 
-        if (_HandleMySQLErrno(lErrno))  // If it returns true, an error was handled successfully (i.e. reconnection)
-            return Execute(stmt);       // Try again
+        m_mStmt->BindParameters(stmt);
 
+        MYSQL_STMT* msql_STMT = m_mStmt->GetSTMT();
+        MYSQL_BIND* msql_BIND = m_mStmt->GetBind();
+
+        if (mysql_bind_param_no_deprecated(msql_STMT, msql_BIND))
+        {
+            uint32 lErrno = mysql_errno(m_Mysql);
+            TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+
+            if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            {
+                m_mStmt->ClearParameters();
+                return false;
+            }
+
+            continue;
+        }
+
+        if (mysql_stmt_execute(msql_STMT))
+        {
+            uint32 lErrno = mysql_errno(m_Mysql);
+            TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+
+            if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            {
+                m_mStmt->ClearParameters();
+                return false;
+            }
+
+            continue;
+        }
+
+        TC_LOG_DEBUG("sql.sql", "[{} ms] SQL(p): {}", getMSTimeDiff(_s, getMSTime()), m_mStmt->getQueryString());
         m_mStmt->ClearParameters();
-        return false;
+        return true;
     }
-
-    if (mysql_stmt_execute(msql_STMT))
-    {
-        uint32 lErrno = mysql_errno(m_Mysql);
-        TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
-
-        if (_HandleMySQLErrno(lErrno))  // If it returns true, an error was handled successfully (i.e. reconnection)
-            return Execute(stmt);       // Try again
-
-        m_mStmt->ClearParameters();
-        return false;
-    }
-
-    TC_LOG_DEBUG("sql.sql", "[{} ms] SQL(p): {}", getMSTimeDiff(_s, getMSTime()), m_mStmt->getQueryString());
-
-    m_mStmt->ClearParameters();
-    return true;
 }
 
 bool MySQLConnection::_Query(PreparedStatementBase* stmt, MySQLPreparedStatement** mysqlStmt, MySQLResult** pResult, uint64* pRowCount, uint32* pFieldCount)
 {
-    if (!m_Mysql)
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     uint32 index = stmt->GetIndex();
 
-    MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
-    ASSERT(m_mStmt);            // Can only be null if preparation failed, server side error or bad query
-
-    m_mStmt->BindParameters(stmt);
-    *mysqlStmt = m_mStmt;
-
-    MYSQL_STMT* msql_STMT = m_mStmt->GetSTMT();
-    MYSQL_BIND* msql_BIND = m_mStmt->GetBind();
-
     uint32 _s = getMSTime();
 
-    if (mysql_bind_param_no_deprecated(msql_STMT, msql_BIND))
+    // bounded retries with statement refetch - handles are invalid after a
+    // reconnection, and retry-via-recursion can stack overflow on a server
+    // that reconnects but keeps dropping queries
+    for (uint8 retries = 0; ; )
     {
-        uint32 lErrno = mysql_errno(m_Mysql);
-        TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+        MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
+        // can be null after a failed (re-)prepare - skip instead of crashing
+        if (!m_mStmt)
+            return false;
 
-        if (_HandleMySQLErrno(lErrno))  // If it returns true, an error was handled successfully (i.e. reconnection)
-            return _Query(stmt, mysqlStmt, pResult, pRowCount, pFieldCount);       // Try again
+        m_mStmt->BindParameters(stmt);
+        *mysqlStmt = m_mStmt;
 
+        MYSQL_STMT* msql_STMT = m_mStmt->GetSTMT();
+        MYSQL_BIND* msql_BIND = m_mStmt->GetBind();
+
+        if (mysql_bind_param_no_deprecated(msql_STMT, msql_BIND))
+        {
+            uint32 lErrno = mysql_errno(m_Mysql);
+            TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}", m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+
+            if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            {
+                m_mStmt->ClearParameters();
+                return false;
+            }
+
+            continue;
+        }
+
+        if (mysql_stmt_execute(msql_STMT))
+        {
+            uint32 lErrno = mysql_errno(m_Mysql);
+            TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}",
+                m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
+
+            if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            {
+                m_mStmt->ClearParameters();
+                return false;
+            }
+
+            continue;
+        }
+
+        TC_LOG_DEBUG("sql.sql", "[{} ms] SQL(p): {}", getMSTimeDiff(_s, getMSTime()), m_mStmt->getQueryString());
         m_mStmt->ClearParameters();
-        return false;
+
+        *pResult = reinterpret_cast<MySQLResult*>(mysql_stmt_result_metadata(msql_STMT));
+        *pRowCount = mysql_stmt_num_rows(msql_STMT);
+        *pFieldCount = mysql_stmt_field_count(msql_STMT);
+
+        return true;
     }
-
-    if (mysql_stmt_execute(msql_STMT))
-    {
-        uint32 lErrno = mysql_errno(m_Mysql);
-        TC_LOG_ERROR("sql.sql", "SQL(p): {}\n [ERROR]: [{}] {}",
-            m_mStmt->getQueryString(), lErrno, mysql_stmt_error(msql_STMT));
-
-        if (_HandleMySQLErrno(lErrno))  // If it returns true, an error was handled successfully (i.e. reconnection)
-            return _Query(stmt, mysqlStmt, pResult, pRowCount, pFieldCount);      // Try again
-
-        m_mStmt->ClearParameters();
-        return false;
-    }
-
-    TC_LOG_DEBUG("sql.sql", "[{} ms] SQL(p): {}", getMSTimeDiff(_s, getMSTime()), m_mStmt->getQueryString());
-
-    m_mStmt->ClearParameters();
-
-    *pResult = reinterpret_cast<MySQLResult*>(mysql_stmt_result_metadata(msql_STMT));
-    *pRowCount = mysql_stmt_num_rows(msql_STMT);
-    *pFieldCount = mysql_stmt_field_count(msql_STMT);
-
-    return true;
 }
 
 ResultSet* MySQLConnection::Query(char const* sql)
@@ -352,29 +386,31 @@ ResultSet* MySQLConnection::Query(char const* sql)
 
 bool MySQLConnection::_Query(const char* sql, MySQLResult** pResult, MySQLField** pFields, uint64* pRowCount, uint32* pFieldCount)
 {
-    if (!m_Mysql)
-        return false;
-
+    // bounded retries - see Execute(): recursion on reconnect-success can
+    // overflow the call stack on a flapping server
+    for (uint8 retries = 0; ; )
     {
+        if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
+            return false;
+
         uint32 _s = getMSTime();
 
-        if (mysql_query(m_Mysql, sql))
+        if (!mysql_query(m_Mysql, sql))
         {
-            uint32 lErrno = mysql_errno(m_Mysql);
-            TC_LOG_INFO("sql.sql", "SQL: {}", sql);
-            TC_LOG_ERROR("sql.sql", "[{}] {}", lErrno, mysql_error(m_Mysql));
-
-            if (_HandleMySQLErrno(lErrno))      // If it returns true, an error was handled successfully (i.e. reconnection)
-                return _Query(sql, pResult, pFields, pRowCount, pFieldCount);    // We try again
-
-            return false;
-        }
-        else
             TC_LOG_DEBUG("sql.sql", "[{} ms] SQL: {}", getMSTimeDiff(_s, getMSTime()), sql);
 
-        *pResult = reinterpret_cast<MySQLResult*>(mysql_store_result(m_Mysql));
-        *pRowCount = mysql_affected_rows(m_Mysql);
-        *pFieldCount = mysql_field_count(m_Mysql);
+            *pResult = reinterpret_cast<MySQLResult*>(mysql_store_result(m_Mysql));
+            *pRowCount = mysql_affected_rows(m_Mysql);
+            *pFieldCount = mysql_field_count(m_Mysql);
+            break;
+        }
+
+        uint32 lErrno = mysql_errno(m_Mysql);
+        TC_LOG_INFO("sql.sql", "SQL: {}", sql);
+        TC_LOG_ERROR("sql.sql", "[{}] {}", lErrno, mysql_error(m_Mysql));
+
+        if (++retries > 1 || !_HandleMySQLErrno(lErrno))
+            return false;
     }
 
     if (!*pResult )
@@ -441,11 +477,20 @@ size_t MySQLConnection::EscapeString(char* to, const char* from, size_t length)
 
 void MySQLConnection::Ping()
 {
+    // the KeepAlive timer fires regardless of connection health - mysql_ping
+    // on a null handle crashes, and a lost connection is real until the next
+    // query reconnects it
+    if (!m_Mysql)
+        return;
+
     mysql_ping(m_Mysql);
 }
 
 uint32 MySQLConnection::GetLastError()
 {
+    if (!m_Mysql)
+        return CR_SERVER_GONE_ERROR;
+
     return mysql_errno(m_Mysql);
 }
 
@@ -564,17 +609,48 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
         {
             TC_LOG_INFO("sql.sql", "Attempting to reconnect to the MySQL server...");
 
+            // Reconnect attempts on the synchronous connection run on the world
+            // thread; each attempt costs a connect timeout + 3s sleep, and the
+            // full series can exceed the FreezeDetector limit and crash the
+            // server while MySQL is down. Cap retries on the sync connection;
+            // async worker threads have their own time budget.
+            if (!(m_connectionFlags & CONNECTION_ASYNC))
+            {
+                if (attempts > 1)
+                    attempts = 1;
+
+                // after a full failure series, fail subsequent queries fast for
+                // a while instead of paying a connect timeout on every single
+                // sync query (an unreachable MySQL turns that into permanent
+                // world-thread starvation -> FreezeDetector abort)
+                uint32 now = getMSTime();
+                if (m_reconnectFailUntilMs && now < m_reconnectFailUntilMs)
+                {
+                    TC_LOG_ERROR("sql.sql", "MySQL is unreachable - failing this query fast and retrying with the next ones.");
+                    return false;
+                }
+            }
+
             m_reconnecting = true;
 
             uint32 const lErrno = Open();
             if (!lErrno)
             {
+                // otherwise a prepare error from a previous transient failure
+                // would keep PrepareStatements() failing forever
+                m_prepareError = false;
+
                 // Don't remove 'this' pointer unless you want to skip loading all prepared statements...
                 if (!this->PrepareStatements())
                 {
-                    TC_LOG_FATAL("sql.sql", "Could not re-prepare statements!");
-                    std::this_thread::sleep_for(std::chrono::seconds(10));
-                    ABORT();
+                    // Aborting the worldserver over a broken re-connection kills
+                    // everyone online - drop the connection instead and let the
+                    // next query retry the whole open+prepare cycle.
+                    TC_LOG_ERROR("sql.sql", "Could not re-prepare statements after reconnect! Dropping the connection; will retry on the next query.");
+                    mysql_close(m_Mysql);
+                    m_Mysql = nullptr;
+                    m_reconnecting = false;
+                    return false;
                 }
 
                 TC_LOG_INFO("sql.sql", "Successfully reconnected to {} @{}:{} ({}).",
@@ -582,19 +658,20 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
                         (m_connectionFlags & CONNECTION_ASYNC) ? "asynchronous" : "synchronous");
 
                 m_reconnecting = false;
+                m_reconnectFailUntilMs = 0;
                 return true;
             }
 
             if ((--attempts) == 0)
             {
-                // Shut down the server when the mysql server isn't
-                // reachable for some time
-                TC_LOG_FATAL("sql.sql", "Failed to reconnect to the MySQL server, "
-                             "terminating the server to prevent data corruption!");
-
-                // We could also initiate a shutdown through using std::raise(SIGTERM)
-                std::this_thread::sleep_for(std::chrono::seconds(10));
-                ABORT();
+                // Keep the worldserver alive when MySQL is unreachable: skip this
+                // query and keep retrying on the following ones instead of
+                // aborting the whole server. Loudly logged so an outage is visible.
+                TC_LOG_ERROR("sql.sql", "Failed to reconnect to the MySQL server! Skipping this query; the server keeps running and retries on the next query. Check that MySQL is reachable.");
+                m_reconnecting = false;
+                if (!(m_connectionFlags & CONNECTION_ASYNC))
+                    m_reconnectFailUntilMs = getMSTime() + 60000; // cool down: fail fast for a minute
+                return false;
             }
             else
             {
@@ -612,17 +689,15 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
         case ER_DUP_ENTRY:
             return false;
 
-        // Outdated table or database structure - terminate core
+        // Outdated table or database structure - previously terminated the core;
+        // keep the server alive, skip the offending query and report loudly so
+        // a broken custom script/plugin does not drop every player.
         case ER_BAD_FIELD_ERROR:
         case ER_NO_SUCH_TABLE:
-            TC_LOG_ERROR("sql.sql", "Your database structure is not up to date. Please make sure you've executed all queries in the sql/updates folders.");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            ABORT();
+            TC_LOG_ERROR("sql.sql", "Schema mismatch in a query (errno {}): missing table/column. The query was skipped; fix the offending code or run the missing sql/updates. Server stays up.", errNo);
             return false;
         case ER_PARSE_ERROR:
-            TC_LOG_ERROR("sql.sql", "Error while parsing SQL. Core fix required.");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            ABORT();
+            TC_LOG_ERROR("sql.sql", "SQL parse error in a query (usually an unescaped string from custom code). The query was skipped; fix the offending code. Server stays up.");
             return false;
         default:
             TC_LOG_ERROR("sql.sql", "Unhandled MySQL errno {}. Unexpected behaviour possible.", errNo);

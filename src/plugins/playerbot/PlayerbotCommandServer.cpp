@@ -5,6 +5,10 @@
 #include "PlayerbotCommandServer.h"
 #include <cstdlib>
 #include <iostream>
+#include <condition_variable>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <boost/bind.hpp>
 #include <boost/smart_ptr.hpp>
 #include <boost/asio.hpp>
@@ -14,6 +18,59 @@
 using namespace std;
 using boost::asio::ip::tcp;
 typedef boost::shared_ptr<tcp::socket> socket_ptr;
+
+namespace
+{
+    // Remote commands are produced by the per-connection worker threads and
+    // consumed on the world thread only: executing RandomPlayerbotMgr lookups,
+    // AI context value access and player reads from arbitrary threads races the
+    // world update and can corrupt/destroy shared core structures.
+    struct RemoteCommandRequest
+    {
+        string line;
+        string response;
+        bool done = false;
+    };
+
+    mutex g_remoteMutex;
+    condition_variable g_remoteCond;
+    deque<shared_ptr<RemoteCommandRequest> > g_remoteQueue;
+}
+
+void PlayerbotCommandServer::ProcessPending()
+{
+    vector<shared_ptr<RemoteCommandRequest> > batch;
+    {
+        lock_guard<mutex> guard(g_remoteMutex);
+        while (!g_remoteQueue.empty())
+        {
+            batch.push_back(g_remoteQueue.front());
+            g_remoteQueue.pop_front();
+        }
+    }
+
+    if (batch.empty())
+        return;
+
+    for (shared_ptr<RemoteCommandRequest> const& request : batch)
+    {
+        string response;
+        try
+        {
+            response = sRandomPlayerbotMgr.HandleRemoteCommand(request->line);
+        }
+        catch (...)
+        {
+            response = "internal error";
+        }
+
+        lock_guard<mutex> guard(g_remoteMutex);
+        request->response = response;
+        request->done = true;
+    }
+
+    g_remoteCond.notify_all();
+}
 
 bool ReadLine(socket_ptr sock, string* buffer, string* line)
 {
@@ -51,7 +108,21 @@ void session(socket_ptr sock)
     {
         string buffer, request;
         while (ReadLine(sock, &buffer, &request)) {
-            string response = sRandomPlayerbotMgr.HandleRemoteCommand(request) + "\n";
+            shared_ptr<RemoteCommandRequest> command = make_shared<RemoteCommandRequest>();
+            command->line = request;
+
+            {
+                lock_guard<mutex> guard(g_remoteMutex);
+                g_remoteQueue.push_back(command);
+            }
+
+            {
+                unique_lock<mutex> lock(g_remoteMutex);
+                if (!g_remoteCond.wait_for(lock, chrono::seconds(10), [&command] { return command->done; }))
+                    command->response = "busy - the world thread did not process the command in time";
+            }
+
+            string response = command->response + "\n";
             boost::asio::write(*sock, boost::asio::buffer(response.c_str(), response.size()));
             request = "";
         }

@@ -99,6 +99,7 @@ class TC_DATABASE_API MySQLConnection
         PreparedStatementContainer           m_stmts;         //!< PreparedStatements storage
         bool                                 m_reconnecting;  //!< Are we reconnecting?
         bool                                 m_prepareError;  //!< Was there any error while preparing statements?
+        uint32                               m_reconnectFailUntilMs = 0; //!< Sync connections fail fast until this time after a full reconnect failure
 
     private:
         bool _HandleMySQLErrno(uint32 errNo, uint8 attempts = 5);

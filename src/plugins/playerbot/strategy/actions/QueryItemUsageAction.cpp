@@ -151,6 +151,10 @@ void QueryItemUsageAction::QueryItemsUsage(ItemIds items)
     for (ItemIds::iterator i = items.begin(); i != items.end(); i++)
     {
         ItemTemplate const *item = sObjectMgr->GetItemTemplate(*i);
+        // skip item ids that have no template in this build's stores rather
+        // than dereferencing a null proto
+        if (!item)
+            continue;
         QueryItemUsage(item);
         QueryQuestItem(*i);
         QueryItemPrice(item);

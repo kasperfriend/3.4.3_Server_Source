@@ -122,7 +122,8 @@ void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
     Player* bot = GetPlayerBot(guid);
     if (bot)
     {
-        bot->GetPlayerbotAI()->TellMaster("Goodbye!");
+        if (PlayerbotAI* ai = bot->GetPlayerbotAI())
+            ai->TellMaster("Goodbye!");
         TC_LOG_INFO("playerbot",  "Bot {} logged out", bot->GetName());
         //bot->SaveToDB();
 
@@ -234,7 +235,7 @@ string PlayerbotHolder::ProcessBotCommand(string cmd, ObjectGuid guid, bool admi
     if (admin)
     {
         Player* bot = GetPlayerBot(guid);
-        if (!bot)
+        if (!bot || !bot->GetPlayerbotAI())
             return "bot not found";
 
         Player* master = bot->GetPlayerbotAI()->GetMaster();
@@ -301,6 +302,13 @@ bool PlayerbotMgr::HandlePlayerbotMgrCommand(ChatHandler* handler, char const* a
     }
 
     Player* player = m_session->GetPlayer();
+    if (!player)
+    {
+        handler->PSendSysMessage("You may only add bots from an in-game session");
+        handler->SetSentErrorMessage(true);
+        return false;
+    }
+
     PlayerbotMgr* mgr = player->GetPlayerbotMgr();
     if (!mgr)
     {
@@ -448,7 +456,11 @@ uint32 PlayerbotHolder::GetAccountId(string name)
 {
     uint32 accountId = 0;
 
-    QueryResult results = LoginDatabase.PQuery("SELECT id FROM account WHERE username = '{}'", name.c_str());
+    // name comes straight from a player chat command - a raw quote in it would
+    // produce a malformed query, and a SQL error aborts this server
+    LoginDatabase.EscapeString(name);
+
+    QueryResult results = LoginDatabase.PQuery("SELECT id FROM account WHERE username = '{}'", name);
     if(results)
     {
         Field* fields = results->Fetch();

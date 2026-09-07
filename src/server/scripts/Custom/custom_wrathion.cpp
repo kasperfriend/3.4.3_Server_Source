@@ -22,10 +22,13 @@ namespace
             {
                 if (Aura* aura = player->AddAura(uint32(spell), player))
                 {
-                    for (uint8 i = EFFECT_0; i <= EFFECT_1; ++i)
+                    // GetEffect() returns null for effect indexes the spell
+                    // does not have - a single-effect spell (like a plain XP
+                    // aura) would otherwise crash on the very first login
+                    for (uint8 i = EFFECT_0; i < MAX_SPELL_EFFECTS; ++i)
                     {
-                        AuraEffect* xp = aura->GetEffect(i);
-                        xp->SetAmount(xp->GetBaseAmount());
+                        if (AuraEffect* xp = aura->GetEffect(i))
+                            xp->SetAmount(xp->GetBaseAmount());
                     }
                 }
             }

@@ -22,6 +22,10 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
 {
     SetNextCheckDelay(sPlayerbotAIConfig.randomBotUpdateInterval * 1000);
 
+    // answer remote command-server requests queued by its worker threads -
+    // those threads must never touch world objects themselves
+    sPlayerbotCommandServer.ProcessPending();
+
     if (!sPlayerbotAIConfig.randomBotAutologin || !sPlayerbotAIConfig.enabled)
         return;
 
@@ -38,17 +42,39 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     list<uint32> bots = GetBots();
     int botCount = bots.size();
     int randomBotsPerInterval = (int)urand(sPlayerbotAIConfig.minRandomBotsPerInterval, sPlayerbotAIConfig.maxRandomBotsPerInterval);
-    if (!processTicks)
+    if (sPlayerbotAIConfig.randomBotLoginAtStartup && processTicks < 10)
     {
-        if (sPlayerbotAIConfig.randomBotLoginAtStartup)
-            randomBotsPerInterval = bots.size();
+        // spread the startup population push over the first ~10 ticks at 10x
+        // the configured interval rate (bounded): every ProcessBot loads a
+        // character on the world thread, and logging in the whole population
+        // in a single tick stalls long enough for the FreezeDetector to kill
+        // the server when RandomBotLoginAtStartup is on
+        randomBotsPerInterval *= 10;
+        if (randomBotsPerInterval > 100)
+            randomBotsPerInterval = 100;
     }
+    // processTicks was initialised but never incremented, making the startup
+    // branch above fire on EVERY tick - every tick processed the whole bot list
+    if (processTicks < 1000)
+        ++processTicks;
 
-    while (botCount++ < maxAllowedBotCount)
+    // resolve the free bots for this tick ONCE: AddRandomBot used to rescan the
+    // characters of every random account per bot added, i.e. accountCount x
+    // addedBots character queries in a single world tick (a FreezeDetector trip
+    // at startup with a large MaxRandomBots)
+    vector<uint32> freeAllianceBots = GetFreeBots(true);
+    vector<uint32> freeHordeBots = GetFreeBots(false);
+
+    int addsThisTick = 0;
+    while (botCount++ < maxAllowedBotCount && addsThisTick < 200)
     {
         bool alliance = botCount % 2;
-        uint32 bot = AddRandomBot(alliance);
-        if (bot) bots.push_back(bot);
+        uint32 bot = AddRandomBot(alliance ? freeAllianceBots : freeHordeBots);
+        if (bot)
+        {
+            bots.push_back(bot);
+            ++addsThisTick;
+        }
         else break;
     }
 
@@ -69,14 +95,15 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     PrintStats();
 }
 
-uint32 RandomPlayerbotMgr::AddRandomBot(bool alliance)
+uint32 RandomPlayerbotMgr::AddRandomBot(vector<uint32>& bots)
 {
-    vector<uint32> bots = GetFreeBots(alliance);
-    if (bots.size() == 0)
+    if (bots.empty())
         return 0;
 
     int index = urand(0, bots.size() - 1);
     uint32 bot = bots[index];
+    // the chosen bot is no longer free - do not offer it again this tick
+    bots.erase(bots.begin() + index);
     SetEventValue(bot, "add", 1, urand(sPlayerbotAIConfig.minRandomBotInWorldTime, sPlayerbotAIConfig.maxRandomBotInWorldTime));
     uint32 randomTime = 30 + urand(sPlayerbotAIConfig.randomBotUpdateInterval, sPlayerbotAIConfig.randomBotUpdateInterval * 3);
     ScheduleRandomize(bot, randomTime);
@@ -140,7 +167,9 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
             TC_LOG_INFO("playerbot",  "Setting dead flag for bot {}", bot);
             uint32 randomTime = urand(sPlayerbotAIConfig.minRandomBotReviveTime, sPlayerbotAIConfig.maxRandomBotReviveTime);
             SetEventValue(bot, "dead", 1, randomTime);
-            SetEventValue(bot, "revive", 1, randomTime - 60);
+            // guard the -60 offset: a revive time below 60 would wrap the uint32
+            // validIn around 4 billion seconds and the bot would never revive
+            SetEventValue(bot, "revive", 1, randomTime > 60 ? randomTime - 60 : 1);
             return false;
         }
 
@@ -254,44 +283,123 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
 {
     TC_LOG_INFO("playerbot",  "Preparing location to random teleporting bot {} for level {}", bot->GetName().c_str(), bot->GetLevel());
 
-    if (locsPerLevelCache[bot->GetLevel()].empty()) {
-        QueryResult results = WorldDatabase.PQuery("select map, position_x, position_y, position_z "
-            "from (select map, position_x, position_y, position_z, avg(t.maxlevel), avg(t.minlevel), "
-            "{} - (avg(t.maxlevel) + avg(t.minlevel)) / 2 delta "
-            "from creature c inner join creature_template t on c.id = t.entry group by t.entry) q "
-            "where delta >= 0 and delta <= {} and map in ({}) and not exists ( "
-            "select map, position_x, position_y, position_z from "
-            "("
-            "select map, c.position_x, c.position_y, c.position_z, avg(t.maxlevel), avg(t.minlevel), "
-            "{} - (avg(t.maxlevel) + avg(t.minlevel)) / 2 delta "
-            "from creature c "
-            "inner join creature_template t on c.id = t.entry group by t.entry "
-            ") q1 "
-            "where delta > {} and q1.map = q.map "
-            "and sqrt("
-            "(q1.position_x - q.position_x)*(q1.position_x - q.position_x) +"
-            "(q1.position_y - q.position_y)*(q1.position_y - q.position_y) +"
-            "(q1.position_z - q.position_z)*(q1.position_z - q.position_z)"
-            ") < {})",
-            bot->GetLevel(),
-            sPlayerbotAIConfig.randomBotTeleLevel,
-            sPlayerbotAIConfig.randomBotMapsAsString.c_str(),
-            bot->GetLevel(),
-            sPlayerbotAIConfig.randomBotTeleLevel,
-            (uint32)sPlayerbotAIConfig.sightDistance
-            );
+    // levels are tried exactly once per server run: an empty candidate list
+    // must not re-run the full creature scan on every teleport of a bot with
+    // that level
+    static set<uint8> teleLevelsTried;
+
+    if (locsPerLevelCache[bot->GetLevel()].empty() && !teleLevelsTried.count(bot->GetLevel()))
+    {
+        teleLevelsTried.insert(bot->GetLevel());
+
+        // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
+        // creature_template has no minlevel/maxlevel columns in this schema.
+        // Scan every creature spawn of the configured maps in ONE query and do
+        // the neighbourhood filtering below in memory: the old SQL correlated a
+        // NOT EXISTS / sqrt() subquery over a full derived creature table once
+        // per row, which could stall the world thread for minutes on the first
+        // teleport (FreezeDetector abort).
+        struct SpawnPoint
+        {
+            uint16 map;
+            float x, y, z;
+            float avgLevel;
+        };
+
+        vector<SpawnPoint> spawns;
+        QueryResult results = WorldDatabase.PQuery(
+                "select c.map, c.position_x, c.position_y, c.position_z, (avg(d.MinLevel) + avg(d.MaxLevel)) / 2 "
+                "from creature c inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 "
+                "where c.map in ({}) group by c.map, c.guid",
+                sPlayerbotAIConfig.randomBotMapsAsString.c_str());
         if (results)
         {
             do
             {
                 Field* fields = results->Fetch();
-                uint16 mapId = fields[0].GetUInt16();
-                float x = fields[1].GetFloat();
-                float y = fields[2].GetFloat();
-                float z = fields[3].GetFloat();
-                WorldLocation loc(mapId, x, y, z, 0);
-                locsPerLevelCache[bot->GetLevel()].push_back(loc);
+                // the AVG expression comes back as DECIMAL - read it as double
+                SpawnPoint point =
+                {
+                    fields[0].GetUInt16(),
+                    fields[1].GetFloat(),
+                    fields[2].GetFloat(),
+                    fields[3].GetFloat(),
+                    static_cast<float>(fields[4].GetDouble())
+                };
+                spawns.push_back(point);
             } while (results->NextRow());
+        }
+
+        if (!spawns.empty())
+        {
+            uint32 botLevel = bot->GetLevel();
+            float maxDelta = static_cast<float>(sPlayerbotAIConfig.randomBotTeleLevel);
+            float maxDist = sPlayerbotAIConfig.sightDistance;
+            float maxDistSq = maxDist * maxDist;
+
+            // bucket the "dangerous" spawns (much lower level than the bot,
+            // mirroring the old delta > RandomBotTeleLevel NOT EXISTS clause)
+            // into a per-map grid with cell size = sight distance, so each
+            // candidate only checks the 27 cells around its own cell
+            float cellSize = maxDist > 0.0f ? maxDist : 50.0f;
+            map<uint16, map<uint64, vector<size_t> > > dangers;
+            for (size_t i = 0; i < spawns.size(); ++i)
+            {
+                SpawnPoint const& point = spawns[i];
+                if (static_cast<float>(botLevel) - point.avgLevel <= maxDelta)
+                    continue;
+
+                int32 cx = static_cast<int32>(point.x / cellSize);
+                int32 cy = static_cast<int32>(point.y / cellSize);
+                int32 cz = static_cast<int32>(point.z / cellSize);
+                uint64 key = (uint64(uint32(cx + (1 << 20))) << 42)
+                        | (uint64(uint32(cy + (1 << 20))) << 21)
+                        | uint64(uint32(cz + (1 << 20)));
+                dangers[point.map][key].push_back(i);
+            }
+
+            for (SpawnPoint const& point : spawns)
+            {
+                float delta = static_cast<float>(botLevel) - point.avgLevel;
+                if (delta < 0.0f || delta > maxDelta)
+                    continue;
+
+                map<uint64, vector<size_t> >& mapDangers = dangers[point.map];
+                bool nearDanger = false;
+                if (!mapDangers.empty())
+                {
+                    int32 cx = static_cast<int32>(point.x / cellSize);
+                    int32 cy = static_cast<int32>(point.y / cellSize);
+                    int32 cz = static_cast<int32>(point.z / cellSize);
+                    for (int32 dx = -1; dx <= 1 && !nearDanger; ++dx)
+                    for (int32 dy = -1; dy <= 1 && !nearDanger; ++dy)
+                    for (int32 dz = -1; dz <= 1; ++dz)
+                    {
+                        uint64 key = (uint64(uint32(cx + dx + (1 << 20))) << 42)
+                                | (uint64(uint32(cy + dy + (1 << 20))) << 21)
+                                | uint64(uint32(cz + dz + (1 << 20)));
+                        map<uint64, vector<size_t> >::iterator cell = mapDangers.find(key);
+                        if (cell == mapDangers.end())
+                            continue;
+
+                        for (size_t idx : cell->second)
+                        {
+                            SpawnPoint const& danger = spawns[idx];
+                            float distSq = (danger.x - point.x) * (danger.x - point.x)
+                                    + (danger.y - point.y) * (danger.y - point.y)
+                                    + (danger.z - point.z) * (danger.z - point.z);
+                            if (distSq < maxDistSq)
+                            {
+                                nearDanger = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!nearDanger)
+                    locsPerLevelCache[bot->GetLevel()].push_back(WorldLocation(point.map, point.x, point.y, point.z, 0.0f));
+            }
         }
     }
 
@@ -403,10 +511,32 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
 {
     uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
 
+    // A creature-table scan per bot teleport is heavy and creature levels do
+    // not change at runtime: cache the computed (min,max) per map area grid for
+    // the whole server run (sentinel max=0 means "no creatures in that area")
+    static std::map<uint64, uint64> zoneLevelCache;
+    uint64 levelKey = (uint64(mapId) << 44)
+            | (uint64((int32(teleY) / 64) + (1 << 21)) << 22)
+            | uint64((int32(teleX) / 64) + (1 << 21));
+    std::map<uint64, uint64>::iterator cached = zoneLevelCache.find(levelKey);
+    if (cached != zoneLevelCache.end())
+    {
+        uint32 cachedMin = uint32(cached->second >> 32);
+        uint32 cachedMax = uint32(cached->second);
+        if (!cachedMax)
+            return urand(1, maxLevel);
+
+        uint32 cachedLevel = urand(cachedMin, cachedMax);
+        return cachedLevel > maxLevel ? maxLevel : cachedLevel;
+    }
+
 	uint32 level;
-    QueryResult results = WorldDatabase.PQuery("select avg(t.minlevel) minlevel, avg(t.maxlevel) maxlevel from creature c "
-            "inner join creature_template t on c.id = t.entry "
-            "where map = '{}' and minlevel > 1 and abs(position_x - '{}') < '{}' and abs(position_y - '{}') < '{}'",
+    // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
+    // creature_template has no minlevel/maxlevel columns in this schema - querying them
+    // raises ER_BAD_FIELD_ERROR which ABORTs the server
+    QueryResult results = WorldDatabase.PQuery("select avg(d.MinLevel) minlevel, avg(d.MaxLevel) maxlevel from creature c "
+            "inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 "
+            "where c.map = '{}' and d.MinLevel > 1 and abs(c.position_x - '{}') < '{}' and abs(c.position_y - '{}') < '{}'",
             mapId, teleX, sPlayerbotAIConfig.randomBotTeleportDistance / 2, teleY, sPlayerbotAIConfig.randomBotTeleportDistance / 2);
 
     if (results)
@@ -416,20 +546,29 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
         // reading such a field is undefined - fall through to the random level
         if (fields && !fields[0].IsNull() && !fields[1].IsNull())
         {
-            uint8 minLevel = fields[0].GetUInt8();
-            uint8 maxLevel = fields[1].GetUInt8();
-            if (minLevel > maxLevel)
-                std::swap(minLevel, maxLevel);
+            // AVG() comes back as DECIMAL - read it as double; GetUInt8() on a fractional
+            // value trips the Field truncation assert and crashes the server
+            uint32 minLevel = static_cast<uint32>(fields[0].GetDouble());
+            uint32 maxZoneLevel = static_cast<uint32>(fields[1].GetDouble());
+            if (!minLevel)
+                minLevel = 1;
+            if (maxZoneLevel < minLevel)
+                maxZoneLevel = minLevel;
 
-            level = urand(minLevel, maxLevel);
+            zoneLevelCache[levelKey] = (uint64(minLevel) << 32) | maxZoneLevel;
+            level = urand(minLevel, maxZoneLevel);
             if (level > maxLevel)
                 level = maxLevel;
         }
         else
+        {
+            zoneLevelCache[levelKey] = 0;
             level = urand(1, maxLevel);
+        }
     }
     else
     {
+        zoneLevelCache[levelKey] = 0;
         level = urand(1, maxLevel);
     }
 

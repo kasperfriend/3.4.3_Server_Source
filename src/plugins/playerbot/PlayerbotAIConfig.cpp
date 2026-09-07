@@ -3,8 +3,205 @@
 #include "playerbot.h"
 #include "RandomPlayerbotFactory.h"
 #include "Accounts/AccountMgr.h"
+#include "../../server/database/Database/DatabaseEnv.h"
 
 using namespace std;
+
+namespace
+{
+    // Column spec: name + full definition as written in
+    // sql/custom/playerbot/characters_playerbot.sql
+    struct BotTableColumn
+    {
+        char const* name;
+        char const* definition;
+    };
+
+    struct BotTableSpec
+    {
+        char const* name;
+        char const* createSql;
+        BotTableColumn const* columns;
+        size_t columnCount;
+        char const* primaryKeyDef;   // e.g. "(`owner`, `bot`, `event`)" or null
+    };
+
+    // Ensures every ai_playerbot_* table exists and has all columns the code
+    // expects. CREATE TABLE IF NOT EXISTS alone can never extend a table that
+    // already exists, so installs that came from older ai_playerbot_* dumps
+    // keep missing columns (e.g. `gender` in ai_playerbot_names, `owner` in
+    // the event tables) forever - every query against them then fails at BEST
+    // (and used to abort the server). Create missing tables, add missing
+    // columns and repair a missing primary key; anything that cannot be added
+    // (e.g. a PK that would collapse duplicate legacy rows) is logged as an
+    // error instead of crashing.
+    void EnsureBotTable(BotTableSpec const& spec)
+    {
+        CharacterDatabase.PExecute("{}", spec.createSql);
+
+        for (size_t i = 0; i < spec.columnCount; ++i)
+        {
+            BotTableColumn const& column = spec.columns[i];
+            QueryResult exists = CharacterDatabase.PQuery(
+                    "SELECT 1 FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{}' AND COLUMN_NAME = '{}'",
+                    spec.name, column.name);
+            // a successful but empty result means the column is missing
+            if (exists && exists->GetRowCount())
+                continue;
+
+            TC_LOG_ERROR("playerbot",
+                    "Playerbot table `{}` is missing the `{}` column - adding it",
+                    spec.name, column.name);
+            CharacterDatabase.PExecute("ALTER TABLE `{}` ADD COLUMN {} {}", spec.name, column.name, column.definition);
+        }
+
+        if (!spec.primaryKeyDef)
+            return;
+
+        QueryResult hasPk = CharacterDatabase.PQuery(
+                "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{}' AND CONSTRAINT_TYPE = 'PRIMARY KEY'",
+                spec.name);
+        if (hasPk && hasPk->GetRowCount())
+            return;
+
+        TC_LOG_ERROR("playerbot", "Playerbot table `{}` has no primary key - adding one", spec.name);
+        CharacterDatabase.PExecute("ALTER TABLE `{}` ADD PRIMARY KEY {}", spec.name, spec.primaryKeyDef);
+    }
+
+    void EnsureBotTables()
+    {
+        static BotTableColumn const randomBotsColumns[] =
+        {
+            { "owner",   "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "bot",     "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "time",    "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "validIn", "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "event",   "VARCHAR(64) NOT NULL DEFAULT ''" },
+            { "value",   "INT UNSIGNED NOT NULL DEFAULT 0" },
+        };
+
+        static BotTableColumn const namesColumns[] =
+        {
+            { "name_id", "INT UNSIGNED NOT NULL AUTO_INCREMENT" },
+            { "name",    "VARCHAR(12) NOT NULL" },
+            { "gender",  "TINYINT UNSIGNED NOT NULL DEFAULT 0" },
+        };
+
+        static BotTableColumn const guildNamesColumns[] =
+        {
+            { "name_id", "INT UNSIGNED NOT NULL AUTO_INCREMENT" },
+            { "name",    "VARCHAR(24) NOT NULL" },
+        };
+
+        static BotTableColumn const guildTasksColumns[] =
+        {
+            { "owner",   "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "guildid", "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "time",    "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "validIn", "INT UNSIGNED NOT NULL DEFAULT 0" },
+            { "type",    "VARCHAR(32) NOT NULL DEFAULT ''" },
+            { "value",   "INT UNSIGNED NOT NULL DEFAULT 0" },
+        };
+
+        static BotTableColumn const speechColumns[] =
+        {
+            { "id",   "INT UNSIGNED NOT NULL AUTO_INCREMENT" },
+            { "name", "VARCHAR(64) NOT NULL" },
+            { "text", "VARCHAR(255) NOT NULL" },
+            { "type", "VARCHAR(16) NOT NULL DEFAULT 'say'" },
+        };
+
+        static BotTableColumn const speechProbabilityColumns[] =
+        {
+            { "name",        "VARCHAR(64) NOT NULL" },
+            { "probability", "INT UNSIGNED NOT NULL DEFAULT 0" },
+        };
+
+        static BotTableColumn const customStrategyColumns[] =
+        {
+            { "name",        "VARCHAR(64) NOT NULL" },
+            { "action_line", "VARCHAR(255) NOT NULL" },
+        };
+
+        static BotTableSpec const tables[] =
+        {
+            { "ai_playerbot_random_bots",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_random_bots` ("
+                "`owner` INT UNSIGNED NOT NULL DEFAULT 0, `bot` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`time` INT UNSIGNED NOT NULL DEFAULT 0, `validIn` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`event` VARCHAR(64) NOT NULL DEFAULT '', `value` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "PRIMARY KEY (`owner`, `bot`, `event`), KEY `idx_event` (`event`), KEY `idx_bot` (`bot`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                randomBotsColumns, sizeof(randomBotsColumns) / sizeof(randomBotsColumns[0]), "(`owner`, `bot`, `event`)" },
+            { "ai_playerbot_names",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_names` ("
+                "`name_id` INT UNSIGNED NOT NULL AUTO_INCREMENT, `name` VARCHAR(12) NOT NULL,"
+                "`gender` TINYINT UNSIGNED NOT NULL DEFAULT 0,"
+                "PRIMARY KEY (`name_id`), UNIQUE KEY `idx_name` (`name`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                namesColumns, sizeof(namesColumns) / sizeof(namesColumns[0]), nullptr },
+            { "ai_playerbot_guild_names",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_guild_names` ("
+                "`name_id` INT UNSIGNED NOT NULL AUTO_INCREMENT, `name` VARCHAR(24) NOT NULL,"
+                "PRIMARY KEY (`name_id`), UNIQUE KEY `idx_name` (`name`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                guildNamesColumns, sizeof(guildNamesColumns) / sizeof(guildNamesColumns[0]), nullptr },
+            { "ai_playerbot_guild_tasks",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_guild_tasks` ("
+                "`owner` INT UNSIGNED NOT NULL DEFAULT 0, `guildid` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`time` INT UNSIGNED NOT NULL DEFAULT 0, `validIn` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`type` VARCHAR(32) NOT NULL DEFAULT '', `value` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "PRIMARY KEY (`owner`, `guildid`, `type`), KEY `idx_guild` (`guildid`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                guildTasksColumns, sizeof(guildTasksColumns) / sizeof(guildTasksColumns[0]), "(`owner`, `guildid`, `type`)" },
+            { "ai_playerbot_speech",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_speech` ("
+                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT, `name` VARCHAR(64) NOT NULL,"
+                "`text` VARCHAR(255) NOT NULL, `type` VARCHAR(16) NOT NULL DEFAULT 'say',"
+                "PRIMARY KEY (`id`), KEY `idx_name` (`name`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                speechColumns, sizeof(speechColumns) / sizeof(speechColumns[0]), nullptr },
+            { "ai_playerbot_speech_probability",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_speech_probability` ("
+                "`name` VARCHAR(64) NOT NULL, `probability` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "PRIMARY KEY (`name`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                speechProbabilityColumns, sizeof(speechProbabilityColumns) / sizeof(speechProbabilityColumns[0]), "(`name`)" },
+            { "ai_playerbot_custom_strategy",
+                "CREATE TABLE IF NOT EXISTS `ai_playerbot_custom_strategy` ("
+                "`name` VARCHAR(64) NOT NULL, `action_line` VARCHAR(255) NOT NULL,"
+                "PRIMARY KEY (`name`, `action_line`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                customStrategyColumns, sizeof(customStrategyColumns) / sizeof(customStrategyColumns[0]), "(`name`, `action_line`)" },
+        };
+
+        for (BotTableSpec const& table : tables)
+            EnsureBotTable(table);
+
+        // seed tables with the starter rows from characters_playerbot.sql so
+        // bots can be created even on a completely fresh install (synchronous:
+        // the rows must be present before CreateRandomBots runs below)
+        CharacterDatabase.PExecute(
+            "INSERT IGNORE INTO `ai_playerbot_names` (`name`) VALUES"
+            "('Aeltar'), ('Baldrin'), ('Cathmor'), ('Dornan'), ('Eldrik'), ('Faelan'),"
+            "('Gorvin'), ('Halbrik'), ('Ithran'), ('Jorlan'), ('Kelvar'), ('Lorwyn'),"
+            "('Mordak'), ('Nyrelle'), ('Orwin'), ('Perrin'), ('Quenna'), ('Rhogar'),"
+            "('Sylvara'), ('Torvald'), ('Ulther'), ('Varlen'), ('Wyndel'), ('Xanthe'),"
+            "('Yorik'), ('Zaltar'), ('Ashwyn'), ('Brannoc'), ('Cirien'), ('Draveth'),"
+            "('Elowen'), ('Fenwick'), ('Gwynor'), ('Harlow'), ('Isolde'), ('Jareth'),"
+            "('Kaelith'), ('Lyanna'), ('Merrick'), ('Norwyn'), ('Ondrel'), ('Pellan'),"
+            "('Rowena'), ('Selwyn'), ('Thalric'), ('Ulmara'), ('Verrik'), ('Wilrun'),"
+            "('Yalira'), ('Zeryth')");
+        CharacterDatabase.PExecute(
+            "INSERT IGNORE INTO `ai_playerbot_guild_names` (`name`) VALUES"
+            "('The Wandering Blades'), ('Sons of Lordaeron'), ('Emerald Vanguard'),"
+            "('Ashen Company'), ('Stormwatch'), ('The Silver Hand Irregulars'),"
+            "('Dawnbreakers'), ('Ironforge Regulars'), ('Nightfall Covenant'),"
+            "('The Last Caravan')");
+    }
+}
 
 PlayerbotAIConfig::PlayerbotAIConfig() : config(ConfigMgr::instance())
 {
@@ -16,8 +213,14 @@ void LoadList(string value, T &list)
     vector<string> ids = split(value, ',');
     for (vector<string>::iterator i = ids.begin(); i != ids.end(); i++)
     {
-        uint32 id = atoi((*i).c_str());
-        if (!id)
+        if (i->empty())
+            continue;
+
+        // only skip tokens that are not numbers at all: 0 is a legal id here
+        // (map 0 = Eastern Kingdoms in AiPlayerbot.RandomBotMaps = "0,1,530,571")
+        char* end = nullptr;
+        uint32 id = strtoul(i->c_str(), &end, 10);
+        if (end == i->c_str())
             continue;
 
         list.push_back(id);
@@ -41,6 +244,12 @@ bool PlayerbotAIConfig::Initialize()
         TC_LOG_INFO("playerbot",  "AI Playerbot is Disabled in aiplayerbot.conf");
         return false;
     }
+
+    // self-heal the ai_playerbot_* tables before anything queries them:
+    // create missing tables, add columns that older ai_playerbot_* dumps are
+    // missing (IF NOT EXISTS scripts can never upgrade existing tables), and
+    // seed the starter name pools on a fresh install
+    EnsureBotTables();
 
     globalCoolDown = (uint32) config->GetIntDefault("AiPlayerbot.GlobalCooldown", 500);
     maxWaitForMove = config->GetIntDefault("AiPlayerbot.MaxWaitForMove", 3000);
@@ -136,6 +345,54 @@ bool PlayerbotAIConfig::Initialize()
     maxGuildTaskAdvertisementTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskAdvertisementTime", 4 * 24 * 3600);
     minGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MinGuildTaskRewardTime", 60);
     maxGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskRewardTime", 600);
+
+    // An inverted min/max pair from the config would eventually reach
+    // urand(min, max) with max < min, whose ASSERT(max >= min) crashes the
+    // worldserver - validate every pair and swap inverted values instead of
+    // trusting the configuration file blindly
+    auto normalizeRange = [](const char* minName, const char* maxName, uint32& minValue, uint32& maxValue)
+    {
+        if (minValue > maxValue)
+        {
+            TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: configuration value {} ({}) is greater than {} ({}); swapping the two values",
+                    minName, minValue, maxName, maxValue);
+            uint32 temp = minValue;
+            minValue = maxValue;
+            maxValue = temp;
+        }
+    };
+
+    normalizeRange("AiPlayerbot.MinRandomBots", "AiPlayerbot.MaxRandomBots", minRandomBots, maxRandomBots);
+    normalizeRange("AiPlayerbot.RandomBotCountChangeMinInterval", "AiPlayerbot.RandomBotCountChangeMaxInterval",
+            randomBotCountChangeMinInterval, randomBotCountChangeMaxInterval);
+    normalizeRange("AiPlayerbot.MinRandomBotsPerInterval", "AiPlayerbot.MaxRandomBotsPerInterval",
+            minRandomBotsPerInterval, maxRandomBotsPerInterval);
+    normalizeRange("AiPlayerbot.MinRandomBotInWorldTime", "AiPlayerbot.MaxRandomBotInWorldTime",
+            minRandomBotInWorldTime, maxRandomBotInWorldTime);
+    normalizeRange("AiPlayerbot.MinRandomBotRandomizeTime", "AiPlayerbot.MaxRandomBotRandomizeTime",
+            minRandomBotRandomizeTime, maxRandomBotRandomizeTime);
+    normalizeRange("AiPlayerbot.MinRandomBotReviveTime", "AiPlayerbot.MaxRandomBotReviveTime",
+            minRandomBotReviveTime, maxRandomBotReviveTime);
+    normalizeRange("AiPlayerbot.MinRandomBotPvpTime", "AiPlayerbot.MaxRandomBotPvpTime",
+            minRandomBotPvpTime, maxRandomBotPvpTime);
+    normalizeRange("AiPlayerbot.MinRandomBotsPriceChangeInterval", "AiPlayerbot.MaxRandomBotsPriceChangeInterval",
+            minRandomBotsPriceChangeInterval, maxRandomBotsPriceChangeInterval);
+    normalizeRange("AiPlayerbot.RandomBotMinLevel", "AiPlayerbot.RandomBotMaxLevel", randomBotMinLevel, randomBotMaxLevel);
+    normalizeRange("AiPlayerbot.MinGuildTaskChangeTime", "AiPlayerbot.MaxGuildTaskChangeTime",
+            minGuildTaskChangeTime, maxGuildTaskChangeTime);
+    normalizeRange("AiPlayerbot.MinGuildTaskAdvertisementTime", "AiPlayerbot.MaxGuildTaskAdvertisementTime",
+            minGuildTaskAdvertisementTime, maxGuildTaskAdvertisementTime);
+    normalizeRange("AiPlayerbot.MinGuildTaskRewardTime", "AiPlayerbot.MaxGuildTaskRewardTime",
+            minGuildTaskRewardTime, maxGuildTaskRewardTime);
+
+    // used as a divisor in trigger/LFG probability rolls - zero (or a negative
+    // value) makes the division produce inf/garbage and undefined int casts
+    if (randomChangeMultiplier <= 0.0f)
+    {
+        TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: AiPlayerbot.RandomChangeMultiplier ({}) must be positive; using 1.0",
+                randomChangeMultiplier);
+        randomChangeMultiplier = 1.0f;
+    }
 
     RandomPlayerbotFactory::CreateRandomBots();
     TC_LOG_INFO("playerbot",  "AI Playerbot configuration loaded");
