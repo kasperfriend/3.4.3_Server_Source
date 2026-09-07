@@ -257,8 +257,10 @@ jobs:
           Copy-Item -Recurse -Force "sql\updates" "$DEST\sql\" -ErrorAction SilentlyContinue
 
           # --- Config ---
-          New-Item -ItemType Directory -Force "$DEST\etc\worldserver.conf.d" | Out-Null
-          Copy-Item "src\plugins\playerbot\aiplayerbot.conf.dist" "$DEST\etc\worldserver.conf.d\" -ErrorAction SilentlyContinue
+          # All playerbot defaults are in the main template moved above.
+          if (-not (Test-Path "$DEST\etc\worldserver.conf.dist")) {
+            throw "worldserver.conf.dist (including AI Playerbot settings) is missing from the install"
+          }
 
           # --- Docs ---
           New-Item -ItemType Directory -Force "$DEST\docs" | Out-Null
@@ -521,7 +523,7 @@ jobs:
           | **vmap4extractor.exe / vmap4assembler.exe** | Visibility map generation |
           | **mmaps_generator.exe** | Movement map (navmesh) generation |
           | **sql/** | Database schemas: base, create, custom (playerbot tables), updates |
-          | **etc/** | Server configuration including \`aiplayerbot.conf.dist\` |
+          | **etc/** | Server configuration including all AI settings in \`worldserver.conf.dist\` |
           | **docs/Playerbots.md** | Full AI playerbot documentation |
 
           ### Downloads

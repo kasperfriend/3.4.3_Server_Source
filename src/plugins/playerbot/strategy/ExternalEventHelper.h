@@ -41,7 +41,10 @@ namespace ai
         void HandlePacket(map<uint16, string> &handlers, const WorldPacket &packet, Player* owner = NULL)
         {
             uint16 opcode = packet.GetOpcode();
-            string name = handlers[opcode];
+            auto handler = handlers.find(opcode);
+            if (handler == handlers.end())
+                return;
+            string const& name = handler->second;
             if (name.empty())
                 return;
 
@@ -50,6 +53,8 @@ namespace ai
                 return;
 
             WorldPacket p(packet);
+            p.rpos(0);
+            p.ResetBitPos();
             trigger->ExternalEvent(p, owner);
         }
 

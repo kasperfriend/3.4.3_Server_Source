@@ -2,6 +2,9 @@
 #include "PlayerbotAIConfig.h"
 #include "playerbot.h"
 #include "RandomPlayerbotFactory.h"
+#include "../ahbot/AhBotConfig.h"
+#include <charconv>
+#include <limits>
 #include "Accounts/AccountMgr.h"
 #include "../../server/database/Database/DatabaseEnv.h"
 
@@ -208,40 +211,80 @@ PlayerbotAIConfig::PlayerbotAIConfig() : config(ConfigMgr::instance())
 }
 
 template <class T>
-void LoadList(string value, T &list)
+void LoadList(string const& value, T& ids, char const* setting)
 {
-    vector<string> ids = split(value, ',');
-    for (vector<string>::iterator i = ids.begin(); i != ids.end(); i++)
+    ids.clear();
+    istringstream input(value);
+    for (string token; getline(input, token, ',');)
     {
-        if (i->empty())
+        size_t first = token.find_first_not_of(" \t\r\n");
+        if (first == string::npos)
             continue;
+        size_t last = token.find_last_not_of(" \t\r\n") + 1;
 
-        // only skip tokens that are not numbers at all: 0 is a legal id here
-        // (map 0 = Eastern Kingdoms in AiPlayerbot.RandomBotMaps = "0,1,530,571")
-        char* end = nullptr;
-        uint32 id = strtoul(i->c_str(), &end, 10);
-        if (end == i->c_str())
+        uint32 id = 0;
+        auto result = std::from_chars(token.data() + first, token.data() + last, id);
+        if (result.ec != std::errc() || result.ptr != token.data() + last)
+        {
+            TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: invalid unsigned ID '{}' in {}; skipping", token, setting);
             continue;
+        }
 
-        list.push_back(id);
+        // Zero is valid (notably map 0). Do not duplicate entries on reload.
+        if (find(ids.begin(), ids.end(), id) == ids.end())
+            ids.push_back(id);
     }
+}
+
+static void LoadRandomBotMaps(string& value, vector<uint32>& maps)
+{
+    LoadList(value, maps, "AiPlayerbot.RandomBotMaps");
+    maps.erase(remove_if(maps.begin(), maps.end(), [](uint32 id)
+    {
+        MapEntry const* map = sMapStore.LookupEntry(id);
+        if (!map || map->Instanceable() || id > numeric_limits<uint16>::max())
+        {
+            TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: random bot map {} is missing, instanced or out of range; skipping", id);
+            return true;
+        }
+        return false;
+    }), maps.end());
+
+    // This string is interpolated into an SQL IN clause. Never pass raw config
+    // text to the database: malformed/empty lists can cause fatal SQL errors.
+    ostringstream sql;
+    for (uint32 id : maps)
+    {
+        if (sql.tellp() > 0)
+            sql << ',';
+        sql << id;
+    }
+    value = sql.str();
+}
+
+uint32 PlayerbotAIConfig::GetRandomChangeRange(double scale) const
+{
+    double multiplier = randomChangeMultiplier;
+    if (!std::isfinite(multiplier) || multiplier <= 0.0)
+        multiplier = 1.0;
+
+    // A small positive multiplier is valid, but its reciprocal can exceed the
+    // integer range used by rand/urand. Saturate before converting to uint32.
+    double range = 1.0 + std::max(0.0, scale) / multiplier;
+    return uint32(std::clamp(range, 1.0, double(numeric_limits<uint32>::max())));
 }
 
 bool PlayerbotAIConfig::Initialize()
 {
     TC_LOG_INFO("playerbot",  "Initializing AI Playerbot by ike3, based on the original Playerbot by blueboy");
 
-    // The playerbot settings live in the regular worldserver configuration
-    // (worldserver.conf or, preferably, worldserver.conf.d/aiplayerbot.conf).
-    // Loading an extra file is attempted for backwards compatibility only.
-    std::string error;
-    if (!config->LoadAdditionalFile("aiplayerbot.conf", true, error))
-        TC_LOG_DEBUG("playerbot", "No separate aiplayerbot.conf found ({}), using worldserver configuration", error);
-
+    // Main.cpp has already loaded worldserver.conf and any explicit overrides.
+    // Do not load a separate bot file here: a stale file in the working directory
+    // would silently override the settings (and environment overrides) from Main.
     enabled = config->GetBoolDefault("AiPlayerbot.Enabled", true);
     if (!enabled)
     {
-        TC_LOG_INFO("playerbot",  "AI Playerbot is Disabled in aiplayerbot.conf");
+        TC_LOG_INFO("playerbot", "AI Playerbot is disabled in {}", config->GetFilename());
         return false;
     }
 
@@ -250,10 +293,12 @@ bool PlayerbotAIConfig::Initialize()
     // missing (IF NOT EXISTS scripts can never upgrade existing tables), and
     // seed the starter name pools on a fresh install
     EnsureBotTables();
+    sAhBotConfig.Initialize();
 
-    globalCoolDown = (uint32) config->GetIntDefault("AiPlayerbot.GlobalCooldown", 500);
-    maxWaitForMove = config->GetIntDefault("AiPlayerbot.MaxWaitForMove", 3000);
-    reactDelay = (uint32) config->GetIntDefault("AiPlayerbot.ReactDelay", 100);
+    // Negative unsigned settings must not wrap into billion-sized counts/timers.
+    globalCoolDown = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.GlobalCooldown", 500)));
+    maxWaitForMove = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxWaitForMove", 3000)));
+    reactDelay = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.ReactDelay", 100)));
 
     sightDistance = config->GetFloatDefault("AiPlayerbot.SightDistance", 50.0f);
     spellDistance = config->GetFloatDefault("AiPlayerbot.SpellDistance", 25.0f);
@@ -267,50 +312,50 @@ bool PlayerbotAIConfig::Initialize()
     whisperDistance = config->GetFloatDefault("AiPlayerbot.WhisperDistance", 6000.0f);
     contactDistance = config->GetFloatDefault("AiPlayerbot.ContactDistance", 0.5f);
 
-    criticalHealth = config->GetIntDefault("AiPlayerbot.CriticalHealth", 20);
-    lowHealth = config->GetIntDefault("AiPlayerbot.LowHealth", 50);
-    mediumHealth = config->GetIntDefault("AiPlayerbot.MediumHealth", 70);
-    almostFullHealth = config->GetIntDefault("AiPlayerbot.AlmostFullHealth", 85);
-    lowMana = config->GetIntDefault("AiPlayerbot.LowMana", 15);
-    mediumMana = config->GetIntDefault("AiPlayerbot.MediumMana", 40);
+    criticalHealth = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.CriticalHealth", 20)));
+    lowHealth = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.LowHealth", 50)));
+    mediumHealth = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MediumHealth", 70)));
+    almostFullHealth = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.AlmostFullHealth", 85)));
+    lowMana = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.LowMana", 15)));
+    mediumMana = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MediumMana", 40)));
 
     randomGearLoweringChance = config->GetFloatDefault("AiPlayerbot.RandomGearLoweringChance", 0.15);
     randomBotMaxLevelChance = config->GetFloatDefault("AiPlayerbot.RandomBotMaxLevelChance", 0.4);
 
-    iterationsPerTick = config->GetIntDefault("AiPlayerbot.IterationsPerTick", 10);
+    iterationsPerTick = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.IterationsPerTick", 10)));
 
     allowGuildBots = config->GetBoolDefault("AiPlayerbot.AllowGuildBots", true);
 
     randomBotMapsAsString = config->GetStringDefault("AiPlayerbot.RandomBotMaps", "0,1,530,571");
-    LoadList<vector<uint32> >(randomBotMapsAsString, randomBotMaps);
-    LoadList<list<uint32> >(config->GetStringDefault("AiPlayerbot.RandomBotQuestItems", "6948,5175,5176,5177,5178"), randomBotQuestItems);
-    LoadList<list<uint32> >(config->GetStringDefault("AiPlayerbot.RandomBotSpellIds", "54197"), randomBotSpellIds);
+    LoadRandomBotMaps(randomBotMapsAsString, randomBotMaps);
+    LoadList<list<uint32> >(config->GetStringDefault("AiPlayerbot.RandomBotQuestItems", "6948,5175,5176,5177,5178"), randomBotQuestItems, "AiPlayerbot.RandomBotQuestItems");
+    LoadList<list<uint32> >(config->GetStringDefault("AiPlayerbot.RandomBotSpellIds", "54197"), randomBotSpellIds, "AiPlayerbot.RandomBotSpellIds");
 
     randomBotAutologin = config->GetBoolDefault("AiPlayerbot.RandomBotAutologin", true);
-    minRandomBots = config->GetIntDefault("AiPlayerbot.MinRandomBots", 50);
-    maxRandomBots = config->GetIntDefault("AiPlayerbot.MaxRandomBots", 200);
-    randomBotUpdateInterval = config->GetIntDefault("AiPlayerbot.RandomBotUpdateInterval", 60);
-    randomBotCountChangeMinInterval = config->GetIntDefault("AiPlayerbot.RandomBotCountChangeMinInterval", 24 * 3600);
-    randomBotCountChangeMaxInterval = config->GetIntDefault("AiPlayerbot.RandomBotCountChangeMaxInterval", 3 * 24 * 3600);
-    minRandomBotInWorldTime = config->GetIntDefault("AiPlayerbot.MinRandomBotInWorldTime", 24 * 3600);
-    maxRandomBotInWorldTime = config->GetIntDefault("AiPlayerbot.MaxRandomBotInWorldTime", 14 * 24 * 3600);
-    minRandomBotRandomizeTime = config->GetIntDefault("AiPlayerbot.MinRandomBotRandomizeTime", 2 * 3600);
-    maxRandomBotRandomizeTime = config->GetIntDefault("AiPlayerbot.MaxRandomRandomizeTime", 14 * 24 * 3600);
-    minRandomBotReviveTime = config->GetIntDefault("AiPlayerbot.MinRandomBotReviveTime", 60);
-    maxRandomBotReviveTime = config->GetIntDefault("AiPlayerbot.MaxRandomReviveTime", 300);
-    randomBotTeleportDistance = config->GetIntDefault("AiPlayerbot.RandomBotTeleportDistance", 1000);
-    minRandomBotsPerInterval = config->GetIntDefault("AiPlayerbot.MinRandomBotsPerInterval", 50);
-    maxRandomBotsPerInterval = config->GetIntDefault("AiPlayerbot.MaxRandomBotsPerInterval", 100);
-    minRandomBotsPriceChangeInterval = config->GetIntDefault("AiPlayerbot.MinRandomBotsPriceChangeInterval", 2 * 3600);
-    maxRandomBotsPriceChangeInterval = config->GetIntDefault("AiPlayerbot.MaxRandomBotsPriceChangeInterval", 48 * 3600);
+    minRandomBots = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBots", 50)));
+    maxRandomBots = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomBots", 200)));
+    randomBotUpdateInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotUpdateInterval", 60)));
+    randomBotCountChangeMinInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotCountChangeMinInterval", 24 * 3600)));
+    randomBotCountChangeMaxInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotCountChangeMaxInterval", 3 * 24 * 3600)));
+    minRandomBotInWorldTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBotInWorldTime", 24 * 3600)));
+    maxRandomBotInWorldTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomBotInWorldTime", 14 * 24 * 3600)));
+    minRandomBotRandomizeTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBotRandomizeTime", 2 * 3600)));
+    maxRandomBotRandomizeTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomRandomizeTime", 14 * 24 * 3600)));
+    minRandomBotReviveTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBotReviveTime", 60)));
+    maxRandomBotReviveTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomReviveTime", 300)));
+    randomBotTeleportDistance = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotTeleportDistance", 1000)));
+    minRandomBotsPerInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBotsPerInterval", 50)));
+    maxRandomBotsPerInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomBotsPerInterval", 100)));
+    minRandomBotsPriceChangeInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinRandomBotsPriceChangeInterval", 2 * 3600)));
+    maxRandomBotsPriceChangeInterval = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxRandomBotsPriceChangeInterval", 48 * 3600)));
     randomBotJoinLfg = config->GetBoolDefault("AiPlayerbot.RandomBotJoinLfg", true);
     logInGroupOnly = config->GetBoolDefault("AiPlayerbot.LogInGroupOnly", true);
     logValuesPerTick = config->GetBoolDefault("AiPlayerbot.LogValuesPerTick", false);
     fleeingEnabled = config->GetBoolDefault("AiPlayerbot.FleeingEnabled", true);
-    randomBotMinLevel = config->GetIntDefault("AiPlayerbot.RandomBotMinLevel", 1);
-    randomBotMaxLevel = config->GetIntDefault("AiPlayerbot.RandomBotMaxLevel", 255);
+    randomBotMinLevel = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotMinLevel", 1)));
+    randomBotMaxLevel = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotMaxLevel", 255)));
     randomBotLoginAtStartup = config->GetBoolDefault("AiPlayerbot.RandomBotLoginAtStartup", true);
-    randomBotTeleLevel = config->GetIntDefault("AiPlayerbot.RandomBotTeleLevel", 3);
+    randomBotTeleLevel = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotTeleLevel", 3)));
 
     randomChangeMultiplier = config->GetFloatDefault("AiPlayerbot.RandomChangeMultiplier", 1.0);
 
@@ -327,24 +372,34 @@ bool PlayerbotAIConfig::Initialize()
     {
         for (uint32 spec = 0; spec < 3; ++spec)
         {
+            specProbability[cls][spec] = 33;
+
+            // SharedDefines also contains retail-only classes. Do not request
+            // settings for class 0, Monk, Demon Hunter, Evoker or Adventurer in Wrath.
+            if (cls == CLASS_NONE || cls == CLASS_MONK || cls > CLASS_DRUID)
+                continue;
+
             ostringstream os; os << "AiPlayerbot.RandomClassSpecProbability." << cls << "." << spec;
-            specProbability[cls][spec] = config->GetIntDefault(os.str().c_str(), 33);
+            int32 weight = config->GetIntDefault(os.str(), 33);
+            if (weight < 0)
+                TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: {} ({}) cannot be negative; using 0", os.str(), weight);
+            specProbability[cls][spec] = uint32(std::max(0, weight));
         }
     }
 
     randomBotAccountPrefix = config->GetStringDefault("AiPlayerbot.RandomBotAccountPrefix", "rndbot");
-    randomBotAccountCount = config->GetIntDefault("AiPlayerbot.RandomBotAccountCount", 50);
+    randomBotAccountCount = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotAccountCount", 50)));
     deleteRandomBotAccounts = config->GetBoolDefault("AiPlayerbot.DeleteRandomBotAccounts", false);
-    randomBotGuildCount = config->GetIntDefault("AiPlayerbot.RandomBotGuildCount", 50);
+    randomBotGuildCount = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.RandomBotGuildCount", 50)));
     deleteRandomBotGuilds = config->GetBoolDefault("AiPlayerbot.DeleteRandomBotGuilds", false);
 
     guildTaskEnabled = config->GetBoolDefault("AiPlayerbot.EnableGuildTasks", true);
-    minGuildTaskChangeTime = config->GetIntDefault("AiPlayerbot.MinGuildTaskChangeTime", 2 * 24 * 3600);
-    maxGuildTaskChangeTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskChangeTime", 5 * 24 * 3600);
-    minGuildTaskAdvertisementTime = config->GetIntDefault("AiPlayerbot.MinGuildTaskAdvertisementTime", 8 * 3600);
-    maxGuildTaskAdvertisementTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskAdvertisementTime", 4 * 24 * 3600);
-    minGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MinGuildTaskRewardTime", 60);
-    maxGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskRewardTime", 600);
+    minGuildTaskChangeTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinGuildTaskChangeTime", 2 * 24 * 3600)));
+    maxGuildTaskChangeTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxGuildTaskChangeTime", 5 * 24 * 3600)));
+    minGuildTaskAdvertisementTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinGuildTaskAdvertisementTime", 8 * 3600)));
+    maxGuildTaskAdvertisementTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxGuildTaskAdvertisementTime", 4 * 24 * 3600)));
+    minGuildTaskRewardTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MinGuildTaskRewardTime", 60)));
+    maxGuildTaskRewardTime = uint32(std::max(0, config->GetIntDefault("AiPlayerbot.MaxGuildTaskRewardTime", 600)));
 
     // An inverted min/max pair from the config would eventually reach
     // urand(min, max) with max < min, whose ASSERT(max >= min) crashes the
@@ -369,9 +424,9 @@ bool PlayerbotAIConfig::Initialize()
             minRandomBotsPerInterval, maxRandomBotsPerInterval);
     normalizeRange("AiPlayerbot.MinRandomBotInWorldTime", "AiPlayerbot.MaxRandomBotInWorldTime",
             minRandomBotInWorldTime, maxRandomBotInWorldTime);
-    normalizeRange("AiPlayerbot.MinRandomBotRandomizeTime", "AiPlayerbot.MaxRandomBotRandomizeTime",
+    normalizeRange("AiPlayerbot.MinRandomBotRandomizeTime", "AiPlayerbot.MaxRandomRandomizeTime",
             minRandomBotRandomizeTime, maxRandomBotRandomizeTime);
-    normalizeRange("AiPlayerbot.MinRandomBotReviveTime", "AiPlayerbot.MaxRandomBotReviveTime",
+    normalizeRange("AiPlayerbot.MinRandomBotReviveTime", "AiPlayerbot.MaxRandomReviveTime",
             minRandomBotReviveTime, maxRandomBotReviveTime);
     normalizeRange("AiPlayerbot.MinRandomBotPvpTime", "AiPlayerbot.MaxRandomBotPvpTime",
             minRandomBotPvpTime, maxRandomBotPvpTime);
@@ -387,15 +442,35 @@ bool PlayerbotAIConfig::Initialize()
 
     // used as a divisor in trigger/LFG probability rolls - zero (or a negative
     // value) makes the division produce inf/garbage and undefined int casts
-    if (randomChangeMultiplier <= 0.0f)
+    if (!std::isfinite(randomChangeMultiplier) || randomChangeMultiplier <= 0.0f)
     {
         TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: AiPlayerbot.RandomChangeMultiplier ({}) must be positive; using 1.0",
                 randomChangeMultiplier);
         randomChangeMultiplier = 1.0f;
     }
 
+    // Millisecond conversion and the scheduling multiplications must not wrap.
+    if (!randomBotUpdateInterval || randomBotUpdateInterval > numeric_limits<uint32>::max() / 1000)
+    {
+        TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: AiPlayerbot.RandomBotUpdateInterval ({}) is out of range; using 60 seconds",
+            randomBotUpdateInterval);
+        randomBotUpdateInterval = 60;
+    }
+
+    // This prefix participates in account SQL, including optional deletion.
+    // Empty/wildcard/quoted prefixes must not broaden that operation or break SQL.
+    if (randomBotAccountPrefix.empty() || !all_of(randomBotAccountPrefix.begin(), randomBotAccountPrefix.end(), [](char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    }))
+    {
+        TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: AiPlayerbot.RandomBotAccountPrefix must contain only ASCII letters, digits or underscores and cannot be empty; disabling bots");
+        enabled = false;
+        return false;
+    }
+
     RandomPlayerbotFactory::CreateRandomBots();
-    TC_LOG_INFO("playerbot",  "AI Playerbot configuration loaded");
+    TC_LOG_INFO("playerbot", "AI Playerbot configuration loaded from {}", config->GetFilename());
 
     return true;
 }

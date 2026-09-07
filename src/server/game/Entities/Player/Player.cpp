@@ -347,6 +347,10 @@ Player::Player(WorldSession* session) : Unit(true), m_sceneMgr(this)
 
 Player::~Player()
 {
+    // Controllers can log out owned bots and inspect their master's state.
+    // Run their teardown before inventory/quest objects below are destroyed.
+    Playerbot::OnPlayerDelete(this);
+
     // it must be unloaded already in PlayerLogout and accessed only for logged in player
     //m_social = nullptr;
 
@@ -365,9 +369,6 @@ Player::~Player()
         delete ItemSetEff[x];
 
     sWorld->DecreasePlayerCount();
-
-    // playerbot mod: release the AI/manager owned by this player
-    Playerbot::OnPlayerDelete(this);
 }
 
 void Player::CleanupsBeforeDelete(bool finalCleanup)
@@ -2575,6 +2576,12 @@ void DeleteSpellFromAllPlayers(uint32 spellId)
 
 bool Player::AddTalent(TalentEntry const* talent, uint8 rank, uint8 talentGroupId, bool learning)
 {
+    if (!talent || rank >= MAX_TALENT_RANK || talentGroupId >= MAX_SPECIALIZATIONS)
+    {
+        TC_LOG_ERROR("entities.player", "Player {} cannot add talent {} with rank {} / group {}", GetGUID().ToString(), talent ? talent->ID : 0, rank, talentGroupId);
+        return false;
+    }
+
     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(talent->SpellRank[rank], DIFFICULTY_NONE);
     if (!spellInfo)
     {
@@ -15298,29 +15305,34 @@ void Player::RewardQuest(Quest const* quest, LootItemType rewardType, uint32 rew
     RewardReputation(quest);
 
     // cast spells after mark quest complete (some spells have quest completed state requirements in spell_area data)
-    if (quest->GetRewSpell() > 0)
+    auto castRewardSpell = [this, quest, questGiver](uint32 spellId)
     {
-        SpellInfo const* spellInfo = sSpellMgr->AssertSpellInfo(quest->GetRewSpell(), GetMap()->GetDifficultyID());
+        Difficulty difficulty = GetMap()->GetDifficultyID();
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId, difficulty);
+        if (!spellInfo)
+        {
+            // Forced quest rewards (bots/GM commands) can reach templates that
+            // bypassed normal validation. Skip only the missing spell, not the
+            // rest of RewardQuest, including saving and delayed-teleport cleanup.
+            TC_LOG_ERROR("sql.sql", "Player::RewardQuest: quest {} reward spell {} is missing for difficulty {} (player {}); skipping spell reward.",
+                quest->GetQuestId(), spellId, uint32(difficulty), GetGUID().ToString());
+            return;
+        }
+
         Unit* caster = this;
         if (questGiver && questGiver->IsUnit() && !quest->HasFlag(QUEST_FLAGS_PLAYER_CAST_COMPLETE) && !spellInfo->HasTargetType(TARGET_UNIT_CASTER))
             caster = questGiver->ToUnit();
 
         caster->CastSpell(this, spellInfo->Id, CastSpellExtraArgs(TRIGGERED_FULL_MASK).SetCastDifficulty(spellInfo->Difficulty));
-    }
+    };
+
+    if (uint32 rewardSpell = quest->GetRewSpell())
+        castRewardSpell(rewardSpell);
     else
     {
         for (int32 displaySpell : quest->RewardDisplaySpell)
-        {
-            if (!displaySpell)
-                continue;
-
-            SpellInfo const* spellInfo = sSpellMgr->AssertSpellInfo(displaySpell, GetMap()->GetDifficultyID());
-            Unit* caster = this;
-            if (questGiver && questGiver->IsUnit() && !quest->HasFlag(QUEST_FLAGS_PLAYER_CAST_COMPLETE) && !spellInfo->HasTargetType(TARGET_UNIT_CASTER))
-                caster = questGiver->ToUnit();
-
-            caster->CastSpell(this, spellInfo->Id, CastSpellExtraArgs(TRIGGERED_FULL_MASK).SetCastDifficulty(spellInfo->Difficulty));
-        }
+            if (displaySpell)
+                castRewardSpell(displaySpell);
     }
 
     if (quest->GetZoneOrSort() > 0)
@@ -17637,7 +17649,10 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
         return false;
     }
 
-    SetLevel(fields.level, false);
+    uint32 loadedLevel = std::clamp<uint32>(fields.level, 1, sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL));
+    if (loadedLevel != fields.level)
+        TC_LOG_ERROR("entities.player.loading", "Player {} has invalid saved level {}; using {}", guid.ToString(), fields.level, loadedLevel);
+    SetLevel(uint8(loadedLevel), false);
     SetXP(fields.xp);
 
     std::vector<std::string_view> exploredZones = Trinity::Tokenize(fields.exploredZones, ' ', false);
@@ -17673,8 +17688,12 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
     }
 
     SetCustomizations(Trinity::Containers::MakeIteratorPair(customizations.begin(), customizations.end()), false);
-    SetInventorySlotCount(fields.inventorySlots);
-    SetBankBagSlotCount(fields.bankSlots);
+    uint8 inventorySlots = std::min<uint32>(fields.inventorySlots, INVENTORY_SLOT_ITEM_END - INVENTORY_SLOT_ITEM_START);
+    uint8 bankSlots = std::min<uint32>(fields.bankSlots, BANK_SLOT_BAG_END - BANK_SLOT_BAG_START);
+    if (inventorySlots != fields.inventorySlots || bankSlots != fields.bankSlots)
+        TC_LOG_ERROR("entities.player.loading", "Player {} has out-of-range inventory/bank bag slots ({}/{}); clamping", guid.ToString(), fields.inventorySlots, fields.bankSlots);
+    SetInventorySlotCount(inventorySlots);
+    SetBankBagSlotCount(bankSlots);
     SetNativeGender(fields.gender);
     SetUpdateFieldValue(m_values.ModifyValue(&Player::m_playerData).ModifyValue(&UF::PlayerData::Inebriation), fields.drunk);
     ReplaceAllPlayerFlags(fields.playerFlags);
@@ -18006,6 +18025,11 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
 
     m_createTime = fields.createTime;
     m_createMode = fields.createMode;
+    if (m_createMode != PlayerCreateMode::Normal && m_createMode != PlayerCreateMode::NPE)
+    {
+        TC_LOG_ERROR("entities.player.loading", "Player {} has invalid saved create mode {}; using Normal", guid.ToString(), int32(m_createMode));
+        m_createMode = PlayerCreateMode::Normal;
+    }
     m_cinematic = fields.cinematic;
     m_Played_time[PLAYED_TIME_TOTAL] = fields.totaltime;
     m_Played_time[PLAYED_TIME_LEVEL] = fields.leveltime;
@@ -18055,8 +18079,13 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
     UpdateSkillsForLevel(); //update skills after load, to make sure they are correctly update at player load
 
     SetNumRespecs(fields.numRespecs);
-    SetActiveTalentGroup(fields.activeTalentGroup);
-    SetBonusTalentGroupCount(fields.bonusTalentGroups);
+    uint8 bonusTalentGroups = std::min<uint8>(fields.bonusTalentGroups, MAX_SPECIALIZATIONS - 1);
+    uint8 activeTalentGroup = fields.activeTalentGroup <= bonusTalentGroups ? fields.activeTalentGroup : 0;
+    if (bonusTalentGroups != fields.bonusTalentGroups || activeTalentGroup != fields.activeTalentGroup)
+        TC_LOG_ERROR("entities.player.loading", "Player {} has invalid saved talent groups (active {}, bonus {}); using {}/{}", guid.ToString(), fields.activeTalentGroup, fields.bonusTalentGroups, activeTalentGroup, bonusTalentGroups);
+    // The setters can inspect talent arrays. Sanitize before either setter.
+    SetActiveTalentGroup(activeTalentGroup);
+    SetBonusTalentGroupCount(bonusTalentGroups);
 
     uint32 lootSpecId = fields.lootSpecId;
     if (ChrSpecializationEntry const* chrSpec = sChrSpecializationStore.LookupEntry(lootSpecId))
@@ -18393,8 +18422,11 @@ void Player::_LoadAuras(PreparedQueryResult auraResult, PreparedQueryResult effe
             uint32 effectIndex = fields[4].GetUInt8();
             if (effectIndex < MAX_SPELL_EFFECTS)
             {
-                casterGuid.SetRawValue(fields[0].GetBinary());
-                itemGuid.SetRawValue(fields[1].GetBinary());
+                if (!casterGuid.TrySetRawValue(fields[0].GetBinary()) || !itemGuid.TrySetRawValue(fields[1].GetBinary()))
+                {
+                    TC_LOG_ERROR("entities.player.loading", "Player {} has an aura effect with an invalid saved GUID length; skipping", GetGUID().ToString());
+                    continue;
+                }
                 AuraKey key{ casterGuid, itemGuid, fields[2].GetUInt32(), fields[3].GetUInt32() };
                 AuraLoadEffectInfo& info = effectInfo[key];
                 info.Amounts[effectIndex] = fields[5].GetInt32();
@@ -18413,8 +18445,11 @@ void Player::_LoadAuras(PreparedQueryResult auraResult, PreparedQueryResult effe
         do
         {
             Field* fields = auraResult->Fetch();
-            casterGuid.SetRawValue(fields[0].GetBinary());
-            itemGuid.SetRawValue(fields[1].GetBinary());
+            if (!casterGuid.TrySetRawValue(fields[0].GetBinary()) || !itemGuid.TrySetRawValue(fields[1].GetBinary()))
+            {
+                TC_LOG_ERROR("entities.player.loading", "Player {} has an aura with an invalid saved GUID length; skipping", GetGUID().ToString());
+                continue;
+            }
             AuraKey key{ casterGuid, itemGuid, fields[2].GetUInt32(), fields[3].GetUInt32() };
             uint32 recalculateMask = fields[4].GetUInt32();
             Difficulty difficulty  = Difficulty(fields[5].GetUInt8());
@@ -18515,7 +18550,14 @@ void Player::LoadCorpse(PreparedQueryResult result)
         {
             Field* fields = result->Fetch();
             _corpseLocation.WorldRelocate(fields[0].GetUInt16(), fields[1].GetFloat(), fields[2].GetFloat(), fields[3].GetFloat(), fields[4].GetFloat());
-            if (!sMapStore.AssertEntry(_corpseLocation.GetMapId())->Instanceable())
+            MapEntry const* corpseMap = sMapStore.LookupEntry(_corpseLocation.GetMapId());
+            if (!corpseMap || !_corpseLocation.IsPositionValid())
+            {
+                TC_LOG_ERROR("entities.player.loading", "Player {} has an invalid saved corpse location (map {}); ignoring it", GetGUID().ToString(), _corpseLocation.GetMapId());
+                _corpseLocation = WorldLocation();
+                RemovePlayerLocalFlag(PLAYER_LOCAL_FLAG_RELEASE_TIMER);
+            }
+            else if (!corpseMap->Instanceable())
                 SetPlayerLocalFlag(PLAYER_LOCAL_FLAG_RELEASE_TIMER);
             else
                 RemovePlayerLocalFlag(PLAYER_LOCAL_FLAG_RELEASE_TIMER);
@@ -27221,19 +27263,20 @@ void Player::_LoadGlyphs(PreparedQueryResult result)
     {
         Field* fields = result->Fetch();
 
-        uint8 talentGroupId = fields[0].GetUInt8();
+        uint32 talentGroupId = fields[0].GetUInt32();
         if (talentGroupId >= MAX_SPECIALIZATIONS)
             continue;
 
-        uint8 glyphSlot = fields[1].GetUInt8();
+        uint32 glyphSlot = fields[1].GetUInt32();
         if (glyphSlot >= MAX_GLYPH_SLOT_INDEX)
             continue;
 
-        uint16 glyphId = fields[2].GetUInt16();
-        if (!sGlyphPropertiesStore.LookupEntry(glyphId))
+        uint32 glyphId = fields[2].GetUInt32();
+        if (glyphId > std::numeric_limits<uint16>::max() || !sGlyphPropertiesStore.LookupEntry(glyphId))
             continue;
 
-        SetGlyph(glyphSlot, glyphId);
+        // Rows belong to their saved group, not whichever group is active.
+        GetGlyphs(uint8(talentGroupId))[glyphSlot] = uint16(glyphId);
 
     } while (result->NextRow());
 }
@@ -27263,14 +27306,22 @@ void Player::_SaveGlyphs(CharacterDatabaseTransaction trans) const
 
 void Player::_LoadTalents(PreparedQueryResult result)
 {
-    // "SELECT talentId, talentRank, talentGroup FROM character_talent WHERE guid = ?"
-    if (result)
+    // SELECT talentId, talentRank, talentGroup FROM character_talent WHERE guid = ?
+    if (!result)
+        return;
+    do
     {
-        do
-            if (TalentEntry const* talent = sTalentStore.LookupEntry((*result)[0].GetUInt32()))
-                AddTalent(talent, (*result)[1].GetUInt8(), (*result)[2].GetUInt8(), false);
-        while (result->NextRow());
-    }
+        uint32 talentId = (*result)[0].GetUInt32();
+        uint32 rank = (*result)[1].GetUInt32();
+        uint32 group = (*result)[2].GetUInt32();
+        if (rank >= MAX_TALENT_RANK || group >= MAX_SPECIALIZATIONS)
+        {
+            TC_LOG_ERROR("entities.player.loading", "Player {} has invalid saved talent {} rank {} / group {}; skipping", GetGUID().ToString(), talentId, rank, group);
+            continue;
+        }
+        if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
+            AddTalent(talent, uint8(rank), uint8(group), false);
+    } while (result->NextRow());
 }
 
 void Player::_SaveTalents(CharacterDatabaseTransaction trans)
@@ -27303,6 +27354,9 @@ void Player::_SaveTalents(CharacterDatabaseTransaction trans)
 
 void Player::ActivateTalentGroup(uint8 talentGroup)
 {
+    if (talentGroup >= MAX_SPECIALIZATIONS || talentGroup > GetBonusTalentGroupCount())
+        return;
+
     if (GetActiveTalentGroup() == talentGroup)
         return;
 
@@ -28590,10 +28644,13 @@ uint32 Player::GetDefaultSpecId() const
 }
 void Player::SetBonusTalentGroupCount(uint8 amount)
 {
-    if (_specializationInfo.BonusGroups == amount)
+    amount = std::min<uint8>(amount, MAX_SPECIALIZATIONS - 1);
+    if (GetActiveTalentGroup() >= MAX_SPECIALIZATIONS)
+        SetActiveTalentGroup(0);
+    if (_specializationInfo.BonusGroups == amount && GetActiveTalentGroup() <= amount)
         return;
 
-    _specializationInfo.BonusGroups = std::min<uint8>(amount, MAX_SPECIALIZATIONS - 1);
+    _specializationInfo.BonusGroups = amount;
     if (GetActiveTalentGroup() > amount)
     {
         ResetTalents(true);

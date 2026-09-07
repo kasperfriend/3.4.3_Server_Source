@@ -148,7 +148,7 @@ ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
     races[RACE_UNDEAD_PLAYER] = "Undead";
 }
 
-string ChatHelper::formatMoney(uint32 copper)
+string ChatHelper::formatMoney(uint64 copper)
 {
     ostringstream out;
 	if (!copper)
@@ -157,9 +157,9 @@ string ChatHelper::formatMoney(uint32 copper)
 		return out.str();
 	}
 
-    uint32 gold = uint32(copper / 10000);
+    uint64 gold = copper / 10000;
     copper -= (gold * 10000);
-    uint32 silver = uint32(copper / 100);
+    uint64 silver = copper / 100;
     copper -= (silver * 100);
     out << " ";
     if (gold > 0)

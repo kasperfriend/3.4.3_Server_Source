@@ -8,6 +8,13 @@
 class LoginQueryHolder;
 class CharacterHandler;
 
+namespace
+{
+    // All holder/session operations run on the world thread. Reserve across
+    // holders, not just within one player's pending list.
+    std::set<ObjectGuid> pendingBotLogins;
+}
+
 PlayerbotHolder::PlayerbotHolder() : PlayerbotAIBase()
 {
 
@@ -25,51 +32,91 @@ void PlayerbotHolder::UpdateAIInternal(uint32 elapsed)
 
 void PlayerbotHolder::UpdateSessions(uint32 /*elapsed*/)
 {
-    // finish the login of every bot whose character finished loading
-    for (std::map<ObjectGuid, WorldSession*>::iterator itr = pendingBots.begin(); itr != pendingBots.end(); )
+    std::vector<ObjectGuid> pending;
+    for (auto const& entry : pendingBots)
+        pending.push_back(entry.first);
+    for (ObjectGuid guid : pending)
     {
-        WorldSession* session = itr->second;
-        session->HandleBotPackets();
-
-        Player* bot = session->GetPlayer();
-        if (bot && bot->IsInWorld())
-        {
-            itr = pendingBots.erase(itr);
-            OnBotLogin(bot);
+        auto it = pendingBots.find(guid);
+        if (it == pendingBots.end())
             continue;
-        }
-
-        // login failed - the session is useless, drop it
-        if (!bot && !session->PlayerLoading())
+        WorldSession* session = it->second;
+        try
         {
-            TC_LOG_ERROR("playerbot", "Bot {} failed to login", itr->first.ToString());
-            itr = pendingBots.erase(itr);
-            delete session;
-            continue;
+            session->HandleBotPackets();
+            Player* bot = session->GetPlayer();
+            // A login can be redirected to homebind before AI attachment.
+            if (bot && bot->IsBeingTeleportedFar())
+            {
+                session->HandleMoveWorldportAck();
+                bot = session->GetPlayer();
+            }
+            if (bot && bot->IsInWorld())
+            {
+                // Retain pending ownership until AI initialization succeeds.
+                OnBotLogin(bot);
+                auto [owned, inserted] = botSessions.try_emplace(guid);
+                if (!inserted)
+                    throw std::runtime_error("Duplicate owned bot session");
+                owned->second.reset(session); // ownership transfer after map allocation succeeds
+                pendingBots.erase(guid);
+                pendingBotLogins.erase(guid);
+                continue;
+            }
+            if (session->PlayerLoading())
+                continue;
+            TC_LOG_ERROR("playerbot", "Bot {} failed to enter the world", guid.ToString());
         }
-
-        ++itr;
+        catch (std::exception const& error)
+        {
+            TC_LOG_ERROR("playerbot", "Bot {} login failed: {}", guid.ToString(), error.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Bot {} login failed with an unknown exception", guid.ToString());
+        }
+        // Erase before teardown callbacks can revisit the holder.
+        pendingBots.erase(guid);
+        pendingBotLogins.erase(guid);
+        playerBots.erase(guid);
+        delete session;
     }
 
-    for (PlayerBotMap::const_iterator itr = GetPlayerBotsBegin(); itr != GetPlayerBotsEnd(); ++itr)
+    // A packet/teleport callback may log a bot out and erase its map entry.
+    // Never retain an iterator over playerBots across those callbacks.
+    std::vector<ObjectGuid> active;
+    for (auto const& entry : botSessions)
+        active.push_back(entry.first);
+    for (ObjectGuid guid : active)
     {
-        Player* const bot = itr->second;
-        if (!bot->GetPlayerbotAI())
+        auto it = botSessions.find(guid);
+        if (it == botSessions.end())
             continue;
-
-        if (bot->IsBeingTeleported())
-            bot->GetPlayerbotAI()->HandleTeleportAck();
-        else if (bot->IsInWorld())
-            bot->GetSession()->HandleBotPackets();
+        WorldSession* session = it->second.get();
+        Player* bot = session->GetPlayer();
+        if (bot && bot->GetPlayerbotAI())
+        {
+            if (bot->IsBeingTeleported())
+                bot->GetPlayerbotAI()->HandleTeleportAck();
+            else if (bot->IsInWorld())
+                session->HandleBotPackets();
+        }
+        // Do not destroy the session while one of its callbacks is still on
+        // the stack; reclaim it only after packet/query handling returns.
+        if (!session->GetPlayer())
+        {
+            playerBots.erase(guid);
+            botSessions.erase(guid);
+        }
     }
 }
 
 void PlayerbotHolder::AddPlayerBot(ObjectGuid guid, uint32 masterAccountId)
 {
-    if (!sPlayerbotAIConfig.enabled || guid.IsEmpty())
+    if (!sPlayerbotAIConfig.enabled || !guid.IsPlayer() || guid.IsEmpty())
         return;
 
-    if (playerBots.find(guid) != playerBots.end() || pendingBots.find(guid) != pendingBots.end())
+    if (playerBots.find(guid) != playerBots.end() || pendingBots.find(guid) != pendingBots.end() || botSessions.count(guid))
         return;
 
     // the character must not be online with a real client
@@ -94,44 +141,68 @@ void PlayerbotHolder::AddPlayerBot(ObjectGuid guid, uint32 masterAccountId)
     if (!AccountMgr::GetName(accountId, accountName))
         accountName = "playerbot";
 
+    if (!pendingBotLogins.insert(guid).second)
+        return;
+
     // socket-less session, updated by this holder only (never added to the world session map)
-    WorldSession* botSession = new WorldSession(accountId, std::move(accountName), 0, nullptr, SEC_PLAYER,
-        uint8(sWorld->getIntConfig(CONFIG_EXPANSION)), 0, "", Minutes(0), LOCALE_enUS, 0, false);
-
-    botSession->SetBotSession(true);
-    botSession->LoginBotPlayer(guid);
-
-    pendingBots[guid] = botSession;
+    try
+    {
+        auto session = std::make_unique<WorldSession>(accountId, std::move(accountName), 0, nullptr, SEC_PLAYER,
+            uint8(sWorld->getIntConfig(CONFIG_EXPANSION)), 0, "", Minutes(0), LOCALE_enUS, 0, false);
+        session->SetBotSession(true);
+        session->LoginBotPlayer(guid);
+        pendingBots.emplace(guid, session.get());
+        session.release();
+    }
+    catch (...)
+    {
+        pendingBotLogins.erase(guid);
+        throw;
+    }
 
     TC_LOG_DEBUG("playerbot", "Bot {} logging in (master account {})", guid.ToString(), masterAccountId);
 }
 
 void PlayerbotHolder::LogoutAllBots()
 {
-    while (true)
-    {
-        PlayerBotMap::const_iterator itr = GetPlayerBotsBegin();
-        if (itr == GetPlayerBotsEnd()) break;
-        Player* bot= itr->second;
-        LogoutPlayerBot(bot->GetGUID());
-    }
+    while (!pendingBots.empty())
+        LogoutPlayerBot(pendingBots.begin()->first);
+    while (!botSessions.empty())
+        LogoutPlayerBot(botSessions.begin()->first);
+    while (!playerBots.empty())
+        LogoutPlayerBot(playerBots.begin()->first);
 }
 
 void PlayerbotHolder::LogoutPlayerBot(ObjectGuid guid)
 {
-    Player* bot = GetPlayerBot(guid);
-    if (bot)
+    if (auto pending = pendingBots.find(guid); pending != pendingBots.end())
     {
-        if (PlayerbotAI* ai = bot->GetPlayerbotAI())
-            ai->TellMaster("Goodbye!");
-        TC_LOG_INFO("playerbot",  "Bot {} logged out", bot->GetName());
-        //bot->SaveToDB();
-
-        WorldSession * botWorldSessionPtr = bot->GetSession();
-        playerBots.erase(guid);    // deletes bot player ptr inside this WorldSession PlayerBotMap
-        botWorldSessionPtr->LogoutPlayer(true); // this will delete the bot Player object and PlayerbotAI object
-        delete botWorldSessionPtr;  // finally delete the bot's WorldSession
+        WorldSession* session = pending->second;
+        pendingBots.erase(pending);
+        pendingBotLogins.erase(guid);
+        playerBots.erase(guid);
+        // Destroying the session drops its query callbacks; no delayed login
+        // can attach an AI to an owner who has already logged out.
+        delete session;
+        return;
     }
+    if (auto owned = botSessions.find(guid); owned != botSessions.end())
+    {
+        std::unique_ptr<WorldSession> session = std::move(owned->second);
+        botSessions.erase(owned);
+        playerBots.erase(guid);
+        if (Player* bot = session->GetPlayer())
+        {
+            if (PlayerbotAI* ai = bot->GetPlayerbotAI())
+                ai->TellMaster("Goodbye!");
+            TC_LOG_INFO("playerbot", "Bot {} logged out", bot->GetName());
+            session->LogoutPlayer(true);
+        }
+        return;
+    }
+    // Entries without an owned session are only possible during initialization
+    // or defensive teardown. Never assume a raw Player entry owns a session.
+    playerBots.erase(guid);
 }
 
 Player* PlayerbotHolder::GetPlayerBot(ObjectGuid playerGuid) const
@@ -222,6 +293,11 @@ string PlayerbotHolder::ProcessBotCommand(string cmd, ObjectGuid guid, bool admi
     }
     else if (cmd == "remove" || cmd == "logout" || cmd == "rm")
     {
+        if (pendingBots.count(guid))
+        {
+            LogoutPlayerBot(guid);
+            return "ok";
+        }
         if (!ObjectAccessor::FindPlayer(guid))
             return "player is offline";
 
@@ -334,34 +410,23 @@ list<string> PlayerbotHolder::HandlePlayerbotCommand(char const* args, Player* m
 {
     list<string> messages;
 
-    if (!*args)
+    std::istringstream input(args ? args : "");
+    std::string cmdStr, charnameStr;
+    if (!(input >> cmdStr))
     {
         messages.push_back("usage: list or add/init/remove PLAYERNAME");
         return messages;
     }
-
-    char *cmd = strtok ((char*)args, " ");
-    char *charname = strtok (NULL, " ");
-    if (!cmd)
-    {
-        messages.push_back("usage: list or add/init/remove PLAYERNAME");
-        return messages;
-    }
-
-    if (!strcmp(cmd, "list"))
+    if (cmdStr == "list")
     {
         messages.push_back(ListBots(master));
         return messages;
     }
-
-    if (!charname)
+    if (!(input >> charnameStr))
     {
         messages.push_back("usage: list or add/init/remove PLAYERNAME");
         return messages;
     }
-
-    std::string cmdStr = cmd;
-    std::string charnameStr = charname;
 
     set<string> bots;
     if (charnameStr == "*" && master)

@@ -117,6 +117,10 @@ ByteBuffer& operator>>(ByteBuffer& data, ItemBonuses& itemBonusInstanceData)
     itemBonusInstanceData.Context = data.read<ItemContext>();
     data >> bonusListIdSize;
 
+    if (bonusListIdSize > (data.size() - data.rpos()) / sizeof(uint32))
+        throw ByteBufferPositionException(data.rpos(), bonusListIdSize, data.size());
+    itemBonusInstanceData.BonusListIDs.clear();
+    itemBonusInstanceData.BonusListIDs.reserve(bonusListIdSize);
     for (uint32 i = 0u; i < bonusListIdSize; ++i)
     {
         uint32 bonusId;
@@ -193,6 +197,7 @@ ByteBuffer& operator>>(ByteBuffer& data, ItemInstance& itemInstance)
 
     data >> itemInstance.Modifications;
 
+    itemInstance.ItemBonus.reset();
     if (hasItemBonus)
     {
         itemInstance.ItemBonus.emplace();

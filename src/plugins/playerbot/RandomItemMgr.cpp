@@ -135,7 +135,9 @@ RandomItemList RandomItemMgr::Query(RandomItemType type)
         if (strstri(proto->GetDefaultLocaleName(), "qa") || strstri(proto->GetDefaultLocaleName(), "test") || strstri(proto->GetDefaultLocaleName(), "deprecated"))
             continue;
 
-        if ((proto->GetBaseRequiredLevel() && proto->GetBaseRequiredLevel() > sAhBotConfig.maxRequiredLevel) || proto->GetItemLevel() > sAhBotConfig.maxItemLevel)
+        // Zero is the default/unlimited setting, not a ban on all nonzero levels.
+        if ((sAhBotConfig.maxRequiredLevel && proto->GetBaseRequiredLevel() > sAhBotConfig.maxRequiredLevel) ||
+            (sAhBotConfig.maxItemLevel && proto->GetItemLevel() > sAhBotConfig.maxItemLevel))
             continue;
 
         if (predicates[type] && !predicates[type]->Apply(proto))

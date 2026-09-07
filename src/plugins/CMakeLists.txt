@@ -15,8 +15,8 @@ if(BUILD_SHARED_LIBS)
     "  to build the bots correctly.")
 endif()
 
-file(GLOB_RECURSE sources_playerbot playerbot/*.cpp playerbot/*.h)
-file(GLOB_RECURSE sources_ahbot ahbot/*.cpp ahbot/*.h)
+file(GLOB_RECURSE sources_playerbot CONFIGURE_DEPENDS playerbot/*.cpp playerbot/*.h)
+file(GLOB_RECURSE sources_ahbot CONFIGURE_DEPENDS ahbot/*.cpp ahbot/*.h)
 
 add_library(plugins STATIC
   ${sources_playerbot}
@@ -66,6 +66,5 @@ if(USE_COREPCH)
   add_cxx_pch(plugins ${CMAKE_CURRENT_SOURCE_DIR}/pchdef.h)
 endif()
 
-# Install the playerbot configuration next to worldserver.conf so that the
-# worldserver picks it up automatically from worldserver.conf.d.
-install(FILES playerbot/aiplayerbot.conf.dist DESTINATION "${CMAKE_INSTALL_PREFIX}/worldserver.conf.d")
+# Playerbot settings are shipped in src/server/worldserver/worldserver.conf.dist
+# and copied/installed by the worldserver target; no separate bot config is needed.

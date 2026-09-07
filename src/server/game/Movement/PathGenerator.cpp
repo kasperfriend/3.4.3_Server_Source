@@ -978,8 +978,8 @@ float PathGenerator::Dist3DSqr(G3D::Vector3 const& p1, G3D::Vector3 const& p2) c
 float PathGenerator::GetPathLength() const
 {
     float length = 0.0f;
-    for (std::size_t i = 0; i < _pathPoints.size() - 1; ++i)
-        length += (_pathPoints[i + 1] - _pathPoints[i]).length();
+    for (std::size_t i = 1; i < _pathPoints.size(); ++i)
+        length += (_pathPoints[i] - _pathPoints[i - 1]).length();
 
     return length;
 }

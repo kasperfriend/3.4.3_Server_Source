@@ -18,7 +18,7 @@ train, use the auction house, and answer chat commands from their master.
 | `src/plugins/CMakeLists.txt` | builds everything above into the static `plugins` library |
 | `src/server/game/AI/Playerbot/PlayerbotHooks.{h,cpp}` | core-side hook registry (function pointers) |
 | `src/plugins/playerbot/PlayerbotHookImpl.cpp` | plugin-side implementation that fills the hooks in |
-| `src/plugins/playerbot/aiplayerbot.conf.dist` | configuration template |
+| `src/server/worldserver/worldserver.conf.dist` | all bot defaults in **AI PLAYERBOT SETTINGS** |
 | `sql/custom/playerbot/characters_playerbot.sql` | the `ai_playerbot_*` tables |
 
 ### Why hooks instead of direct calls?
@@ -33,8 +33,8 @@ Core call sites (all marked with a `playerbot mod` comment):
 
 | Core location | Hook |
 | --- | --- |
-| `World::Update` | `OnWorldUpdate` — drives `RandomPlayerbotMgr` |
-| `Player::Update` | `OnPlayerUpdate` — drives a bot's AI and a master's bot manager |
+| `World::Update` | `OnWorldUpdate` — drives random and player-owned bot sessions on the world thread |
+| `Player::Update` | `OnPlayerUpdate` — drives the bot AI on its player/map update |
 | `WorldSession::HandlePlayerLogin` | `OnPlayerLogin` |
 | `WorldSession::LogoutPlayer` | `OnPlayerLogout` |
 | `Player::~Player` | `OnPlayerDelete` |
@@ -55,14 +55,18 @@ normally receives over the wire; both are marked `// playerbot`:
 Nothing special — the `plugins` target is part of the normal CMake build and is
 linked into `worldserver` (link order: `scripts plugins game`).
 
-```sh
-cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build -j$(nproc)
-cmake --install build
+From a Visual Studio 2022 Developer Command Prompt on Windows:
+
+```bat
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCOPY_CONF=1
+cmake --build build --config RelWithDebInfo
+cmake --install build --config RelWithDebInfo
 ```
 
-`cmake --install` also drops `aiplayerbot.conf.dist` into
-`<conf dir>/worldserver.conf.d/`.
+With `COPY_CONF=1` (the default), CMake places `worldserver.conf.dist`, including
+all playerbot settings, next to `worldserver.exe` in the build output.
+`cmake --install` installs that same template. There is no separate bot template.
+Configuration values are read at runtime, not compiled into the executable.
 
 > **Note:** build with the default static linking (`WITH_DYNAMIC_LINKING=0`).
 > With shared libraries the core is compiled with `-fvisibility=hidden` and the
@@ -98,29 +102,112 @@ can be re-run safely.
 
 ## 4. Configuration
 
-Copy `aiplayerbot.conf.dist` to `aiplayerbot.conf` in your
-`worldserver.conf.d/` directory (the installer already places the `.dist`
-file there). Every key also has a sane default compiled in, so an empty file
-still works.
+Use the **AI PLAYERBOT SETTINGS** section of `worldserver.conf.dist`. It contains
+active defaults for every `AiPlayerbot.*` setting, all ten Wrath classes' talent
+weights, and the minimal `AhBot.*` pricing helper settings. Keep these in the
+existing `[worldserver]` section; do not add an `[AiPlayerbotConf]` section.
 
-Key settings:
+### Upgrading an existing server
+
+1. Stop worldserver and back up your live `worldserver.conf`.
+2. Regenerate CMake and rebuild to include the C++ fixes. Copy the new executable
+   and its matching PDB if you run from a separate server directory.
+3. Merge **AI PLAYERBOT SETTINGS** from the new `worldserver.conf.dist` into your
+   live `worldserver.conf`. Preserve your database credentials and other server
+   settings, and replace any existing bot keys rather than duplicating them.
+4. Migrate any custom values from old `aiplayerbot.conf` files. The plugin no
+   longer loads a standalone file from the working directory. The core still
+   loads normal `*.conf` overrides from its configured config directory (by
+   default `worldserver.conf.d`), so remove the old bot override after migration
+   or it can override values in `worldserver.conf`.
+5. Restart worldserver. Bot configuration changes require a restart.
+
+**Rebuilding/installing updates `.conf.dist`, not your live `.conf`.** On a new
+installation, copy `worldserver.conf.dist` to `worldserver.conf` and configure
+your database connections before starting the server.
+
+Put comments on separate lines, not after values. For example, `80 # max level`
+is not an integer to the config parser and triggers the "Bad value" fallback.
+
+Key settings (edit the existing entries, do not append duplicate keys):
 
 ```ini
-AiPlayerbot.Enabled = 1                 # master switch
+# Master switch
+AiPlayerbot.Enabled = 1
 AiPlayerbot.AllowGuildBots = 1
-AiPlayerbot.RandomBotAutologin = 1      # keep a population of random bots online
+# Keep a population of random bots online
+AiPlayerbot.RandomBotAutologin = 1
 AiPlayerbot.MinRandomBots = 50
 AiPlayerbot.MaxRandomBots = 200
-AiPlayerbot.RandomBotAccountPrefix = rndbot
+AiPlayerbot.RandomBotAccountPrefix = "rndbot"
 AiPlayerbot.RandomBotAccountCount = 50
 AiPlayerbot.RandomBotMinLevel = 1
 AiPlayerbot.RandomBotMaxLevel = 80
-AiPlayerbot.CommandPrefix =             # e.g. "!" if you want "!follow"
-AiPlayerbot.CommandServerPort = 0       # 0 disables the TCP command server
+# Use "!" if you want commands such as "!follow"
+AiPlayerbot.CommandPrefix = ""
+# Disable the optional TCP command server
+AiPlayerbot.CommandServerPort = 0
 ```
 
-Spec probabilities per class are configured with
-`AiPlayerbot.RandomClassSpecProbability.<class>.<spec>`.
+The template's `RandomBotMaxLevel = 255` is capped by `MaxPlayerLevel` (normally
+80); setting an explicit value of 80 as above is also valid. The historical
+keys `AiPlayerbot.MaxRandomRandomizeTime` and `AiPlayerbot.MaxRandomReviveTime`
+are intentional: adding "Bot" to those names makes them unused settings.
+
+Spec probabilities are relative weights configured with
+`AiPlayerbot.RandomClassSpecProbability.<class>.<spec>`. Only Wrath class IDs
+1–9 and 11 are read; spec indices are 0–2. This does not add random character
+generation support for a class that the factory does not already support.
+Negative weights become zero; an all-zero row falls back to equal chances.
+
+`RandomBotMaps` accepts unsigned decimal IDs of non-instanced maps present in
+loaded client data. Bad tokens/maps are logged and skipped, and an empty valid
+list prevents random teleport queries. Map 0 remains valid. The account prefix
+must be nonempty ASCII letters/digits/underscores; invalid prefixes disable bot
+initialization before account operations. Underscores match literally in account
+selection, not as SQL wildcards.
+
+The minimal `AhBot.*` helper also filters guild-task item candidates through
+`MaxItemLevel`, `MaxRequiredLevel` and `IgnoreItems`. A maximum of zero means
+unlimited. Pricing multipliers must be finite and positive; invalid values use
+1.0, and copper prices saturate at the signed 32-bit limit. `AhBot.Enabled` and
+`AhBot.UnderPriceProbability` remain compatibility-only fields, not switches for
+the core's full AuctionHouseBot module.
+
+### Quest-reward crash protection
+
+Random-bot quest initialization skips disabled quests, including disabled
+prerequisites. Disabled templates bypass the core's post-load reward validation
+and can contain spell IDs absent from the loaded data. Prerequisite chains are
+also traversed without recursion and deduplicated to handle broken/cyclic data.
+
+`Player::RewardQuest` checks both completion and display reward spells instead
+of asserting on a missing spell. Missing spells are logged with the quest ID,
+spell ID, difficulty and player GUID; other rewards and quest-save/teleport
+cleanup still run. These errors still indicate data that needs investigating;
+config migration alone does not repair spell data. No bot-account deletion or
+database reset is required for this fix.
+
+The follow-up [safety audit](PlayerbotSafetyAudit.md) covers spell resets, hunter
+pet/stable initialization, combat refresh, spell-dependency cycles, teleport and
+numeric configuration, and related population/level/talent errors. It includes
+validation results and a Windows smoke-test checklist; it is not a guarantee
+that incompatible client/world data or all other server paths are safe.
+
+See [MMAP loading and world-data fixes](MapData.md) for false load warnings even
+with correctly placed files, parent/filename resolution, generator fixes and
+core-derived bot spawn selection. There is no blanket requirement to move or
+re-extract existing maps for those code fixes.
+
+The subsequent [packet/byte-level audit](PacketCompatibility.md) fixes packet-type
+assertions, GUID reuse, bit/bounds errors, FIFO event delivery, ready responses,
+and loot/trade handling. It documents the exact wire fixtures and remaining
+end-to-end/client-capture limits.
+
+The [fresh-start/login audit](FreshLoginSafety.md) follows authentication, saved
+character loading, first world entry, pending bot logins and disconnect/teardown.
+It covers the new connection-state, character-data and session-ownership guards
+and provides a cold-start smoke-test checklist.
 
 ---
 
@@ -216,10 +303,8 @@ migrations applied during the port:
 * **No AhBot** — ike3's auction-house bot is not ported.  Use the core's own
   `AuctionHouseBot` module.  Only the item-pricing helpers the bots need were
   kept in `src/plugins/ahbot/`.
-* **Windows builds** — Windows support is best-effort.  The CI runs a Windows
-  build using vcpkg for dependencies, but it is marked non-blocking due to the
-  fragility of the Windows dependency chain.  Linux is the primary supported
-  platform.
+* **Windows only** — this source tree builds with MSVC on Windows. See the
+  root README for dependencies; Linux and macOS builds are not supported.
 
 ---
 
@@ -231,11 +316,29 @@ This repository includes two GitHub Actions workflows:
 
 Runs automatically on every push to `main` and on every pull request.
 
-* **Linux** (Ubuntu 22.04, GCC 12): full build with all servers and tools.
-  This is the primary CI check and **must pass**.
-* **Windows** (Windows Server 2022, MSVC 2022): best-effort build using
-  vcpkg for dependencies.  Marked `continue-on-error` because the Windows
-  dependency chain (Boost via vcpkg) is fragile.
+* **Windows** (Windows Server 2022, MSVC 2022): blocking build using vcpkg
+  dependencies. The build must produce both worldserver and bnetserver.
+* Bot regression checks run before the full build. They validate config coverage,
+  types/defaults, talent weights, and compile actual quest, pet, combat-refresh,
+  config/pricing and dependency-validation code against lightweight fakes (no
+  database/client data needed). MMAP tests additionally compile the actual loader
+  and bundled Detour and perform file loading/navigation on generated fixtures.
+  Packet tests use the real byte buffer, GUID codecs and packet writers/readers,
+  including exhaustive GUID mask combinations and byte-boundary truncations.
+  Login tests cover frame fragmentation, auth state/ownership, corrupted saved
+  character state and pending/active bot lifecycle using deterministic fakes.
+  After the build, the generated `worldserver.conf.dist` is checked against the
+  source template so a missing or stale config fails CI.
+
+Run the focused checks locally with Python 3.9+ and MSVC (or g++ for the standalone
+logic harness):
+
+```bat
+python -m unittest discover -s tests -p "playerbot_*_test.py" -v
+python tests/playerbot_config_test.py --config build/bin/RelWithDebInfo/worldserver.conf.dist
+```
+
+These tests do not replace a full Windows build or a live-server smoke test.
 
 ### Release (`release.yml`)
 
@@ -245,9 +348,7 @@ Inputs:
 * **tag** — release tag name (e.g. `v3.4.3-bots-1`), or leave empty for auto
 * **prerelease** — mark as pre-release (default: true)
 * **build_type** — `RelWithDebInfo` or `Release`
-* **build_windows** — also build Windows binaries (adds ~45 min)
 
-The workflow builds the server, packages the binaries together with SQL
-schemas, configuration files, and documentation, strips debug symbols, and
-creates a GitHub Release with downloadable `.tar.gz` (Linux) and `.zip`
-(Windows) archives.
+The workflow builds the Windows server and packages binaries, SQL schemas,
+configuration files (including the unified `worldserver.conf.dist`), required
+DLLs and documentation in a downloadable `.zip`.

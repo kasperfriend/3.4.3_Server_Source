@@ -1,0 +1,115 @@
+// Tests real generator discovery and TerrainInfo load coordination blocks.
+#include "PathCommon.h"
+#include "StringFormat.h"
+#include <fmt/format.h>
+#include <algorithm>
+#include <set>
+#include <limits>
+#include <atomic>
+#include <bitset>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+using namespace std;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+namespace MMAP
+{
+    struct StaticMapTree { static uint32 packTileID(uint32 x, uint32 y) { return (x << 16) | y; } };
+    struct MapTiles
+    {
+        uint32 m_mapId;
+        set<uint32>* m_tiles;
+        MapTiles(uint32 id, set<uint32>* tiles) : m_mapId(id), m_tiles(tiles) { }
+        bool operator==(uint32 id) const { return m_mapId == id; }
+    };
+    using TileList = vector<MapTiles>;
+    struct MapBuilder
+    {
+        TileList m_tiles;
+        uint32 m_totalTiles = 0;
+        ~MapBuilder() { for (auto const& map : m_tiles) delete map.m_tiles; }
+        void discoverTiles();
+        bool shouldSkipMap(uint32) const { return false; }
+        void getGridBounds(uint32, uint32&, uint32&, uint32&, uint32&) { throw runtime_error("unexpected empty map"); }
+    };
+@DISCOVER@
+}
+constexpr int32 MAX_NUMBER_OF_GRIDS = 64, CENTER_GRID_ID = 32;
+constexpr float SIZE_OF_GRIDS = 533.33333f;
+namespace Trinity
+{
+    bool IsValidMapCoord(float x, float y) { return isfinite(x) && isfinite(y) && abs(x) < 17066 && abs(y) < 17066; }
+}
+struct GridMap { };
+struct TerrainInfo
+{
+    mutex _loadMutex;
+    atomic<uint16> _referenceCountFromMap[64][64]{};
+    bitset<4096> _loadedGrids;
+    unique_ptr<GridMap> _gridMap[64][64];
+    vector<shared_ptr<TerrainInfo>> _childTerrain;
+    int loads = 0;
+    uint32 GetId() const { return 0; }
+    static int32 GetBitsetIndex(int32 x, int32 y) { return x * 64 + y; }
+    void LoadMapAndVMap(int32 gx, int32 gy);
+    GridMap* GetGrid(uint32 mapId, float x, float y, bool loadIfMissing = true);
+    void LoadMapAndVMapImpl(int32 gx, int32 gy)
+    {
+        ++loads;
+        _loadedGrids.set(GetBitsetIndex(gx, gy));
+        _gridMap[gx][gy] = make_unique<GridMap>();
+    }
+};
+@TERRAIN_LOAD@
+@GET_GRID@
+struct Point
+{
+    float x = 0, y = 0;
+    Point operator-(Point const& other) const { return { x - other.x, y - other.y }; }
+    float length() const { return sqrt(x * x + y * y); }
+};
+struct PathGenerator { vector<Point> _pathPoints; float GetPathLength() const; };
+@PATH_LENGTH@
+int main()
+{
+    try
+    {
+        CHECK(!filesystem::exists("maps") && !filesystem::exists("vmaps"));
+        filesystem::create_directory("maps");
+        filesystem::create_directory("vmaps");
+        ofstream("maps/0000_15_27.map").put('x');
+        ofstream("maps/0999.tilelist").put('x'); // not terrain; do not discover map 999 or a fake 0,0 tile
+        ofstream("vmaps/0000.vmtree").put('x');
+        ofstream("vmaps/0000_24_39.vmtile").put('x');
+        MMAP::MapBuilder builder;
+        builder.discoverTiles();
+        CHECK(builder.m_tiles.size() == 1 && builder.m_totalTiles == 2);
+        auto const& tiles = *builder.m_tiles[0].m_tiles;
+        CHECK(tiles.count(MMAP::StaticMapTree::packTileID(27, 15)));
+        CHECK(tiles.count(MMAP::StaticMapTree::packTileID(39, 24)));
+        CHECK(!tiles.count(MMAP::StaticMapTree::packTileID(24, 39)));
+
+        PathGenerator path;
+        CHECK(path.GetPathLength() == 0);
+        path._pathPoints = { { 0, 0 } };
+        CHECK(path.GetPathLength() == 0);
+        path._pathPoints.push_back({ 3, 4 });
+        CHECK(path.GetPathLength() == 5);
+        TerrainInfo terrain;
+        CHECK(terrain.GetGrid(0, 0, 0) && terrain.loads == 1); // height query preloads tile
+        terrain.LoadMapAndVMap(32, 32); // later, the actual Map references it
+        terrain.LoadMapAndVMap(32, 32); // second map/instance references it
+        CHECK(terrain.loads == 1 && terrain._referenceCountFromMap[32][32] == 2);
+        CHECK(!terrain.GetGrid(0, numeric_limits<float>::quiet_NaN(), 0));
+        CHECK(!terrain.GetGrid(0, 20000, 0));
+        terrain.LoadMapAndVMap(-1, 32);
+        terrain.LoadMapAndVMap(64, 32);
+        CHECK(terrain.loads == 1);
+        cout << "Generator axis discovery and terrain load coordination passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

@@ -1,0 +1,102 @@
+#include "MessageBuffer.h"
+#include "ByteConverter.h"
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <stdexcept>
+#include <string>
+using namespace std;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+#define ASSERT(condition, ...) CHECK(condition)
+template<class... T> void Log(T const&...) { }
+#define TC_LOG_ERROR(...) Log(__VA_ARGS__)
+// Model only the protobuf ParseFromArray/size contract. Tests do not substitute
+// this for a protobuf implementation or make claims about TLS/RPC semantics.
+struct Header
+{
+    uint32 length = 0;
+    bool ParseFromArray(void const* bytes, size_t count)
+    {
+        if (count != 5 || static_cast<uint8 const*>(bytes)[0] != 0xA5) return false;
+        memcpy(&length, static_cast<uint8 const*>(bytes) + 1, 4);
+        return true;
+    }
+    uint32 size() const { return length; }
+    uint32 service_id() const { return 1; }
+    uint32 service_hash() const { return 2; }
+    uint32 token() const { return 3; }
+    uint32 method_id() const { return 4; }
+};
+namespace Battlenet
+{
+    struct Session
+    {
+        MessageBuffer input, _headerLengthBuffer{ 2 }, _headerBuffer, _packetBuffer;
+        bool open = true;
+        map<uint32, function<void(MessageBuffer)>> _responseCallbacks;
+        bool IsOpen() const { return open; }
+        void CloseSocket() { open = false; }
+        MessageBuffer& GetReadBuffer() { return input; }
+        void AsyncRead() { input.Normalize(); }
+        string GetClientInfo() const { return "test peer"; }
+        void ReadHandler();
+        bool ReadHeaderLengthHandler();
+        bool ReadHeaderHandler();
+        bool ReadDataHandler();
+    };
+}
+struct Dispatcher
+{
+    vector<size_t> bodies;
+    void Dispatch(Battlenet::Session*, uint32, uint32, uint32, MessageBuffer body) { bodies.push_back(body.GetActiveSize()); }
+} sServiceDispatcher;
+@PARTIAL@
+@READ@
+@LENGTH@
+@HEADER@
+@BODY@
+vector<uint8> Frame(uint32 size, bool valid = true)
+{
+    vector<uint8> bytes{ 0, 5, uint8(valid ? 0xA5 : 0) };
+    auto raw = reinterpret_cast<uint8*>(&size);
+    bytes.insert(bytes.end(), raw, raw + 4);
+    return bytes;
+}
+void Feed(Battlenet::Session& session, vector<uint8> const& bytes, size_t fragment)
+{
+    for (size_t i = 0; i < bytes.size() && session.IsOpen(); i += fragment)
+    {
+        size_t count = min(fragment, bytes.size() - i);
+        session.input.Resize(session.input.GetActiveSize() + count);
+        session.input.Write(bytes.data() + i, count);
+        session.ReadHandler();
+    }
+}
+int main()
+{
+    try
+    {
+        auto empty = Frame(0), full = Frame(17);
+        full.resize(full.size() + 17, 0x55);
+        empty.insert(empty.end(), full.begin(), full.end());
+        for (size_t split = 1; split <= empty.size(); ++split)
+        {
+            sServiceDispatcher.bodies.clear();
+            Battlenet::Session session;
+            Feed(session, empty, split);
+            CHECK(session.IsOpen() && sServiceDispatcher.bodies == vector<size_t>({ 0, 17 }));
+        }
+        for (auto const& malformed : { Frame(0xFFFFFFFF), Frame(1024 * 1024 + 1), Frame(0, false), vector<uint8>{ 0, 0 } })
+        {
+            Battlenet::Session session;
+            Feed(session, malformed, 1);
+            CHECK(!session.IsOpen() && session._packetBuffer.GetBufferSize() == 4096);
+        }
+        Battlenet::Session limit;
+        Feed(limit, Frame(1024 * 1024), 1);
+        CHECK(limit.IsOpen() && limit._packetBuffer.GetBufferSize() == 1024 * 1024);
+        cout << "Battle.net fragmented frames and preallocation bounds passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

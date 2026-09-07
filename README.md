@@ -33,9 +33,13 @@ Quick start:
 
 1. Build normally — the `plugins` library is part of the CMake build.
 2. Import `sql/custom/playerbot/characters_playerbot.sql` into your **characters** database.
-3. Copy `src/plugins/playerbot/aiplayerbot.conf.dist` to
-   `<config dir>/worldserver.conf.d/aiplayerbot.conf` (`cmake --install` does this for you)
-   and set `AiPlayerbot.Enabled = 1`.
+3. Configure bots in the **AI PLAYERBOT SETTINGS** section of `worldserver.conf`.
+   All defaults are included in the normal `worldserver.conf.dist` copied by the build
+   (`COPY_CONF=1`, the default). For an existing server, merge that section into your
+   live `worldserver.conf`; rebuilding never overwrites your live configuration.
+   Keep `AiPlayerbot.Enabled = 1` to enable bots and restart worldserver.
+   No separate `aiplayerbot.conf` is needed. Migrate any old overrides from
+   `worldserver.conf.d/aiplayerbot.conf`, then remove that old override file.
 4. In game: `.bot add <charactername>`, then whisper the bot `follow`, `attack my target`, `stay`, …
 
 See [docs/Playerbots.md](docs/Playerbots.md) for the full documentation:

@@ -2,6 +2,20 @@
 #include "AhBot.h"
 #include "Entities/Item/ItemTemplate.h"
 #include <cmath>
+#include <limits>
+
+namespace
+{
+    int32 ClampBotPrice(double price)
+    {
+        // Prices enter signed-int32 trade/guild-task APIs. Never convert NaN,
+        // infinity or an out-of-range value directly to an integer.
+        if (!(price > 0.0))
+            return 0;
+        double maximum = std::numeric_limits<int32>::max();
+        return price >= maximum ? std::numeric_limits<int32>::max() : int32(price);
+    }
+}
 
 double ahbot::AhBot::GetRarityPriceMultiplier(const ItemTemplate* proto)
 {
@@ -9,10 +23,10 @@ double ahbot::AhBot::GetRarityPriceMultiplier(const ItemTemplate* proto)
         return 1.0;
     // Exponential scaling by quality, capped so epic/legendary items are
     // priced realistically for bots to buy/sell.
-    double multiplier = std::pow(2.0, int32(proto->GetQuality()) - 1) * sAhBotConfig.priceQualityMultiplier;
-    if (multiplier > 100.0)
-        multiplier = 100.0;
-    return multiplier;
+    double multiplier = std::pow(2.0, double(proto->GetQuality()) - 1.0) * sAhBotConfig.priceQualityMultiplier;
+    if (!std::isfinite(multiplier) || multiplier <= 0.0)
+        return 1.0;
+    return std::min(multiplier, 100.0);
 }
 
 int32 ahbot::AhBot::GetSellPrice(const ItemTemplate* proto)
@@ -20,19 +34,19 @@ int32 ahbot::AhBot::GetSellPrice(const ItemTemplate* proto)
     if (!proto)
         return 0;
 
-    int32 base = proto->GetSellPrice() ? int32(proto->GetSellPrice()) : int32(proto->GetBuyPrice());
+    double base = proto->GetSellPrice() ? double(proto->GetSellPrice()) : double(proto->GetBuyPrice());
     if (!base)
     {
         // Estimate price from item level/quality when the template carries no price.
-        int32 level = std::max(1, int32(proto->GetItemLevel()));
-        base = int32(level * level * 0.02f) * (int32(proto->GetQuality()) + 1);
+        double level = std::max(1.0, double(proto->GetItemLevel()));
+        base = std::floor(level * level * 0.02) * (double(proto->GetQuality()) + 1.0);
     }
 
     double price = double(base) * GetRarityPriceMultiplier(proto) * sAhBotConfig.priceMultiplier;
     if (price < sAhBotConfig.defaultMinPrice)
         price = sAhBotConfig.defaultMinPrice;
 
-    return int32(price);
+    return ClampBotPrice(price);
 }
 
 int32 ahbot::AhBot::GetBuyPrice(const ItemTemplate* proto)
@@ -44,5 +58,5 @@ int32 ahbot::AhBot::GetBuyPrice(const ItemTemplate* proto)
     if (!sell)
         return 0;
 
-    return int32(sell * 1.5);
+    return ClampBotPrice(double(sell) * 1.5);
 }

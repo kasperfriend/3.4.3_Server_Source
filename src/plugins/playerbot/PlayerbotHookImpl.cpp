@@ -43,6 +43,7 @@ namespace
         try
         {
             sRandomPlayerbotMgr.UpdateSessions(diff);
+            sRandomPlayerbotMgr.UpdatePlayerbotSessions(diff);
         }
         catch (std::exception const& e)
         {
@@ -60,12 +61,6 @@ namespace
         {
             if (PlayerbotAI* ai = player->GetPlayerbotAI())
                 ai->UpdateAI(diff);
-
-            if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
-            {
-                mgr->UpdateAI(diff);
-                mgr->UpdateSessions(diff);
-            }
         }
         catch (std::exception const& e)
         {
@@ -79,7 +74,7 @@ namespace
 
     void PlayerbotPlayerLogin(Player* player)
     {
-        if (!player)
+        if (!player || !player->GetSession() || player->GetSession()->IsBotSession())
             return;
 
         try
@@ -129,9 +124,19 @@ namespace
 
         try
         {
+            // A Player can also be removed directly by core map/error cleanup.
+            // Do not leave its owning session with a pointer to the destroyed Player.
+            if (WorldSession* session = player->GetSession())
+                if (session->IsBotSession() && session->GetPlayer() == player)
+                    session->SetPlayer(nullptr);
+
+            sRandomPlayerbotMgr.OnPlayerLogout(player); // also covers deletion without a normal logout hook
             PlayerbotAI* ai = player->GetPlayerbotAI();
-            // capture the master before the AI (which stores it) is deleted
             Player* master = ai ? ai->GetMaster() : nullptr;
+            sRandomPlayerbotMgr.RemovePlayerBotEntry(player->GetGUID());
+            if (master && master != player)
+                if (PlayerbotMgr* masterMgr = master->GetPlayerbotMgr())
+                    masterMgr->RemovePlayerBotEntry(player->GetGUID());
 
             if (ai)
             {
@@ -143,16 +148,6 @@ namespace
             {
                 player->SetPlayerbotMgr(nullptr);
                 delete mgr;
-            }
-
-            // purge holder map entries pointing at this destroyed player: a bot
-            // removed from the world without the normal logout flow would
-            // otherwise leave a dangling pointer the managers keep dereferencing
-            sRandomPlayerbotMgr.RemovePlayerBotEntry(player->GetGUID());
-            if (master)
-            {
-                if (PlayerbotMgr* masterMgr = master->GetPlayerbotMgr())
-                    masterMgr->RemovePlayerBotEntry(player->GetGUID());
             }
         }
         catch (std::exception const& e)
@@ -260,7 +255,9 @@ namespace Playerbot
         if (!IsEnabled())
             return;
 
-        SetEnabled(false);
+        // Keep teardown hooks active until every owned/pending bot is gone.
+        sRandomPlayerbotMgr.ShutdownPlayerbotSessions();
         sRandomPlayerbotMgr.LogoutAllBots();
+        SetEnabled(false);
     }
 }

@@ -13,6 +13,7 @@ namespace ai
             creators["gossip hello"] = &WorldPacketTriggerContext::gossip_hello;
             creators["group invite"] = &WorldPacketTriggerContext::group_invite;
             creators["group set leader"] = &WorldPacketTriggerContext::group_set_leader;
+            creators["buy failed"] = &WorldPacketTriggerContext::buy_failed;
             creators["not enough money"] = &WorldPacketTriggerContext::no_money;
             creators["not enough reputation"] = &WorldPacketTriggerContext::no_reputation;
             creators["cannot equip"] = &WorldPacketTriggerContext::cannot_equip;
@@ -47,6 +48,7 @@ namespace ai
         }
 
     private:
+        static Trigger* buy_failed(PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "buy failed"); }
         static Trigger* guild_invite(PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "guild invite"); }
         static Trigger* lfg_teleport(PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "lfg teleport"); }
         static Trigger* lfg_leave(PlayerbotAI* ai) { return new WorldPacketTrigger(ai, "lfg leave"); }

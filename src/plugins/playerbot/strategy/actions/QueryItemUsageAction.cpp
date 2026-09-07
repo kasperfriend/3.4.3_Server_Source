@@ -1,5 +1,8 @@
 #include "../../../pchdef.h"
 #include "../../playerbot.h"
+#include "../../PlayerbotPackets.h"
+#include "../../GuildTaskMgr.h"
+#include <limits>
 #include "strategy/actions/QueryItemUsageAction.h"
 #include "../values/ItemUsageValue.h"
 #include "../../../ahbot/AhBot.h"
@@ -11,66 +14,44 @@ using namespace ai;
 
 bool QueryItemUsageAction::Execute(Event event)
 {
-    WorldPacket& data = event.getPacket();
-    if (!data.empty())
+    if (!event.getPacket().empty())
     {
-        data.rpos(0);
-
-        // SMSG_ITEM_PUSH_RESULT in 3.4.3 (WorldPackets::Item::ItemPushResult::Write,
-        // Player::SendNewItem) - not the classic 3.3.5 field order this action
-        // used to read (which mis-parsed every push now that the item flow works
-        // again: the fields after the guid are different and the item id sits
-        // inside a trailing ItemInstance). Read the modern layout instead.
-        ObjectGuid guid;
-        data >> guid;
-        if (guid != bot->GetGUID())
+        packets::ItemPush pushed;
+        if (!packets::ReadItemPush(event.getPacket(), pushed) || pushed.Player != bot->GetGUID() || pushed.Quantity <= 0)
             return false;
-
-        data.read_skip<uint8>();                // Slot
-        data.read_skip<int32>();                // SlotInBag
-        int32 questLogItemId = 0;
-        data >> questLogItemId;                 // only set when it differs from the real id
-        int32 quantity = 0;
-        data >> quantity;                       // count of the pushed stack
-        data.read_skip<int32>();                // QuantityInInventory
-        data.read_skip<int32>();                // DungeonEncounterID
-        data.read_skip<int32>();                // BattlePetSpeciesID
-        data.read_skip<int32>();                // BattlePetBreedID
-        data.read_skip<uint32>();               // BattlePetBreedQuality
-        data.read_skip<int32>();                // BattlePetLevel
-        ObjectGuid itemGuid;
-        data >> itemGuid;                       // ItemGUID (packed ObjectGuid - a
-                                                // fixed-size read_skip would walk
-                                                // into the trailing bit block)
-
-        bool pushed = data.ReadBit();           // Pushed (e.g. quest reward, trade)
-        bool created = data.ReadBit();          // Created (crafted)
-        data.ReadBit();                         // Unused_1017
-        data.ReadBits(3);                       // DisplayText
-        data.ReadBit();                         // IsBonusRoll
-        data.ReadBit();                         // IsEncounterLoot
-        data.ResetBitPos();
-
-        int32 itemId = 0;
-        data >> itemId;                         // ItemInstance.ItemID (first field)
-        if (itemId <= 0)
-            itemId = questLogItemId;            // fall back to the quest-credit id
-        if (itemId <= 0)
-            return false;
-
-        ItemTemplate const *item = sObjectMgr->GetItemTemplate(uint32(itemId));
+        uint32 itemId = pushed.Item.ItemID;
+        if (!itemId && pushed.QuestLogItemID > 0)
+            itemId = uint32(pushed.QuestLogItemID);
+        ItemTemplate const* item = sObjectMgr->GetItemTemplate(itemId);
         if (!item)
             return false;
 
-        ostringstream out; out << chat->formatItem(item, quantity);
-        if (created)
+        if (!pushed.Pushed && !pushed.Created && sRandomPlayerbotMgr.IsRandomBot(bot))
+        {
+            uint32 lootAmount = sRandomPlayerbotMgr.GetLootAmount(bot);
+            if (Group* group = bot->GetGroup())
+            {
+                double price = double(pushed.Quantity) * auctionbot.GetSellPrice(item) * sRandomPlayerbotMgr.GetSellMultiplier(bot);
+                double total = double(lootAmount) + (std::isfinite(price) && price > 0.0 ? price : 0.0);
+                sRandomPlayerbotMgr.SetLootAmount(bot, uint32(std::min(total, double(std::numeric_limits<uint32>::max()))));
+                for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+                    if (Player* member = ref->GetSource())
+                        if (member != bot)
+                            sGuildTaskMgr.CheckItemTask(itemId, uint32(pushed.Quantity), member, bot);
+            }
+            else if (lootAmount)
+                sRandomPlayerbotMgr.SetLootAmount(bot, 0);
+        }
+
+        ostringstream out;
+        out << chat->formatItem(item, pushed.Quantity);
+        if (pushed.Created)
             out << " created";
-        else if (pushed)
+        else if (pushed.Pushed)
             out << " received";
         ai->TellMaster(out);
-
         QueryItemUsage(item);
-        QueryQuestItem(uint32(itemId));
+        QueryQuestItem(itemId);
         return true;
     }
 

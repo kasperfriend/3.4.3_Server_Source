@@ -587,6 +587,14 @@ void ObjectGuid::SetRawValue(std::vector<uint8> const& guid)
     memcpy(this, guid.data(), sizeof(*this));
 }
 
+bool ObjectGuid::TrySetRawValue(std::vector<uint8> const& guid)
+{
+    if (guid.size() != sizeof(*this))
+        return false;
+    memcpy(this, guid.data(), sizeof(*this));
+    return true;
+}
+
 static inline uint32 GetRealmIdForObjectGuid(uint32 realmId)
 {
     if (realmId)
@@ -780,8 +788,11 @@ ByteBuffer& operator>>(ByteBuffer& buf, ObjectGuid& guid)
 {
     uint8 lowMask, highMask;
     buf >> lowMask >> highMask;
-    buf.ReadPackedUInt64(lowMask, guid._data[0]);
-    buf.ReadPackedUInt64(highMask, guid._data[1]);
+    uint64 low = 0, high = 0;
+    buf.ReadPackedUInt64(lowMask, low);
+    buf.ReadPackedUInt64(highMask, high);
+    // Commit both halves only after a complete read (also safe when reused).
+    guid.SetRawValue(high, low);
     return buf;
 }
 

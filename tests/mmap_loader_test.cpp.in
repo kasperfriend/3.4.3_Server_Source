@@ -1,0 +1,231 @@
+// Exercises the real MMapManager + bundled Detour using generated navigation
+// data. No game/client files, database, or worldserver linkage are required.
+#include "MMapManager.h"
+#include "MMapDataValidation.h"
+#include "DetourNavMeshBuilder.h"
+#include "Log.h"
+#include "Memory.h"
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+
+namespace fs = std::filesystem;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw std::runtime_error("Check failed at line " + std::to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+
+@TELEPORT_NAV@
+namespace MMAP
+{
+    struct TileBuilder { bool shouldSkipTile(uint32, uint32, uint32, dtNavMesh const*) const; };
+@TILE_CACHE@
+}
+
+std::vector<unsigned char> MakeTile()
+{
+    unsigned short vertices[] = { 0, 0, 0, 0, 0, 10, 10, 0, 10, 10, 0, 0 };
+    unsigned short polygons[] = { 0, 1, 2, 3, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
+    unsigned short flags[] = { NAV_GROUND };
+    unsigned char areas[] = { NAV_AREA_GROUND };
+    dtNavMeshCreateParams params{};
+    params.verts = vertices; params.vertCount = 4;
+    params.polys = polygons; params.polyCount = 1; params.nvp = 6;
+    params.polyFlags = flags; params.polyAreas = areas;
+    params.tileX = 0; params.tileY = 0;
+    params.bmax[0] = 10; params.bmax[1] = 1; params.bmax[2] = 10;
+    params.cs = 1; params.ch = 1;
+    params.walkableHeight = 2; params.walkableRadius = 0.5f; params.walkableClimb = 0.5f;
+    params.buildBvTree = true;
+    unsigned char* data = nullptr;
+    int size = 0;
+    CHECK(dtCreateNavMeshData(&params, &data, &size));
+    std::vector<unsigned char> tile(data, data + size);
+    dtFree(data);
+    CHECK(!MMAP::ValidateMMapTileData(tile.data(), uint32(tile.size())));
+    return tile;
+}
+
+void Write(fs::path const& file, void const* data, size_t size)
+{
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out.write(static_cast<char const*>(data), std::streamsize(size));
+    CHECK(out.good());
+}
+void Params(fs::path const& dir, std::string const& name = "0000.mmap", int maxTiles = 4)
+{
+    // Preserve compatibility with the old generator's signed 0x80000000 field.
+    dtNavMeshParams params{ { 0, 0, 0 }, 10, 10, maxTiles, std::numeric_limits<int>::min() };
+    Write(dir / "mmaps" / name, &params, sizeof(params));
+}
+void Tile(fs::path const& dir, std::string const& name, std::vector<unsigned char> const& data,
+    uint32 mmapVersion = MMAP_VERSION, uint32 dtVersion = DT_NAVMESH_VERSION, uint32 sizeOverride = 0)
+{
+    MmapTileHeader header;
+    header.mmapVersion = mmapVersion;
+    header.dtVersion = dtVersion;
+    header.size = sizeOverride ? sizeOverride : uint32(data.size());
+    std::ofstream out(dir / "mmaps" / name, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<char const*>(&header), sizeof(header));
+    out.write(reinterpret_cast<char const*>(data.data()), std::streamsize(data.size()));
+    CHECK(out.good());
+}
+std::string Base(fs::path const& dir) { return dir.u8string(); }
+bool Logged(std::string const& text)
+{
+    for (auto const& message : TestLog::messages)
+        if (message.find(text) != std::string::npos) return true;
+    return false;
+}
+void Clear(fs::path const& dir)
+{
+    fs::remove_all(dir / "mmaps");
+    fs::create_directories(dir / "mmaps");
+    TestLog::messages.clear();
+}
+
+int failAllocationAt = -1, allocations = 0;
+void* Allocate(size_t size, dtAllocHint)
+{
+    if (allocations++ == failAllocationAt) return nullptr;
+    return std::malloc(size);
+}
+void Free(void* value) { std::free(value); }
+
+void TestLoader(fs::path const& dir)
+{
+    auto data = MakeTile();
+    Clear(dir);
+    Params(dir);
+    Tile(dir, "00003132.mmtile", data);
+    {
+        MMAP::MMapManager mgr;
+        mgr.InitializeThreadUnsafe({ { 0, {} } });
+        CHECK(mgr.getLoadedMapsCount() == 0); // registry entries are not loaded meshes
+        CHECK(mgr.loadMapInstance(Base(dir), 0, 0, 7));
+        CHECK(mgr.loadMap(Base(dir), 0, 31, 32)); // base path need not end in '/'
+        CHECK(mgr.loadMap(Base(dir) + '/', 0, 31, 32)); // duplicate load is success
+        CHECK(mgr.getLoadedMapsCount() == 1 && mgr.getLoadedTilesCount() == 1);
+        CHECK(mgr.GetNavMeshQuery(0, 0, 7));
+        {
+            auto cwd = fs::current_path();
+            fs::current_path(dir);
+            MMAP::TileBuilder builder;
+            CHECK(builder.shouldSkipTile(0, 32, 31, mgr.GetNavMesh(0)));
+            dtNavMeshParams shifted = *mgr.GetNavMesh(0)->getParams();
+            shifted.orig[0] -= shifted.tileWidth;
+            dtNavMesh changed;
+            CHECK(dtStatusSucceed(changed.init(&shifted)));
+            CHECK(!builder.shouldSkipTile(0, 32, 31, &changed)); // changed .mmap origin forces regeneration
+            fs::current_path(cwd);
+        }
+        CHECK(HasBotTeleportNavigation(mgr, 0, 0, 7, 2, 8, 0));
+        CHECK(!HasBotTeleportNavigation(mgr, 0, 0, 7, 200, 200, 0));
+        CHECK(!HasBotTeleportNavigation(mgr, 0, 0, 999, 2, 8, 0));
+        dtQueryFilter filter;
+        float point[] = { 2, 0, 2 }, extents[] = { 3, 3, 3 }, nearest[3];
+        dtPolyRef ref = 0;
+        CHECK(dtStatusSucceed(mgr.GetNavMeshQuery(0, 0, 7)->findNearestPoly(point, extents, &filter, &ref, nearest)) && ref);
+        CHECK(!mgr.loadMap(Base(dir), 0, -1, 32));
+        CHECK(!mgr.loadMap(Base(dir), 0, 64, 32));
+        CHECK(!mgr.loadMap(Base(dir), 999, 31, 32)); // invalid world map, not a process abort
+        CHECK(Logged("not registered"));
+        CHECK(mgr.unloadMap(0, 31, 32) && mgr.getLoadedTilesCount() == 0);
+        CHECK(mgr.loadMap(Base(dir), 0, 31, 32));
+        CHECK(mgr.unloadMapInstance(0, 0, 7));
+        CHECK(mgr.unloadMap(0) && mgr.getLoadedMapsCount() == 0);
+    }
+    {
+        MMAP::MMapManager mgr;
+        mgr.InitializeThreadUnsafe({ { 0, { 1 } }, { 1, { 2 } } });
+        CHECK(mgr.loadMapInstance(Base(dir), 2, 2, 3)); // deep inheritance, no child files
+        CHECK(mgr.loadMap(Base(dir), 2, 31, 32));
+        CHECK(mgr.GetNavMeshQuery(2, 2, 3) && mgr.getLoadedTilesCount() == 1);
+    }
+    fs::rename(dir / "mmaps/0000.mmap", dir / "mmaps/000.mmap");
+    fs::rename(dir / "mmaps/00003132.mmtile", dir / "mmaps/0003132.mmtile");
+    {
+        MMAP::MMapManager mgr;
+        CHECK(mgr.loadMap(Base(dir), 0, 31, 32)); // same binary format, legacy filenames
+    }
+    Tile(dir, "00003132.mmtile", data, MMAP_VERSION + 1);
+    {
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMap(Base(dir), 0, 31, 32)); // bad canonical must not fall back to good legacy
+        CHECK(Logged("incompatible tile") && Logged("File exists"));
+    }
+    Clear(dir);
+    Params(dir);
+    Tile(dir, "00003132.mmtile", data, MMAP_VERSION, DT_NAVMESH_VERSION + 1);
+    {
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMap(Base(dir), 0, 31, 32));
+    }
+    for (uint32 size : { 1u, uint32(data.size() + 20), 0x80000000u, 0xFFFFFFFFu })
+    {
+        Tile(dir, "00003132.mmtile", data, MMAP_VERSION, DT_NAVMESH_VERSION, size);
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMap(Base(dir), 0, 31, 32));
+        CHECK(mgr.getLoadedTilesCount() == 0);
+    }
+    auto malformed = data;
+    reinterpret_cast<dtMeshHeader*>(malformed.data())->maxLinkCount = 0;
+    Tile(dir, "00003132.mmtile", malformed);
+    {
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMap(Base(dir), 0, 31, 32));
+        CHECK(Logged("invalid Detour element counts"));
+        auto cwd = fs::current_path();
+        fs::current_path(dir);
+        CHECK(!MMAP::TileBuilder{}.shouldSkipTile(0, 32, 31, mgr.GetNavMesh(0))); // header-only checks used to skip this corrupt tile
+        fs::current_path(cwd);
+    }
+    malformed = data;
+    size_t polyOffset = sizeof(dtMeshHeader) + 4 * 3 * sizeof(float);
+    reinterpret_cast<dtPoly*>(malformed.data() + polyOffset)->verts[0] = 65535;
+    CHECK(MMAP::ValidateMMapTileData(malformed.data(), uint32(malformed.size())));
+    Tile(dir, "00003132.mmtile", malformed);
+    {
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMap(Base(dir), 0, 31, 32));
+    }
+    Clear(dir);
+    Params(dir, "0000.mmap", -1);
+    {
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMapInstance(Base(dir), 0, 0, 0));
+        CHECK(mgr.getLoadedMapsCount() == 0);
+    }
+    Params(dir);
+    Tile(dir, "00003132.mmtile", data);
+    // Allocation failures in Detour init must remain destructor-safe.
+    dtAllocSetCustom(&Allocate, &Free);
+    for (int failure = 0; failure < 4; ++failure)
+    {
+        failAllocationAt = failure;
+        allocations = 0;
+        MMAP::MMapManager mgr;
+        CHECK(!mgr.loadMapInstance(Base(dir), 0, 0, 1));
+        CHECK(!mgr.GetNavMeshQuery(0, 0, 1));
+    }
+    failAllocationAt = -1;
+    dtAllocSetCustom(nullptr, nullptr);
+}
+
+int main()
+{
+    try
+    {
+        // Deliberately use both spaces and non-ASCII names. Only logging/errors
+        // and the unused custom filter header are shimmed; MMAP/Detour/IO are real.
+        fs::path directory = fs::current_path() / fs::u8path(u8"map data \u041a\u0430\u0440\u0442\u0438");
+        CHECK(!fs::exists(directory)); // never overwrite a caller's existing data
+        fs::create_directories(directory);
+        TestLoader(directory);
+        fs::remove_all(directory);
+        std::cout << "Real MMAP/Detour load, query, inheritance, naming and rejection tests passed\n";
+    }
+    catch (std::exception const& error) { std::cerr << error.what() << '\n'; return 1; }
+}

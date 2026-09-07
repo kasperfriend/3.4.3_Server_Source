@@ -33,6 +33,7 @@
 #include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include <G3D/g3dmath.h>
+#include <unordered_set>
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/hashed_index.hpp>
@@ -139,65 +140,75 @@ SpellMgr* SpellMgr::instance()
 /// Some checks for spells, to prevent adding deprecated/broken spells for trainers, spell book, etc
 bool SpellMgr::IsSpellValid(SpellInfo const* spellInfo, Player* player, bool msg)
 {
-    // not exist
     if (!spellInfo)
         return false;
 
-    bool needCheckReagents = false;
-
-    // check effects
-    for (SpellEffectInfo const& spellEffectInfo : spellInfo->GetEffects())
+    auto report = [player, msg](std::string const& text)
     {
-        switch (spellEffectInfo.Effect)
+        if (!msg)
+            return;
+        if (player)
+            ChatHandler(player->GetSession()).SendSysMessage(text);
+        else
+            TC_LOG_ERROR("sql.sql", "{}", text);
+    };
+
+    struct ValidationFrame
+    {
+        SpellInfo const* Spell;
+        size_t NextEffect = 0;
+        bool CheckReagents = false;
+    };
+    // Player login, default skills and quest rewards all validate learned
+    // spells here. Cyclic or very deep learn-spell data must not recurse on
+    // the C++ stack. A completed shared dependency only needs checking once.
+    std::vector<ValidationFrame> pending{ { spellInfo } };
+    std::unordered_map<SpellInfo const*, bool> checked{ { spellInfo, false } };
+    while (!pending.empty())
+    {
+        ValidationFrame& frame = pending.back();
+        SpellInfo const* current = frame.Spell;
+        if (frame.NextEffect == current->GetEffects().size())
         {
-            // craft spell for crafting non-existed item (break client recipes list show)
-            case SPELL_EFFECT_CREATE_ITEM:
-            case SPELL_EFFECT_CREATE_LOOT:
-            {
-                if (spellEffectInfo.ItemType == 0)
-                {
-                    // skip auto-loot crafting spells, it does not need explicit item info (but has special fake items sometimes).
-                    if (!spellInfo->IsLootCrafting())
+            if (frame.CheckReagents)
+                for (int32 reagent : current->Reagent)
+                    if (reagent > 0 && !sObjectMgr->GetItemTemplate(reagent))
                     {
-                        if (msg)
-                        {
-                            if (player)
-                                ChatHandler(player->GetSession()).PSendSysMessage("The craft spell %u does not have a create item entry.", spellInfo->Id);
-                            else
-                                TC_LOG_ERROR("sql.sql", "The craft spell {} does not have a create item entry.", spellInfo->Id);
-                        }
+                        report(Trinity::StringFormat("Craft spell {} refers to missing reagent {}", current->Id, reagent));
                         return false;
                     }
+            checked[current] = true;
+            pending.pop_back();
+            continue;
+        }
 
-                }
-                // also possible IsLootCrafting case but fake items must exist anyway
-                else if (!sObjectMgr->GetItemTemplate(spellEffectInfo.ItemType))
+        SpellEffectInfo const& effect = current->GetEffects()[frame.NextEffect++];
+        switch (effect.Effect)
+        {
+            case SPELL_EFFECT_CREATE_ITEM:
+            case SPELL_EFFECT_CREATE_LOOT:
+                if ((!effect.ItemType && !current->IsLootCrafting()) ||
+                    (effect.ItemType && !sObjectMgr->GetItemTemplate(effect.ItemType)))
                 {
-                    if (msg)
-                    {
-                        if (player)
-                            ChatHandler(player->GetSession()).PSendSysMessage("Craft spell %u has created a non-existing in DB item (Entry: %u) and then...", spellInfo->Id, spellEffectInfo.ItemType);
-                        else
-                            TC_LOG_ERROR("sql.sql", "Craft spell {} has created a non-existing item in DB item (Entry: {}) and then...", spellInfo->Id, spellEffectInfo.ItemType);
-                    }
+                    report(Trinity::StringFormat("Craft spell {} has invalid created item {}", current->Id, effect.ItemType));
                     return false;
                 }
-
-                needCheckReagents = true;
+                frame.CheckReagents = true;
                 break;
-            }
             case SPELL_EFFECT_LEARN_SPELL:
             {
-                SpellInfo const* spellInfo2 = sSpellMgr->GetSpellInfo(spellEffectInfo.TriggerSpell, DIFFICULTY_NONE);
-                if (!IsSpellValid(spellInfo2, player, msg))
+                SpellInfo const* learned = sSpellMgr->GetSpellInfo(effect.TriggerSpell, DIFFICULTY_NONE);
+                if (!learned)
                 {
-                    if (msg)
-                    {
-                        if (player)
-                            ChatHandler(player->GetSession()).PSendSysMessage("Spell %u learn to broken spell %u, and then...", spellInfo->Id, spellEffectInfo.TriggerSpell);
-                        else
-                            TC_LOG_ERROR("sql.sql", "Spell {} learn to invalid spell {}, and then...", spellInfo->Id, spellEffectInfo.TriggerSpell);
-                    }
+                    report(Trinity::StringFormat("Spell {} learns missing spell {}", current->Id, effect.TriggerSpell));
+                    return false;
+                }
+                auto [state, inserted] = checked.emplace(learned, false);
+                if (inserted)
+                    pending.push_back({ learned });
+                else if (!state->second)
+                {
+                    report(Trinity::StringFormat("Spell {} learns spell {}, forming a dependency cycle", current->Id, effect.TriggerSpell));
                     return false;
                 }
                 break;
@@ -206,25 +217,6 @@ bool SpellMgr::IsSpellValid(SpellInfo const* spellInfo, Player* player, bool msg
                 break;
         }
     }
-
-    if (needCheckReagents)
-    {
-        for (uint8 j = 0; j < MAX_SPELL_REAGENTS; ++j)
-        {
-            if (spellInfo->Reagent[j] > 0 && !sObjectMgr->GetItemTemplate(spellInfo->Reagent[j]))
-            {
-                if (msg)
-                {
-                    if (player)
-                        ChatHandler(player->GetSession()).PSendSysMessage("Craft spell %u refers a non-existing reagent in DB item (Entry: %u) and then...", spellInfo->Id, spellInfo->Reagent[j]);
-                    else
-                        TC_LOG_ERROR("sql.sql", "Craft spell {} refers to a non-existing reagent in DB, item (Entry: {}) and then...", spellInfo->Id, spellInfo->Reagent[j]);
-                }
-                return false;
-            }
-        }
-    }
-
     return true;
 }
 
@@ -1027,6 +1019,35 @@ void SpellMgr::LoadSpellRanks()
     TC_LOG_INFO("server.loading", ">> Loaded {} spell rank records in {} ms", uint32(mSpellChains.size()), GetMSTimeDiffToNow(oldMSTime));
 }
 
+static bool WouldCreateSpellRequirementCycle(SpellRequiredMap const& requirements, uint32 spellId, uint32 requiredSpellId, SpellMgr const& spellMgr)
+{
+    // Player::LearnSpell/RemoveSpell traverse these dependencies recursively.
+    // Reject the edge that closes a cycle rather than exposing that graph to
+    // every bot spell reset (or normal player spell learning/unlearning).
+    std::vector<uint32> pending{ requiredSpellId };
+    std::unordered_set<uint32> visited;
+    while (!pending.empty())
+    {
+        uint32 current = pending.back();
+        pending.pop_back();
+        if (current == spellId)
+            return true;
+        if (!visited.insert(current).second)
+            continue;
+
+        // Removing a lower rank also removes known higher ranks. Include the
+        // reverse rank edge when checking requirements, or a mixed rank/required
+        // cycle could still get through an otherwise acyclic spell_required table.
+        if (uint32 previous = spellMgr.GetPrevSpellInChain(current))
+            pending.push_back(previous);
+
+        auto bounds = requirements.equal_range(current);
+        for (auto it = bounds.first; it != bounds.second; ++it)
+            pending.push_back(it->second);
+    }
+    return false;
+}
+
 void SpellMgr::LoadSpellRequired()
 {
     uint32 oldMSTime = getMSTime();
@@ -1076,6 +1097,12 @@ void SpellMgr::LoadSpellRequired()
         if (IsSpellRequiringSpell(spell_id, spell_req))
         {
             TC_LOG_ERROR("sql.sql", "Duplicate entry of req_spell {} and spell_id {} in `spell_required`, skipped.", spell_req, spell_id);
+            continue;
+        }
+
+        if (WouldCreateSpellRequirementCycle(mSpellReq, spell_id, spell_req, *this))
+        {
+            TC_LOG_ERROR("sql.sql", "spell_id {} and req_spell {} in `spell_required` would create a dependency cycle; skipped.", spell_id, spell_req);
             continue;
         }
 

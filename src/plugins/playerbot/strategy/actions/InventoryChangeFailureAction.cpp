@@ -56,3 +56,26 @@ bool InventoryChangeFailureAction::Execute(Event event)
     }
     return true;
 }
+
+
+bool BuyFailedAction::Execute(Event event)
+{
+    if (event.getPacket().GetOpcode() != SMSG_BUY_FAILED)
+        return false;
+    WorldPacket data(event.getPacket());
+    data.rpos(0);
+    data.ResetBitPos();
+    ObjectGuid vendor;
+    uint32 itemId;
+    uint8 reason;
+    data >> vendor >> itemId >> reason;
+    if (data.rpos() != data.size())
+        return false;
+    if (reason == BUY_ERR_NOT_ENOUGHT_MONEY)
+        ai->TellMaster("Not enough money");
+    else if (reason == BUY_ERR_REPUTATION_REQUIRE)
+        ai->TellMaster("Not enough reputation");
+    else
+        ai->TellMaster("I couldn't buy that item");
+    return true;
+}

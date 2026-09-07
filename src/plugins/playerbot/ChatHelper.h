@@ -15,7 +15,7 @@ namespace ai
         ChatHelper(PlayerbotAI* ai);
 
     public:
-        static string formatMoney(uint32 copper);
+        static string formatMoney(uint64 copper);
         static uint32 parseMoney(string& text);
         static ItemIds parseItems(string& text);
         uint32 parseSpell(string& text);

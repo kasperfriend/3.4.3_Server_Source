@@ -972,8 +972,14 @@ void ObjectMgr::LoadCreatureTemplateDifficulty()
         }
 
         CreatureDifficulty creatureDifficulty;
-        creatureDifficulty.MinLevel               = fields[2].GetUInt8();
-        creatureDifficulty.MaxLevel               = fields[3].GetUInt8();
+        // Read before narrowing: an out-of-range world-data value must not
+        // reach Field's uint8 truncation assertion during startup.
+        int64 minLevel = fields[2].GetInt64();
+        int64 maxLevel = fields[3].GetInt64();
+        if (minLevel < 1 || minLevel > 255 || maxLevel < 1 || maxLevel > 255)
+            TC_LOG_ERROR("sql.sql", "Creature {} difficulty {} has level range {}..{} outside 1..255; clamping in memory", entry, uint32(difficulty), minLevel, maxLevel);
+        creatureDifficulty.MinLevel               = uint8(std::clamp<int64>(minLevel, 1, 255));
+        creatureDifficulty.MaxLevel               = uint8(std::clamp<int64>(maxLevel, 1, 255));
         creatureDifficulty.HealthScalingExpansion = fields[4].GetInt32();
         creatureDifficulty.HealthModifier         = fields[5].GetFloat();
         creatureDifficulty.ManaModifier           = fields[6].GetFloat();
@@ -994,26 +1000,11 @@ void ObjectMgr::LoadCreatureTemplateDifficulty()
         // TODO: Check if this still applies
         creatureDifficulty.DamageModifier *= Creature::GetDamageMod(itr->second.Classification);
 
-        if (creatureDifficulty.MinLevel == 0 || creatureDifficulty.MaxLevel == 0)
-        {
-            if (creatureDifficulty.MinLevel == 0)
-            {
-                TC_LOG_ERROR("sql.sql", "Table `creature_template_difficulty` lists creature (ID: {}) has MinLevel set to 0 but the allowed minimum is 1. Ignored and set to 1.", entry);
-                creatureDifficulty.MinLevel = 1;
-            }
-
-            if (creatureDifficulty.MaxLevel == 0)
-            {
-                TC_LOG_ERROR("sql.sql", "Table `creature_template_difficulty` lists creature (ID: {}) has MaxLevel set to 0 but the allowed minimum is 1. Ignored and set to 1.", entry);
-                creatureDifficulty.MaxLevel = 1;
-            }
-        }
-
         if (creatureDifficulty.MinLevel > creatureDifficulty.MaxLevel)
         {
             TC_LOG_ERROR("sql.sql", "Table `creature_template_difficulty` lists creature (ID: {}) with a higher MinLevel ({}) than MaxLevel ({}). MaxLevel will be set to MinLevel value.",
                 entry, creatureDifficulty.MinLevel, creatureDifficulty.MaxLevel);
-            creatureDifficulty.MinLevel = creatureDifficulty.MaxLevel;
+            creatureDifficulty.MaxLevel = creatureDifficulty.MinLevel;
         }
 
         if (creatureDifficulty.HealthScalingExpansion < EXPANSION_LEVEL_CURRENT || creatureDifficulty.HealthScalingExpansion > CURRENT_EXPANSION)
@@ -2300,6 +2291,14 @@ void ObjectMgr::LoadCreatures()
         if (!mapEntry)
         {
             TC_LOG_ERROR("sql.sql", "Table `creature` has creature (GUID: {}) that spawned at nonexistent map (Id: {}), skipped.", guid, data.mapId);
+            continue;
+        }
+
+        if (!MapManager::IsValidMapCoord(data.mapId, data.spawnPoint))
+        {
+            TC_LOG_ERROR("sql.sql", "Table `creature` has creature (GUID: {} Entry: {} MapID: {}) with invalid coordinates ({}); skipped before grid/tile access",
+                guid, data.id, data.mapId, data.spawnPoint.ToString());
+            _creatureDataStore.erase(guid);
             continue;
         }
 
@@ -3813,6 +3812,9 @@ void ObjectMgr::LoadPetLevelInfo()
 
 PetLevelInfo const* ObjectMgr::GetPetLevelInfo(uint32 creature_id, uint8 level) const
 {
+    if (!level)
+        return nullptr;
+
     if (level > sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
         level = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
 

@@ -56,6 +56,8 @@ namespace ai
             creators["tell cast failed"] = &WorldPacketActionContext::tell_cast_failed;
             creators["accept duel"] = &WorldPacketActionContext::accept_duel;
             creators["ready check"] = &WorldPacketActionContext::ready_check;
+            creators["finish ready check"] = &WorldPacketActionContext::ready_check_finished;
+            creators["buy failed"] = &WorldPacketActionContext::buy_failed;
             creators["ready check finished"] = &WorldPacketActionContext::ready_check_finished;
             creators["uninvite"] = &WorldPacketActionContext::uninvite;
             creators["lfg join"] = &WorldPacketActionContext::lfg_join;
@@ -68,6 +70,7 @@ namespace ai
         }
 
     private:
+        static Action* buy_failed(PlayerbotAI* ai) { return new BuyFailedAction(ai); }
         static Action* guild_accept(PlayerbotAI* ai) { return new GuildAcceptAction(ai); }
         static Action* security_check(PlayerbotAI* ai) { return new SecurityCheckAction(ai); }
         static Action* lfg_teleport(PlayerbotAI* ai) { return new LfgTeleportAction(ai); }

@@ -9,6 +9,7 @@
 #include <string>
 
 class WorldPacket;
+class WorldSession;
 class Player;
 class Unit;
 class Object;
@@ -49,6 +50,8 @@ protected:
 
 protected:
     PlayerBotMap playerBots;
+    // Own completed bot sessions even if a core callback removes their Player.
+    std::map<ObjectGuid, std::unique_ptr<WorldSession>> botSessions;
     // bot sessions whose character is still being loaded from the database
     std::map<ObjectGuid, WorldSession*> pendingBots;
 };

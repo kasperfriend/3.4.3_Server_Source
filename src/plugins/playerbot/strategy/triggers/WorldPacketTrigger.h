@@ -1,36 +1,43 @@
 #pragma once
 
 #include "../Trigger.h"
+#include "Log.h"
+#include <deque>
 
 namespace ai
 {
     class WorldPacketTrigger : public Trigger {
     public:
-        WorldPacketTrigger(PlayerbotAI* ai, string command) : Trigger(ai, command), triggered(false) {}
+        WorldPacketTrigger(PlayerbotAI* ai, string command) : Trigger(ai, command), checked(false) {}
 
         virtual void ExternalEvent(WorldPacket &packet, Player* owner = NULL)
         {
-            this->packet = packet;
-            this->owner = owner;
-            triggered = true;
+            if (pending.size() >= 256)
+            {
+                TC_LOG_WARN("playerbot", "Bot event queue '{}' full; discarding oldest event", getName());
+                pending.pop_front();
+                checked = false; // a previously checked front is already consumed
+            }
+            pending.emplace_back(getName(), packet, owner);
         }
 
         virtual Event Check()
         {
-            if (!triggered)
+            if (pending.empty() || checked)
                 return Event();
-
-            return Event(getName(), packet, owner);
+            checked = true;
+            return pending.front();
         }
 
         virtual void Reset()
         {
-            triggered = false;
+            if (checked && !pending.empty())
+                pending.pop_front();
+            checked = false;
         }
 
     private:
-        WorldPacket packet;
-        bool triggered;
-        Player* owner;
+        std::deque<Event> pending;
+        bool checked;
     };
 }

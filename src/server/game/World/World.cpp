@@ -986,7 +986,7 @@ void World::LoadConfigSettings(bool reload)
     else
         m_int_configs[CONFIG_MAX_PLAYER_LEVEL] = sConfigMgr->GetIntDefault("MaxPlayerLevel", DEFAULT_MAX_LEVEL);
 
-    if (m_int_configs[CONFIG_MAX_PLAYER_LEVEL] > MAX_LEVEL)
+    if (m_int_configs[CONFIG_MAX_PLAYER_LEVEL] < 1 || m_int_configs[CONFIG_MAX_PLAYER_LEVEL] > MAX_LEVEL)
     {
         TC_LOG_ERROR("server.loading", "MaxPlayerLevel ({}) must be in range 1..{}. Set to {}.", m_int_configs[CONFIG_MAX_PLAYER_LEVEL], MAX_LEVEL, MAX_LEVEL);
         m_int_configs[CONFIG_MAX_PLAYER_LEVEL] = MAX_LEVEL;

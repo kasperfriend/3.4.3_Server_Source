@@ -1,0 +1,92 @@
+#include "StringFormat.h"
+#include <fmt/format.h>
+#include <array>
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <unordered_map>
+#include <vector>
+using namespace std;
+using uint32 = uint32_t;
+using int32 = int32_t;
+constexpr uint32 DIFFICULTY_NONE = 0, SPELL_EFFECT_CREATE_ITEM = 24, SPELL_EFFECT_CREATE_LOOT = 157, SPELL_EFFECT_LEARN_SPELL = 36;
+#define CHECK(...) do { if (!(__VA_ARGS__)) throw runtime_error("Check failed at line " + to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
+vector<string> errors;
+#define TC_LOG_ERROR(category, fmt, text) errors.push_back(text)
+struct Player { void* GetSession() { return nullptr; } };
+struct ChatHandler { explicit ChatHandler(void*) { } void SendSysMessage(string const& text) { errors.push_back(text); } };
+struct SpellEffectInfo { uint32 Effect = 0, ItemType = 0, TriggerSpell = 0; };
+struct SpellInfo
+{
+    uint32 Id = 0;
+    vector<SpellEffectInfo> effects;
+    array<int32, 8> Reagent{};
+    bool lootCraft = false;
+    auto const& GetEffects() const { return effects; }
+    bool IsLootCrafting() const { return lootCraft; }
+};
+struct ObjectMgr
+{
+    set<uint32> items{ 1, 2 };
+    void const* GetItemTemplate(uint32 id) const { return items.count(id) ? this : nullptr; }
+} objectMgr;
+auto sObjectMgr = &objectMgr;
+struct SpellMgr
+{
+    map<uint32, SpellInfo> spells;
+    SpellInfo const* GetSpellInfo(uint32 id, uint32) const
+    {
+        auto it = spells.find(id);
+        return it == spells.end() ? nullptr : &it->second;
+    }
+    static bool IsSpellValid(SpellInfo const*, Player*, bool);
+} spellMgr;
+auto sSpellMgr = &spellMgr;
+@VALIDATION@
+int main()
+{
+    try
+    {
+        CHECK(!SpellMgr::IsSpellValid(nullptr, nullptr, true));
+        auto& root = spellMgr.spells[1]; root.Id = 1;
+        root.effects = { { SPELL_EFFECT_LEARN_SPELL, 0, 1 } };
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, true));
+        CHECK(!errors.empty());
+        root.effects[0].TriggerSpell = 2;
+        auto& child = spellMgr.spells[2]; child.Id = 2;
+        child.effects = { { SPELL_EFFECT_LEARN_SPELL, 0, 1 } };
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, false));
+        child.effects.clear();
+        root.effects.push_back({ SPELL_EFFECT_LEARN_SPELL, 0, 2 }); // shared dependency is valid
+        CHECK(SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.effects[0].TriggerSpell = 999;
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.effects = { { SPELL_EFFECT_CREATE_ITEM, 999, 0 } };
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, true));
+        root.effects[0].ItemType = 1;
+        root.Reagent[0] = -1; // negative reagent sentinel remains valid
+        CHECK(SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.Reagent[0] = 999;
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.Reagent[0] = 2;
+        CHECK(SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.effects[0] = { SPELL_EFFECT_CREATE_LOOT, 0, 0 };
+        CHECK(!SpellMgr::IsSpellValid(&root, nullptr, false));
+        root.lootCraft = true;
+        CHECK(SpellMgr::IsSpellValid(&root, nullptr, false));
+        spellMgr.spells.clear();
+        constexpr uint32 depth = 20000;
+        for (uint32 id = 1; id <= depth; ++id)
+        {
+            auto& spell = spellMgr.spells[id]; spell.Id = id;
+            if (id < depth) spell.effects.push_back({ SPELL_EFFECT_LEARN_SPELL, 0, id + 1 });
+        }
+        CHECK(SpellMgr::IsSpellValid(&spellMgr.spells.at(1), nullptr, false));
+        spellMgr.spells.at(depth).effects.push_back({ SPELL_EFFECT_LEARN_SPELL, 0, 1 });
+        CHECK(!SpellMgr::IsSpellValid(&spellMgr.spells.at(1), nullptr, false));
+        cout << "Login spell validation: cycles, shared/deep chains and crafting/reagents passed\n";
+    }
+    catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
+}

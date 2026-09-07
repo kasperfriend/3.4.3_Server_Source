@@ -77,7 +77,7 @@ std::string_view ByteBuffer::ReadCString(bool requireValidUtf8 /*= true*/)
 
 std::string_view ByteBuffer::ReadString(uint32 length, bool requireValidUtf8 /*= true*/)
 {
-    if (_rpos + length > size())
+    if (_rpos > size() || length > size() - _rpos)
         throw ByteBufferPositionException(_rpos, length, size());
 
     ResetBitPos();
@@ -95,7 +95,7 @@ void ByteBuffer::append(uint8 const* src, size_t cnt)
 {
     ASSERT(src, "Attempted to put a NULL-pointer in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", _wpos, size());
     ASSERT(cnt, "Attempted to put a zero-sized value in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", _wpos, size());
-    ASSERT((size() + cnt) < 100000000);
+    ASSERT(size() < 100000000 && cnt < 100000000 - size() && _wpos < 100000000 && cnt < 100000000 - _wpos);
 
     FlushBits();
 
@@ -120,7 +120,7 @@ void ByteBuffer::append(uint8 const* src, size_t cnt)
 
 void ByteBuffer::put(size_t pos, uint8 const* src, size_t cnt)
 {
-    ASSERT(pos + cnt <= size(), "Attempted to put value with size: " SZFMTD " in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", cnt, pos, size());
+    ASSERT(pos <= size() && cnt <= size() - pos, "Attempted to put value with size: " SZFMTD " in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", cnt, pos, size());
     ASSERT(src, "Attempted to put a NULL-pointer in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", pos, size());
     ASSERT(cnt, "Attempted to put a zero-sized value in ByteBuffer (pos: " SZFMTD " size: " SZFMTD ")", pos, size());
 
@@ -129,7 +129,7 @@ void ByteBuffer::put(size_t pos, uint8 const* src, size_t cnt)
 
 void ByteBuffer::PutBits(std::size_t pos, std::size_t value, uint32 bitCount)
 {
-    ASSERT(pos + bitCount <= size() * 8, "Attempted to put %u bits in ByteBuffer (bitpos: " SZFMTD " size: " SZFMTD ")", bitCount, pos, size());
+    ASSERT(pos <= size() * 8 && bitCount <= size() * 8 - pos && bitCount <= sizeof(value) * 8, "Attempted to put %u bits in ByteBuffer (bitpos: " SZFMTD " size: " SZFMTD ")", bitCount, pos, size());
     ASSERT(bitCount, "Attempted to put a zero bits in ByteBuffer");
 
     for (uint32 i = 0; i < bitCount; ++i)
