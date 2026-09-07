@@ -277,47 +277,123 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
 {
     TC_LOG_INFO("playerbot",  "Preparing location to random teleporting bot {} for level {}", bot->GetName().c_str(), bot->GetLevel());
 
-    if (locsPerLevelCache[bot->GetLevel()].empty()) {
+    // levels are tried exactly once per server run: an empty candidate list
+    // must not re-run the full creature scan on every teleport of a bot with
+    // that level
+    static set<uint8> teleLevelsTried;
+
+    if (locsPerLevelCache[bot->GetLevel()].empty() && !teleLevelsTried.count(bot->GetLevel()))
+    {
+        teleLevelsTried.insert(bot->GetLevel());
+
         // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
-        // creature_template has no minlevel/maxlevel columns in this schema - querying them
-        // raises ER_BAD_FIELD_ERROR which ABORTs the server
-        QueryResult results = WorldDatabase.PQuery("select map, position_x, position_y, position_z "
-            "from (select map, position_x, position_y, position_z, avg(d.MaxLevel), avg(d.MinLevel), "
-            "{} - (avg(d.MaxLevel) + avg(d.MinLevel)) / 2 delta "
-            "from creature c inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 group by d.Entry) q "
-            "where delta >= 0 and delta <= {} and map in ({}) and not exists ( "
-            "select map, position_x, position_y, position_z from "
-            "("
-            "select map, c.position_x, c.position_y, c.position_z, avg(d.MaxLevel), avg(d.MinLevel), "
-            "{} - (avg(d.MaxLevel) + avg(d.MinLevel)) / 2 delta "
-            "from creature c "
-            "inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 group by d.Entry "
-            ") q1 "
-            "where delta > {} and q1.map = q.map "
-            "and sqrt("
-            "(q1.position_x - q.position_x)*(q1.position_x - q.position_x) +"
-            "(q1.position_y - q.position_y)*(q1.position_y - q.position_y) +"
-            "(q1.position_z - q.position_z)*(q1.position_z - q.position_z)"
-            ") < {})",
-            bot->GetLevel(),
-            sPlayerbotAIConfig.randomBotTeleLevel,
-            sPlayerbotAIConfig.randomBotMapsAsString.c_str(),
-            bot->GetLevel(),
-            sPlayerbotAIConfig.randomBotTeleLevel,
-            (uint32)sPlayerbotAIConfig.sightDistance
-            );
+        // creature_template has no minlevel/maxlevel columns in this schema.
+        // Scan every creature spawn of the configured maps in ONE query and do
+        // the neighbourhood filtering below in memory: the old SQL correlated a
+        // NOT EXISTS / sqrt() subquery over a full derived creature table once
+        // per row, which could stall the world thread for minutes on the first
+        // teleport (FreezeDetector abort).
+        struct SpawnPoint
+        {
+            uint16 map;
+            float x, y, z;
+            float avgLevel;
+        };
+
+        vector<SpawnPoint> spawns;
+        QueryResult results = WorldDatabase.PQuery(
+                "select c.map, c.position_x, c.position_y, c.position_z, (avg(d.MinLevel) + avg(d.MaxLevel)) / 2 "
+                "from creature c inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 "
+                "where c.map in ({}) group by c.map, c.guid",
+                sPlayerbotAIConfig.randomBotMapsAsString.c_str());
         if (results)
         {
             do
             {
                 Field* fields = results->Fetch();
-                uint16 mapId = fields[0].GetUInt16();
-                float x = fields[1].GetFloat();
-                float y = fields[2].GetFloat();
-                float z = fields[3].GetFloat();
-                WorldLocation loc(mapId, x, y, z, 0);
-                locsPerLevelCache[bot->GetLevel()].push_back(loc);
+                // the AVG expression comes back as DECIMAL - read it as double
+                SpawnPoint point =
+                {
+                    fields[0].GetUInt16(),
+                    fields[1].GetFloat(),
+                    fields[2].GetFloat(),
+                    fields[3].GetFloat(),
+                    static_cast<float>(fields[4].GetDouble())
+                };
+                spawns.push_back(point);
             } while (results->NextRow());
+        }
+
+        if (!spawns.empty())
+        {
+            uint32 botLevel = bot->GetLevel();
+            float maxDelta = static_cast<float>(sPlayerbotAIConfig.randomBotTeleLevel);
+            float maxDist = sPlayerbotAIConfig.sightDistance;
+            float maxDistSq = maxDist * maxDist;
+
+            // bucket the "dangerous" spawns (much lower level than the bot,
+            // mirroring the old delta > RandomBotTeleLevel NOT EXISTS clause)
+            // into a per-map grid with cell size = sight distance, so each
+            // candidate only checks the 27 cells around its own cell
+            float cellSize = maxDist > 0.0f ? maxDist : 50.0f;
+            map<uint16, map<uint64, vector<size_t> > > dangers;
+            for (size_t i = 0; i < spawns.size(); ++i)
+            {
+                SpawnPoint const& point = spawns[i];
+                if (static_cast<float>(botLevel) - point.avgLevel <= maxDelta)
+                    continue;
+
+                int32 cx = static_cast<int32>(point.x / cellSize);
+                int32 cy = static_cast<int32>(point.y / cellSize);
+                int32 cz = static_cast<int32>(point.z / cellSize);
+                uint64 key = (uint64(uint32(cx + (1 << 20))) << 42)
+                        | (uint64(uint32(cy + (1 << 20))) << 21)
+                        | uint64(uint32(cz + (1 << 20)));
+                dangers[point.map][key].push_back(i);
+            }
+
+            for (SpawnPoint const& point : spawns)
+            {
+                float delta = static_cast<float>(botLevel) - point.avgLevel;
+                if (delta < 0.0f || delta > maxDelta)
+                    continue;
+
+                map<uint64, vector<size_t> >& mapDangers = dangers[point.map];
+                bool nearDanger = false;
+                if (!mapDangers.empty())
+                {
+                    int32 cx = static_cast<int32>(point.x / cellSize);
+                    int32 cy = static_cast<int32>(point.y / cellSize);
+                    int32 cz = static_cast<int32>(point.z / cellSize);
+                    for (int32 dx = -1; dx <= 1 && !nearDanger; ++dx)
+                    for (int32 dy = -1; dy <= 1 && !nearDanger; ++dy)
+                    for (int32 dz = -1; dz <= 1; ++dz)
+                    {
+                        uint64 key = (uint64(uint32(cx + dx + (1 << 20))) << 42)
+                                | (uint64(uint32(cy + dy + (1 << 20))) << 21)
+                                | uint64(uint32(cz + dz + (1 << 20)));
+                        map<uint64, vector<size_t> >::iterator cell = mapDangers.find(key);
+                        if (cell == mapDangers.end())
+                            continue;
+
+                        for (size_t idx : cell->second)
+                        {
+                            SpawnPoint const& danger = spawns[idx];
+                            float distSq = (danger.x - point.x) * (danger.x - point.x)
+                                    + (danger.y - point.y) * (danger.y - point.y)
+                                    + (danger.z - point.z) * (danger.z - point.z);
+                            if (distSq < maxDistSq)
+                            {
+                                nearDanger = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!nearDanger)
+                    locsPerLevelCache[bot->GetLevel()].push_back(WorldLocation(point.map, point.x, point.y, point.z, 0.0f));
+            }
         }
     }
 
