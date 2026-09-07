@@ -25,7 +25,24 @@ template<typename... T> void Log(T const&...) { }
 #define TC_LOG_ERROR(...) Warn(__VA_ARGS__)
 #define TC_LOG_INFO(...) Log(__VA_ARGS__)
 #define TC_LOG_DEBUG(...) Log(__VA_ARGS__)
-constexpr uint32 CLASS_HUNTER = 3, MAX_CLASSES = 15, HUNTER_PET = 1, PET_SAVE_AS_CURRENT = 0;
+constexpr uint32 CLASS_WARRIOR = 1, CLASS_PALADIN = 2, CLASS_HUNTER = 3, CLASS_DEATH_KNIGHT = 6, CLASS_SHAMAN = 7;
+constexpr uint32 MAX_CLASSES = 15, HUNTER_PET = 1, PET_SAVE_AS_CURRENT = 0;
+constexpr uint16 SKILL_SWORDS = 43, SKILL_AXES = 44, SKILL_BOWS = 45, SKILL_GUNS = 46, SKILL_MACES = 54;
+constexpr uint16 SKILL_TWO_HANDED_SWORDS = 55, SKILL_DEFENSE = 95, SKILL_STAVES = 136, SKILL_TWO_HANDED_MACES = 160;
+constexpr uint16 SKILL_TWO_HANDED_AXES = 172, SKILL_DAGGERS = 173, SKILL_THROWN = 176, SKILL_CROSSBOWS = 226;
+constexpr uint16 SKILL_WANDS = 228, SKILL_POLEARMS = 229, SKILL_PLATE_MAIL = 293, SKILL_MAIL = 413;
+constexpr uint16 SKILL_FIST_WEAPONS = 473, SKILL_RIDING = 762;
+struct SkillRaceClassInfoEntry { };
+struct DB2Manager
+{
+    set<uint32> allowed;
+    SkillRaceClassInfoEntry const* GetSkillRaceClassInfo(uint32 skill, uint8, uint8) const
+    {
+        static SkillRaceClassInfoEntry info;
+        return allowed.count(skill) ? &info : nullptr;
+    }
+} db2Manager;
+auto& sDB2Manager = db2Manager;
 constexpr uint32 PLAYERSPELL_REMOVED = 1, PETSPELL_REMOVED = 1, DIFFICULTY_NONE = 0;
 constexpr uint32 ITEM_QUALITY_NORMAL = 1, ITEM_QUALITY_UNCOMMON = 2, ITEM_QUALITY_RARE = 3, ITEM_QUALITY_EPIC = 4;
 constexpr uint32 ITEM_CLASS_WEAPON = 2, ITEM_CLASS_ARMOR = 4, ITEM_CLASS_CONTAINER = 1, ITEM_SUBCLASS_ARMOR_SHIELD = 6;
@@ -151,7 +168,8 @@ struct Motion { void Clear() { } };
 struct Guid { string ToString() const { return "Player-1-test"; } };
 struct Player : Unit
 {
-    uint8 cls = CLASS_HUNTER, level = 1, statsLevel = 1;
+    uint8 cls = CLASS_HUNTER, race = 1, level = 1, statsLevel = 1;
+    vector<uint32> skills;
     bool inWorld = true, teleporting = false, positionValid = true, hasAI = true, dead = false, creationFails = false;
     uint32 creations = 0, saved = 0, teleports = 0;
     PlayerSpellMap spells;
@@ -163,7 +181,9 @@ struct Player : Unit
     Motion motion;
     ~Player() { delete pet; }
     uint8 GetClass() const { return cls; }
+    uint8 GetRace() const { return race; }
     uint8 GetLevel() const { return level; }
+    void SetSkill(uint32 id, uint16, uint16, uint16) { skills.push_back(id); }
     void SetLevel(uint8 value) { level = value; }
     void GiveLevel(uint8 value) { CHECK(value >= 1 && value <= 80); level = statsLevel = value; }
     string GetName() const { return "testbot"; }
@@ -251,6 +271,8 @@ struct PlayerbotFactory
     void InitTalents();
     void InitTalents(uint32 spec) { talents.push_back(spec); }
     bool CanEquipItem(ItemTemplate const*, uint32);
+    void InitSkills();
+    void SetRandomSkill(uint16);
     void Refresh() { ++refreshes; Prepare(); }
     void RestoreLevel()
     {
@@ -282,15 +304,6 @@ struct MapMgr
     Map* CreateMap(uint32, Player* bot) { ++calls; return bot->GetMap(); }
 } mapMgr;
 auto sMapMgr = &mapMgr;
-namespace DisableMgr { bool enabled = true; bool IsPathfindingEnabled(uint32) { return enabled; } }
-namespace PhasingHandler { uint32 GetTerrainMapId(uint32, uint32 mapId, void*, float, float) { return mapId; } }
-namespace MMAP
-{
-    struct MMapManager { };
-    struct MMapFactory { static MMapManager* createOrGetMMapManager() { static MMapManager mgr; return &mgr; } };
-}
-bool navigationAvailable = true;
-bool HasBotTeleportNavigation(MMAP::MMapManager&, uint32, uint32, uint32, float, float, float) { return navigationAvailable; }
 struct RandomPlayerbotMgr
 {
     uint32 queries = 0;
@@ -304,6 +317,8 @@ auto& sRandomPlayerbotMgr = randomMgr;
 @PREPARE@
 @TALENTS@
 @EQUIP@
+@SKILLS@
+@RANDOM_SKILL@
 @REFRESH@
 @TELEPORT@
 @TELEPORT_LEVEL_GUARD@
@@ -446,6 +461,30 @@ void TestLevelsTalentsAndEquipment()
     config.minRandomBotsPerInterval = config.maxRandomBotsPerInterval = 0;
     CHECK(StartupBudget(0) == 0);
 }
+void TestSkills()
+{
+    sDB2Manager.allowed = { SKILL_DEFENSE, SKILL_BOWS, SKILL_GUNS, SKILL_MAIL, SKILL_RIDING };
+    Player hunter;
+    hunter.cls = CLASS_HUNTER;
+    hunter.level = 40;
+    PlayerbotFactory(&hunter, 40).InitSkills();
+    set<uint32> written(hunter.skills.begin(), hunter.skills.end());
+    CHECK(written.count(SKILL_DEFENSE) && written.count(SKILL_BOWS) && written.count(SKILL_GUNS));
+    CHECK(written.count(SKILL_MAIL) && written.count(SKILL_RIDING));
+    CHECK(!written.count(SKILL_SWORDS) && !written.count(SKILL_WANDS) && !written.count(SKILL_PLATE_MAIL));
+    hunter.skills.clear();
+    sDB2Manager.allowed.clear();
+    PlayerbotFactory(&hunter, 40).InitSkills();
+    CHECK(hunter.skills.empty()); // no SkillRaceClassInfo, no character_skills rows
+    sDB2Manager.allowed = { SKILL_DEFENSE, SKILL_SWORDS, SKILL_PLATE_MAIL, SKILL_RIDING };
+    Player warrior;
+    warrior.cls = CLASS_WARRIOR;
+    warrior.level = 80;
+    PlayerbotFactory(&warrior, 80).InitSkills();
+    set<uint32> warriorSkills(warrior.skills.begin(), warrior.skills.end());
+    CHECK(warriorSkills.count(SKILL_SWORDS) && warriorSkills.count(SKILL_PLATE_MAIL) && warriorSkills.count(SKILL_RIDING));
+    CHECK(!warriorSkills.count(SKILL_BOWS) && !warriorSkills.count(SKILL_MAIL));
+}
 void TestTeleport()
 {
     Player bot;
@@ -481,19 +520,15 @@ void TestTeleport()
         randomMgr.RandomTeleport(&bot, locations);
     }
     CHECK(bot.teleports == 3);
-    navigationAvailable = false;
     randomMgr.RandomTeleport(&bot, locations);
-    CHECK(bot.teleports == 3); // no straight-line teleport into a non-navigable location
-    DisableMgr::enabled = false;
-    randomMgr.RandomTeleport(&bot, locations);
-    CHECK(bot.teleports == 4); // explicit pathfinding disable keeps its existing behavior
+    CHECK(bot.teleports == 4); // dest mmap is not a teleport gate; terrain/area already passed
 }
 int main()
 {
     try
     {
-        CheckMaximumLevel(); TestPet(); TestSpellReset(); TestCombatRefresh(); TestLevelsTalentsAndEquipment(); TestTeleport();
-        cout << "Factory/pet/spell/combat/teleport regressions passed\n";
+        CheckMaximumLevel(); TestPet(); TestSpellReset(); TestCombatRefresh(); TestLevelsTalentsAndEquipment(); TestSkills(); TestTeleport();
+        cout << "Factory/pet/spell/combat/skill/teleport regressions passed\n";
     }
     catch (exception const& error) { cerr << error.what() << '\n'; return 1; }
 }

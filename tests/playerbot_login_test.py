@@ -102,6 +102,19 @@ class PlayerbotLoginTest(unittest.TestCase):
         self.assertIn("UpdatePlayerbotSessions(diff)", update)
         shutdown = function("src/plugins/playerbot/PlayerbotHookImpl.cpp", "    void ShutdownPlayerbots()")
         self.assertLess(shutdown.index("ShutdownPlayerbotSessions"), shutdown.index("SetEnabled(false)"))
+        main = (ROOT / "src/server/worldserver/Main.cpp").read_text(encoding="utf-8")
+        # Reverse shared_ptr destruction: KickAll, then bots, then UnloadAll.
+        self.assertLess(main.index("std::shared_ptr<void> mapManagementHandle"),
+                        main.index("std::shared_ptr<void> sPlayerbotHandle"))
+        kick = function("src/server/worldserver/Main.cpp", "    std::shared_ptr<void> sWorldSocketMgrHandle")
+        self.assertLess(kick.index("KickAll"), kick.index("ShutdownPlayerbots"))
+        self.assertLess(kick.index("ShutdownPlayerbots"), kick.index("StopNetwork"))
+        load = function("src/server/worldserver/Main.cpp", "static void LoadAllScripts()")
+        self.assertLess(load.index('GetBoolDefault("AiPlayerbot.Enabled"'), load.index("RegisterPlayerbotScripts"))
+        initialize = function("src/plugins/playerbot/PlayerbotHookImpl.cpp", "    void InitializePlayerbots()")
+        self.assertLess(initialize.index("if (!sPlayerbotAIConfig.Initialize())"), initialize.index("SetEnabled(true)"))
+        load_skills = function(PLAYER, "void Player::_LoadSkills(")
+        self.assertLess(load_skills.index("IsBotSession"), load_skills.index("SKILL_DELETED"))
         for signature in ("void WorldSocket::HandleAuthSessionCallback(", "void WorldSocket::HandleAuthContinuedSessionCallback("):
             auth = function(SOCKET, signature)
             self.assertIn("!IsOpen()", auth)

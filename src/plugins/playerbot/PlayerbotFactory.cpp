@@ -980,7 +980,11 @@ void PlayerbotFactory::InitTradeSkills()
 {
     for (int i = 0; i < sizeof(tradeSkills) / sizeof(uint32); ++i)
     {
-        bot->SetSkill(tradeSkills[i], 0, 0, 0);
+        // Player::SetSkill(id, 0, 0, 0) on an unknown skill learns it (the
+        // "new skill" branch), which can fill PLAYER_MAX_SKILLS and persist
+        // zero-value professions. Only clear trades the bot already has.
+        if (bot->HasSkill(tradeSkills[i]))
+            bot->SetSkill(tradeSkills[i], 0, 0, 0);
     }
 
     vector<uint32> firstSkills;
@@ -1041,7 +1045,6 @@ void PlayerbotFactory::UpdateTradeSkills()
 
 void PlayerbotFactory::InitSkills()
 {
-    uint32 maxValue = level * 5;
     SetRandomSkill(SKILL_DEFENSE);
     SetRandomSkill(SKILL_SWORDS);
     SetRandomSkill(SKILL_AXES);
@@ -1059,16 +1062,19 @@ void PlayerbotFactory::InitSkills()
     SetRandomSkill(SKILL_POLEARMS);
     SetRandomSkill(SKILL_FIST_WEAPONS);
 
-    if (bot->GetLevel() >= 70)
-        bot->SetSkill(SKILL_RIDING, 0, 300, 300);
-    else if (bot->GetLevel() >= 60)
-        bot->SetSkill(SKILL_RIDING, 0, 225, 225);
-    else if (bot->GetLevel() >= 40)
-        bot->SetSkill(SKILL_RIDING, 0, 150, 150);
-    else if (bot->GetLevel() >= 20)
-        bot->SetSkill(SKILL_RIDING, 0, 75, 75);
-    else
-        bot->SetSkill(SKILL_RIDING, 0, 0, 0);
+    if (sDB2Manager.GetSkillRaceClassInfo(SKILL_RIDING, bot->GetRace(), bot->GetClass()))
+    {
+        if (bot->GetLevel() >= 70)
+            bot->SetSkill(SKILL_RIDING, 0, 300, 300);
+        else if (bot->GetLevel() >= 60)
+            bot->SetSkill(SKILL_RIDING, 0, 225, 225);
+        else if (bot->GetLevel() >= 40)
+            bot->SetSkill(SKILL_RIDING, 0, 150, 150);
+        else if (bot->GetLevel() >= 20)
+            bot->SetSkill(SKILL_RIDING, 0, 75, 75);
+        else
+            bot->SetSkill(SKILL_RIDING, 0, 0, 0);
+    }
 
     uint32 skillLevel = bot->GetLevel() < 40 ? 0 : 1;
     switch (bot->GetClass())
@@ -1076,20 +1082,28 @@ void PlayerbotFactory::InitSkills()
     case CLASS_DEATH_KNIGHT:
     case CLASS_WARRIOR:
     case CLASS_PALADIN:
-        bot->SetSkill(SKILL_PLATE_MAIL, 0, skillLevel, skillLevel);
+        if (sDB2Manager.GetSkillRaceClassInfo(SKILL_PLATE_MAIL, bot->GetRace(), bot->GetClass()))
+            bot->SetSkill(SKILL_PLATE_MAIL, 0, skillLevel, skillLevel);
         break;
     case CLASS_SHAMAN:
     case CLASS_HUNTER:
-        bot->SetSkill(SKILL_MAIL, 0, skillLevel, skillLevel);
+        if (sDB2Manager.GetSkillRaceClassInfo(SKILL_MAIL, bot->GetRace(), bot->GetClass()))
+            bot->SetSkill(SKILL_MAIL, 0, skillLevel, skillLevel);
+        break;
     }
 }
 
 void PlayerbotFactory::SetRandomSkill(uint16 id)
 {
+    // Player::_LoadSkills rejects skills with no SkillRaceClassInfo for this
+    // race/class (ERROR + SKILL_DELETED). Writing them here floods the console
+    // on every subsequent bot login.
+    if (!sDB2Manager.GetSkillRaceClassInfo(id, bot->GetRace(), bot->GetClass()))
+        return;
+
     uint32 maxValue = level * 5;
     uint32 curValue = urand(maxValue - level, maxValue);
     bot->SetSkill(id, 0, curValue, maxValue);
-
 }
 
 void PlayerbotFactory::InitAvailableSpells()
@@ -1267,6 +1281,7 @@ void PlayerbotFactory::InitQuests()
         AddQuestChain(questId, questIds, visited);
     }
 
+    vector<Quest const*> toReward;
     for (uint32 questId : questIds)
     {
         Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
@@ -1284,10 +1299,21 @@ void PlayerbotFactory::InitQuests()
                 !bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
             continue;
 
-        bot->RemoveActiveQuest(questId, false);
-        bot->RemoveRewardedQuest(questId, false);
+        toReward.push_back(quest);
+    }
 
-        bot->SetQuestStatus(questId, QUEST_STATUS_COMPLETE);
+    // RewardQuest always writes QUEST_DEFAULT_SAVE_TYPE (INSERT). That overwrites
+    // RemoveRewardedQuest's QUEST_FORCE_DELETE_SAVE_TYPE, so a later SaveToDB
+    // inserts character_queststatus_rewarded rows that already exist.
+    for (Quest const* quest : toReward)
+        bot->RemoveRewardedQuest(quest->GetQuestId(), false);
+    if (!toReward.empty())
+        bot->SaveToDB();
+
+    for (Quest const* quest : toReward)
+    {
+        bot->RemoveActiveQuest(quest->GetQuestId(), false);
+        bot->SetQuestStatus(quest->GetQuestId(), QUEST_STATUS_COMPLETE);
         bot->RewardQuest(quest, LootItemType::Item, 0, bot, false);
         ClearInventory();
     }

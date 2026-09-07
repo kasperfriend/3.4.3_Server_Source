@@ -132,11 +132,14 @@ namespace Playerbot
     void ShutdownPlayerbots();
 }
 
-/// loads the static core scripts plus the playerbot commands
+/// loads the static core scripts plus the playerbot commands when enabled
 static void LoadAllScripts()
 {
     AddScripts();
-    Playerbot::RegisterPlayerbotScripts();
+    // Scripts load in SetInitialWorldSettings, before InitializePlayerbots,
+    // so gate on the config key rather than Playerbot::IsEnabled().
+    if (sConfigMgr->GetBoolDefault("AiPlayerbot.Enabled", true))
+        Playerbot::RegisterPlayerbotScripts();
 }
 void StopDB();
 void WorldUpdateLoop();
@@ -352,9 +355,12 @@ extern int main(int argc, char** argv)
     sSecretMgr->Initialize(SECRET_OWNER_WORLDSERVER);
     sWorld->SetInitialWorldSettings();
 
-    // playerbot mod: bring the bot system up once the world is ready
+    // playerbot mod: bring the bot system up once the world is ready.
+    // Create the shutdown handle AFTER mapManagementHandle so reverse
+    // destruction logs bots out (and unsummons their pets) before UnloadAll.
+    // Socket-less bot sessions are never in World::m_sessions, so KickAll
+    // alone would leave them in-world while maps are destroyed.
     Playerbot::InitializePlayerbots();
-    std::shared_ptr<void> sPlayerbotHandle(nullptr, [](void*) { Playerbot::ShutdownPlayerbots(); });
 
     std::shared_ptr<void> mapManagementHandle(nullptr, [](void*)
     {
@@ -366,6 +372,8 @@ extern int main(int argc, char** argv)
         sTerrainMgr.UnloadAll();
         sInstanceLockMgr.Unload();
     });
+
+    std::shared_ptr<void> sPlayerbotHandle(nullptr, [](void*) { Playerbot::ShutdownPlayerbots(); });
 
     // Start the Remote Access port (acceptor) if enabled
     std::unique_ptr<AsyncAcceptor> raAcceptor;
@@ -408,6 +416,7 @@ extern int main(int argc, char** argv)
     std::shared_ptr<void> sWorldSocketMgrHandle(nullptr, [](void*)
     {
         sWorld->KickAll();                                       // save and kick all players
+        Playerbot::ShutdownPlayerbots();                         // socket-less bot sessions are not in m_sessions
         sWorld->UpdateSessions(1);                             // real players unload required UpdateSessions call
 
         sWorldSocketMgr.StopNetwork();

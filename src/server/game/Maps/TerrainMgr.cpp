@@ -253,7 +253,9 @@ void TerrainInfo::LoadMMap(int32 gx, int32 gy)
     if (mmapLoadResult)
         TC_LOG_DEBUG("mmaps.tiles", "MMAP loaded name:{}, id:{}, x:{}, y:{} (mmap rep.: x:{}, y:{})", GetMapName(), GetId(), gx, gy, gx, gy);
     else
-        TC_LOG_WARN("mmaps.tiles", "Could not load MMAP name:{}, id:{}, x:{}, y:{} (mmap rep.: x:{}, y:{})", GetMapName(), GetId(), gx, gy, gx, gy);
+        // Missing ocean/empty tiles are expected. Corrupt/incompatible files
+        // already log ERROR from MMapManager; do not duplicate that as WARN.
+        TC_LOG_DEBUG("mmaps.tiles", "Could not load MMAP name:{}, id:{}, x:{}, y:{} (mmap rep.: x:{}, y:{})", GetMapName(), GetId(), gx, gy, gx, gy);
 }
 
 void TerrainInfo::UnloadMap(int32 gx, int32 gy)

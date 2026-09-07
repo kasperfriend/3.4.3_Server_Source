@@ -126,6 +126,7 @@ struct Player : Unit
     uint32 currentLevel = 13, saves = 0;
     bool canDelayTeleport = false;
     vector<uint32> rewards, mutations;
+    uint32 dbSaves = 0;
     Map* GetMap() { return &map; }
     Guid GetGUID() const { return {}; }
     uint32 GetLevel() const { return currentLevel; }
@@ -134,6 +135,7 @@ struct Player : Unit
     void RemoveActiveQuest(uint32 id, bool) { mutations.push_back(id); }
     void RemoveRewardedQuest(uint32 id, bool) { mutations.push_back(id); }
     void SetQuestStatus(uint32 id, int) { mutations.push_back(id); }
+    void SaveToDB() { ++dbSaves; }
     void RewardQuest(Quest const* quest, LootItemType, uint32, Object* questGiver, bool)
     {
         rewards.push_back(quest->id);
@@ -256,13 +258,14 @@ void TestQuestInitialization()
     Player bot;
     PlayerbotFactory factory{ &bot, 13 };
     factory.InitQuests();
-    CHECK(bot.rewards.empty() && bot.mutations.empty()); // disabled root never queues its ancestor
+    CHECK(bot.rewards.empty() && bot.mutations.empty() && bot.dbSaves == 0); // disabled root never queues its ancestor
 
     AddQuest(3, 2); // disabled prerequisite must not be rewarded or traversed
     AddQuest(4, 9999); // missing prerequisite is harmless
     factory.InitQuests();
     CHECK(bot.rewards == vector<uint32>({ 3, 4 }));
     CHECK(bot.mutations.size() == 6 && errors.empty());
+    CHECK(bot.dbSaves == 1); // flush rewarded-quest deletes before RewardQuest INSERT
 
     Reset();
     bot = Player{};

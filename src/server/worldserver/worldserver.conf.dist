@@ -4571,7 +4571,8 @@ AiPlayerbot.DeleteRandomBotAccounts = 0
 #                     Map 0 is Eastern Kingdoms, 1 Kalimdor, 530 Outland and 571 Northrend.
 #                     Use unsigned decimal IDs of non-instanced maps present in the client data.
 #                     Invalid IDs are logged/skipped; an empty valid list prevents random teleports.
-#                     When MMAP pathfinding is enabled, destinations must have a nearby ground polygon.
+#                     Destinations are creature spawn points. Movement after spawn uses the core
+#                     MotionMaster pathfinder; missing dest-tile mmap is not treated as an error.
 #        Default:     "0,1,530,571" - (RandomBotMaps)
 #                     3             - (RandomBotTeleLevel)
 #                     1000          - (RandomBotTeleportDistance, yards)
@@ -4711,3 +4712,4 @@ AhBot.IgnoreItems = ""
 
 #
 ###################################################################################################
+############################################################################

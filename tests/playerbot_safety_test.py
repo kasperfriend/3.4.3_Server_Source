@@ -47,6 +47,8 @@ class PlayerbotSafetyTest(unittest.TestCase):
                 ("PREPARE", "void PlayerbotFactory::Prepare()"),
                 ("TALENTS", "void PlayerbotFactory::InitTalents()"),
                 ("EQUIP", "bool PlayerbotFactory::CanEquipItem("),
+                ("SKILLS", "void PlayerbotFactory::InitSkills()"),
+                ("RANDOM_SKILL", "void PlayerbotFactory::SetRandomSkill("),
             )
         }
         blocks["MAX_LEVEL"] = source_slice(
@@ -98,6 +100,25 @@ class PlayerbotSafetyTest(unittest.TestCase):
         self.assertNotIn("/ sPlayerbotAIConfig.randomChangeMultiplier", lfg)
         tick = function(MANAGER, "void RandomPlayerbotMgr::UpdateAIInternal(")
         self.assertLess(tick.index("botProcessed >= randomBotsPerInterval"), tick.index("ProcessBot(bot)"))
+        initialize = function("src/plugins/playerbot/PlayerbotHookImpl.cpp", "    void InitializePlayerbots()")
+        self.assertLess(initialize.index("if (!sPlayerbotAIConfig.Initialize())"), initialize.index("SetEnabled(true)"))
+        self.assertLess(initialize.index("return;"), initialize.index("SetEnabled(true)"))
+        self.assertIn("commandServerPort", initialize)
+        ctor = function(MANAGER, "RandomPlayerbotMgr::RandomPlayerbotMgr()")
+        self.assertNotIn("sPlayerbotCommandServer.Start()", ctor)
+        load = function("src/server/worldserver/Main.cpp", "static void LoadAllScripts()")
+        self.assertIn('GetBoolDefault("AiPlayerbot.Enabled"', load)
+        self.assertLess(load.index('GetBoolDefault("AiPlayerbot.Enabled"'), load.index("RegisterPlayerbotScripts"))
+        config_init = function(CONFIG, "bool PlayerbotAIConfig::Initialize()")
+        self.assertLess(config_init.index('GetBoolDefault("AiPlayerbot.Enabled"'), config_init.index("EnsureBotTables"))
+        self.assertLess(config_init.index("if (!enabled)"), config_init.index("CreateRandomBots"))
+        trade = function(FACTORY, "void PlayerbotFactory::InitTradeSkills()")
+        self.assertIn("HasSkill(tradeSkills[i])", trade)
+        teleport = function(MANAGER, "void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation>")
+        self.assertNotIn("HasBotTeleportNavigation", teleport)
+        self.assertNotIn("GetNavMeshQuery", teleport)
+        self.assertIn("no candidate passed terrain/area checks", teleport)
+        self.assertNotIn("MMAP checks", teleport)
 
 
 if __name__ == "__main__":

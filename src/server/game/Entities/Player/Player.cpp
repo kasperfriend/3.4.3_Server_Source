@@ -26249,8 +26249,14 @@ void Player::_LoadSkills(PreparedQueryResult result)
             SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skill, race, GetClass());
             if (!rcEntry)
             {
-                TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
-                    GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
+                // Random bots previously saved every weapon skill. Keep deleting the
+                // leftover rows, but do not spam ERROR for socket-less bot sessions.
+                if (GetSession() && GetSession()->IsBotSession())
+                    TC_LOG_DEBUG("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
+                        GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
+                else
+                    TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
+                        GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
 
                 mSkillStatus.insert(SkillStatusMap::value_type(skill, SkillStatusData(mSkillStatus.size(), SKILL_DELETED)));
                 continue;
