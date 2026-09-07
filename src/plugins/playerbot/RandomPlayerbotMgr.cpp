@@ -140,7 +140,9 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
             TC_LOG_INFO("playerbot",  "Setting dead flag for bot {}", bot);
             uint32 randomTime = urand(sPlayerbotAIConfig.minRandomBotReviveTime, sPlayerbotAIConfig.maxRandomBotReviveTime);
             SetEventValue(bot, "dead", 1, randomTime);
-            SetEventValue(bot, "revive", 1, randomTime - 60);
+            // guard the -60 offset: a revive time below 60 would wrap the uint32
+            // validIn around 4 billion seconds and the bot would never revive
+            SetEventValue(bot, "revive", 1, randomTime > 60 ? randomTime - 60 : 1);
             return false;
         }
 

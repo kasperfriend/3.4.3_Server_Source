@@ -143,6 +143,54 @@ bool PlayerbotAIConfig::Initialize()
     minGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MinGuildTaskRewardTime", 60);
     maxGuildTaskRewardTime = config->GetIntDefault("AiPlayerbot.MaxGuildTaskRewardTime", 600);
 
+    // An inverted min/max pair from the config would eventually reach
+    // urand(min, max) with max < min, whose ASSERT(max >= min) crashes the
+    // worldserver - validate every pair and swap inverted values instead of
+    // trusting the configuration file blindly
+    auto normalizeRange = [](const char* minName, const char* maxName, uint32& minValue, uint32& maxValue)
+    {
+        if (minValue > maxValue)
+        {
+            TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: configuration value {} ({}) is greater than {} ({}); swapping the two values",
+                    minName, minValue, maxName, maxValue);
+            uint32 temp = minValue;
+            minValue = maxValue;
+            maxValue = temp;
+        }
+    };
+
+    normalizeRange("AiPlayerbot.MinRandomBots", "AiPlayerbot.MaxRandomBots", minRandomBots, maxRandomBots);
+    normalizeRange("AiPlayerbot.RandomBotCountChangeMinInterval", "AiPlayerbot.RandomBotCountChangeMaxInterval",
+            randomBotCountChangeMinInterval, randomBotCountChangeMaxInterval);
+    normalizeRange("AiPlayerbot.MinRandomBotsPerInterval", "AiPlayerbot.MaxRandomBotsPerInterval",
+            minRandomBotsPerInterval, maxRandomBotsPerInterval);
+    normalizeRange("AiPlayerbot.MinRandomBotInWorldTime", "AiPlayerbot.MaxRandomBotInWorldTime",
+            minRandomBotInWorldTime, maxRandomBotInWorldTime);
+    normalizeRange("AiPlayerbot.MinRandomBotRandomizeTime", "AiPlayerbot.MaxRandomBotRandomizeTime",
+            minRandomBotRandomizeTime, maxRandomBotRandomizeTime);
+    normalizeRange("AiPlayerbot.MinRandomBotReviveTime", "AiPlayerbot.MaxRandomBotReviveTime",
+            minRandomBotReviveTime, maxRandomBotReviveTime);
+    normalizeRange("AiPlayerbot.MinRandomBotPvpTime", "AiPlayerbot.MaxRandomBotPvpTime",
+            minRandomBotPvpTime, maxRandomBotPvpTime);
+    normalizeRange("AiPlayerbot.MinRandomBotsPriceChangeInterval", "AiPlayerbot.MaxRandomBotsPriceChangeInterval",
+            minRandomBotsPriceChangeInterval, maxRandomBotsPriceChangeInterval);
+    normalizeRange("AiPlayerbot.RandomBotMinLevel", "AiPlayerbot.RandomBotMaxLevel", randomBotMinLevel, randomBotMaxLevel);
+    normalizeRange("AiPlayerbot.MinGuildTaskChangeTime", "AiPlayerbot.MaxGuildTaskChangeTime",
+            minGuildTaskChangeTime, maxGuildTaskChangeTime);
+    normalizeRange("AiPlayerbot.MinGuildTaskAdvertisementTime", "AiPlayerbot.MaxGuildTaskAdvertisementTime",
+            minGuildTaskAdvertisementTime, maxGuildTaskAdvertisementTime);
+    normalizeRange("AiPlayerbot.MinGuildTaskRewardTime", "AiPlayerbot.MaxGuildTaskRewardTime",
+            minGuildTaskRewardTime, maxGuildTaskRewardTime);
+
+    // used as a divisor in trigger/LFG probability rolls - zero (or a negative
+    // value) makes the division produce inf/garbage and undefined int casts
+    if (randomChangeMultiplier <= 0.0f)
+    {
+        TC_LOG_ERROR("playerbot", "PlayerbotAIConfig: AiPlayerbot.RandomChangeMultiplier ({}) must be positive; using 1.0",
+                randomChangeMultiplier);
+        randomChangeMultiplier = 1.0f;
+    }
+
     RandomPlayerbotFactory::CreateRandomBots();
     TC_LOG_INFO("playerbot",  "AI Playerbot configuration loaded");
 
