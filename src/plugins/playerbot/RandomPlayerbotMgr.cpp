@@ -40,15 +40,35 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     int randomBotsPerInterval = (int)urand(sPlayerbotAIConfig.minRandomBotsPerInterval, sPlayerbotAIConfig.maxRandomBotsPerInterval);
     if (!processTicks)
     {
-        if (sPlayerbotAIConfig.randomBotLoginAtStartup)
-            randomBotsPerInterval = bots.size();
+        // log the population in gradually over ~10 ticks instead of all in a
+        // single one: every ProcessBot loads a character on the world thread,
+        // and all-at-once stalls long enough for the FreezeDetector to kill
+        // the server whenever RandomBotLoginAtStartup is on
+        if (sPlayerbotAIConfig.randomBotLoginAtStartup && botCount / 10 > randomBotsPerInterval)
+            randomBotsPerInterval = botCount / 10;
     }
+    // processTicks was initialised but never incremented, making the startup
+    // branch above fire on EVERY tick - every tick processed the whole bot list
+    if (processTicks < 1000)
+        ++processTicks;
 
-    while (botCount++ < maxAllowedBotCount)
+    // resolve the free bots for this tick ONCE: AddRandomBot used to rescan the
+    // characters of every random account per bot added, i.e. accountCount x
+    // addedBots character queries in a single world tick (a FreezeDetector trip
+    // at startup with a large MaxRandomBots)
+    vector<uint32> freeAllianceBots = GetFreeBots(true);
+    vector<uint32> freeHordeBots = GetFreeBots(false);
+
+    int addsThisTick = 0;
+    while (botCount++ < maxAllowedBotCount && addsThisTick < 200)
     {
         bool alliance = botCount % 2;
-        uint32 bot = AddRandomBot(alliance);
-        if (bot) bots.push_back(bot);
+        uint32 bot = AddRandomBot(alliance ? freeAllianceBots : freeHordeBots);
+        if (bot)
+        {
+            bots.push_back(bot);
+            ++addsThisTick;
+        }
         else break;
     }
 
@@ -69,14 +89,15 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     PrintStats();
 }
 
-uint32 RandomPlayerbotMgr::AddRandomBot(bool alliance)
+uint32 RandomPlayerbotMgr::AddRandomBot(vector<uint32>& bots)
 {
-    vector<uint32> bots = GetFreeBots(alliance);
-    if (bots.size() == 0)
+    if (bots.empty())
         return 0;
 
     int index = urand(0, bots.size() - 1);
     uint32 bot = bots[index];
+    // the chosen bot is no longer free - do not offer it again this tick
+    bots.erase(bots.begin() + index);
     SetEventValue(bot, "add", 1, urand(sPlayerbotAIConfig.minRandomBotInWorldTime, sPlayerbotAIConfig.maxRandomBotInWorldTime));
     uint32 randomTime = 30 + urand(sPlayerbotAIConfig.randomBotUpdateInterval, sPlayerbotAIConfig.randomBotUpdateInterval * 3);
     ScheduleRandomize(bot, randomTime);
@@ -408,6 +429,25 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
 {
     uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
 
+    // A creature-table scan per bot teleport is heavy and creature levels do
+    // not change at runtime: cache the computed (min,max) per map area grid for
+    // the whole server run (sentinel max=0 means "no creatures in that area")
+    static std::map<uint64, uint64> zoneLevelCache;
+    uint64 levelKey = (uint64(mapId) << 44)
+            | (uint64((int32(teleY) / 64) + (1 << 21)) << 22)
+            | uint64((int32(teleX) / 64) + (1 << 21));
+    std::map<uint64, uint64>::iterator cached = zoneLevelCache.find(levelKey);
+    if (cached != zoneLevelCache.end())
+    {
+        uint32 cachedMin = uint32(cached->second >> 32);
+        uint32 cachedMax = uint32(cached->second);
+        if (!cachedMax)
+            return urand(1, maxLevel);
+
+        uint32 cachedLevel = urand(cachedMin, cachedMax);
+        return cachedLevel > maxLevel ? maxLevel : cachedLevel;
+    }
+
 	uint32 level;
     // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
     // creature_template has no minlevel/maxlevel columns in this schema - querying them
@@ -433,15 +473,20 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
             if (maxZoneLevel < minLevel)
                 maxZoneLevel = minLevel;
 
+            zoneLevelCache[levelKey] = (uint64(minLevel) << 32) | maxZoneLevel;
             level = urand(minLevel, maxZoneLevel);
             if (level > maxLevel)
                 level = maxLevel;
         }
         else
+        {
+            zoneLevelCache[levelKey] = 0;
             level = urand(1, maxLevel);
+        }
     }
     else
     {
+        zoneLevelCache[levelKey] = 0;
         level = urand(1, maxLevel);
     }
 

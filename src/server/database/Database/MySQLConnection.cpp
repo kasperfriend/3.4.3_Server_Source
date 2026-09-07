@@ -564,6 +564,14 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
         {
             TC_LOG_INFO("sql.sql", "Attempting to reconnect to the MySQL server...");
 
+            // Reconnect attempts on the synchronous connection run on the world
+            // thread; each attempt costs a connect timeout + 3s sleep, and the
+            // full series can exceed the FreezeDetector limit and crash the
+            // server while MySQL is down. Cap retries on the sync connection;
+            // async worker threads have their own time budget.
+            if (!(m_connectionFlags & CONNECTION_ASYNC) && attempts > 2)
+                attempts = 2;
+
             m_reconnecting = true;
 
             uint32 const lErrno = Open();
@@ -572,9 +580,14 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
                 // Don't remove 'this' pointer unless you want to skip loading all prepared statements...
                 if (!this->PrepareStatements())
                 {
-                    TC_LOG_FATAL("sql.sql", "Could not re-prepare statements!");
-                    std::this_thread::sleep_for(std::chrono::seconds(10));
-                    ABORT();
+                    // Aborting the worldserver over a broken re-connection kills
+                    // everyone online - drop the connection instead and let the
+                    // next query retry the whole open+prepare cycle.
+                    TC_LOG_ERROR("sql.sql", "Could not re-prepare statements after reconnect! Dropping the connection; will retry on the next query.");
+                    mysql_close(m_Mysql);
+                    m_Mysql = nullptr;
+                    m_reconnecting = false;
+                    return false;
                 }
 
                 TC_LOG_INFO("sql.sql", "Successfully reconnected to {} @{}:{} ({}).",
@@ -587,14 +600,12 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
 
             if ((--attempts) == 0)
             {
-                // Shut down the server when the mysql server isn't
-                // reachable for some time
-                TC_LOG_FATAL("sql.sql", "Failed to reconnect to the MySQL server, "
-                             "terminating the server to prevent data corruption!");
-
-                // We could also initiate a shutdown through using std::raise(SIGTERM)
-                std::this_thread::sleep_for(std::chrono::seconds(10));
-                ABORT();
+                // Keep the worldserver alive when MySQL is unreachable: skip this
+                // query and keep retrying on the following ones instead of
+                // aborting the whole server. Loudly logged so an outage is visible.
+                TC_LOG_ERROR("sql.sql", "Failed to reconnect to the MySQL server! Skipping this query; the server keeps running and retries on the next query. Check that MySQL is reachable.");
+                m_reconnecting = false;
+                return false;
             }
             else
             {
@@ -612,17 +623,15 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
         case ER_DUP_ENTRY:
             return false;
 
-        // Outdated table or database structure - terminate core
+        // Outdated table or database structure - previously terminated the core;
+        // keep the server alive, skip the offending query and report loudly so
+        // a broken custom script/plugin does not drop every player.
         case ER_BAD_FIELD_ERROR:
         case ER_NO_SUCH_TABLE:
-            TC_LOG_ERROR("sql.sql", "Your database structure is not up to date. Please make sure you've executed all queries in the sql/updates folders.");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            ABORT();
+            TC_LOG_ERROR("sql.sql", "Schema mismatch in a query (errno {}): missing table/column. The query was skipped; fix the offending code or run the missing sql/updates. Server stays up.", errNo);
             return false;
         case ER_PARSE_ERROR:
-            TC_LOG_ERROR("sql.sql", "Error while parsing SQL. Core fix required.");
-            std::this_thread::sleep_for(std::chrono::seconds(10));
-            ABORT();
+            TC_LOG_ERROR("sql.sql", "SQL parse error in a query (usually an unescaped string from custom code). The query was skipped; fix the offending code. Server stays up.");
             return false;
         default:
             TC_LOG_ERROR("sql.sql", "Unhandled MySQL errno {}. Unexpected behaviour possible.", errNo);
