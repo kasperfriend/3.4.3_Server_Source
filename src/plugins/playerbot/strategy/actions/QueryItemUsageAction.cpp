@@ -118,9 +118,13 @@ void QueryItemUsageAction::QueryItemPrice(ItemTemplate const *item)
         for (list<Item*>::iterator i = items.begin(); i != items.end(); ++i)
         {
             Item* sell = *i;
-            int32 sellPrice = sell->GetCount() * auctionbot.GetSellPrice(sell->GetTemplate()) * sRandomPlayerbotMgr.GetSellMultiplier(bot);
+            ItemTemplate const* proto = sell->GetTemplate();
+            if (!proto)
+                continue;
+
+            int32 sellPrice = sell->GetCount() * auctionbot.GetSellPrice(proto) * sRandomPlayerbotMgr.GetSellMultiplier(bot);
             ostringstream out;
-            out << "Selling " << chat->formatItem(sell->GetTemplate(), sell->GetCount()) << " for " << chat->formatMoney(sellPrice);
+            out << "Selling " << chat->formatItem(proto, sell->GetCount()) << " for " << chat->formatMoney(sellPrice);
             ai->TellMaster(out.str());
         }
     }
