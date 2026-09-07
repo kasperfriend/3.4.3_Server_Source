@@ -276,8 +276,6 @@ uint32 PlayerbotAIConfig::GetRandomChangeRange(double scale) const
 
 bool PlayerbotAIConfig::Initialize()
 {
-    TC_LOG_INFO("playerbot",  "Initializing AI Playerbot by ike3, based on the original Playerbot by blueboy");
-
     // Main.cpp has already loaded worldserver.conf and any explicit overrides.
     // Do not load a separate bot file here: a stale file in the working directory
     // would silently override the settings (and environment overrides) from Main.
@@ -287,6 +285,8 @@ bool PlayerbotAIConfig::Initialize()
         TC_LOG_INFO("playerbot", "AI Playerbot is disabled in {}", config->GetFilename());
         return false;
     }
+
+    TC_LOG_INFO("playerbot",  "Initializing AI Playerbot by ike3, based on the original Playerbot by blueboy");
 
     // self-heal the ai_playerbot_* tables before anything queries them:
     // create missing tables, add columns that older ai_playerbot_* dumps are

@@ -6,10 +6,6 @@
 #include "PlayerbotAI.h"
 #include "AiFactory.h"
 #include "Maps/MapManager.h"
-#include "DisableMgr.h"
-#include "MMapFactory.h"
-#include "MMapDefines.h"
-#include "PhasingHandler.h"
 #include "PlayerbotCommandServer.h"
 #include "GuildTaskMgr.h"
 #include <tuple>
@@ -118,7 +114,6 @@ namespace
 
 RandomPlayerbotMgr::RandomPlayerbotMgr() : PlayerbotHolder(), processTicks(0)
 {
-    sPlayerbotCommandServer.Start();
 }
 
 RandomPlayerbotMgr::~RandomPlayerbotMgr()
@@ -331,19 +326,6 @@ bool RandomPlayerbotMgr::ProcessBot(uint32 bot)
     return false;
 }
 
-static bool HasBotTeleportNavigation(MMAP::MMapManager& mmap, uint32 terrainMapId, uint32 mapId, uint32 instanceId, float x, float y, float z)
-{
-    dtNavMeshQuery const* query = mmap.GetNavMeshQuery(terrainMapId, mapId, instanceId);
-    if (!query)
-        return false;
-    dtQueryFilter filter;
-    filter.setIncludeFlags(NAV_GROUND | NAV_GROUND_STEEP);
-    float point[3] = { y, z, x }; // Detour uses Y,Z,X, not world X,Y,Z.
-    float extents[3] = { 3.0f, 5.0f, 3.0f }, nearest[3];
-    dtPolyRef poly = 0;
-    return dtStatusSucceed(query->findNearestPoly(point, extents, &filter, &poly, nearest)) && poly != 0;
-}
-
 void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs)
 {
     if (!bot || !bot->IsInWorld() || bot->IsBeingTeleported())
@@ -351,7 +333,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
 
     if (locs.empty())
     {
-        TC_LOG_ERROR("playerbot",  "Cannot teleport bot {} - no locations available", bot->GetName().c_str());
+        TC_LOG_DEBUG("playerbot",  "Cannot teleport bot {} - no locations available", bot->GetName().c_str());
         return;
     }
 
@@ -390,12 +372,10 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
             continue;
 
         z = 0.05f + ground;
-        if (DisableMgr::IsPathfindingEnabled(loc.GetMapId()))
-        {
-            uint32 terrainMapId = PhasingHandler::GetTerrainMapId(bot->GetPhaseShift(), loc.GetMapId(), map->GetTerrain(), x, y);
-            if (!HasBotTeleportNavigation(*MMAP::MMapFactory::createOrGetMMapManager(), terrainMapId, loc.GetMapId(), map->GetInstanceId(), x, y, z))
-                continue;
-        }
+        // Dest tiles are often not loaded (and ocean/empty grids have no .mmtile).
+        // Requiring a navmesh polygon at the grind offset therefore rejects valid
+        // creature-spawn destinations and logs a false mmap error even when
+        // bots already walk with MotionMaster pathfinding after spawn.
         TC_LOG_INFO("playerbot",  "Random teleporting bot {} to {} {},{},{} (1/{} locations)",
                 bot->GetName().c_str(), area->AreaName[LOCALE_enUS], x, y, z, locs.size());
 
@@ -404,7 +384,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
         return;
     }
 
-    TC_LOG_ERROR("playerbot",  "Cannot teleport bot {} - no candidate passed terrain/area/MMAP checks", bot->GetName().c_str());
+    TC_LOG_DEBUG("playerbot",  "Cannot teleport bot {} - no candidate passed terrain/area checks", bot->GetName().c_str());
 }
 
 void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
@@ -506,7 +486,7 @@ void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
         // indexing locs would underflow urand() and dereference
         if (locs.empty())
         {
-            TC_LOG_ERROR("playerbot", "No game_tele locations for map {}, skipping for random teleport of bot {}",
+            TC_LOG_DEBUG("playerbot", "No game_tele locations for map {}, skipping for random teleport of bot {}",
                     mapId, bot->GetName());
             continue;
         }

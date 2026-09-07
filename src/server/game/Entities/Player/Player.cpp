@@ -5884,7 +5884,13 @@ void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal)
 
         if (!skillSlot)
         {
-            TC_LOG_ERROR("misc", "Tried to add skill {} but player {} ({}) cannot have additional skills", id, GetName(), GetGUID().ToString());
+            // Random bots can fill PLAYER_MAX_SKILLS with leftover weapon/trade
+            // rows from earlier factory versions. Skip the console ERROR; the
+            // extra skill is still not learned.
+            if (GetSession() && GetSession()->IsBotSession())
+                TC_LOG_DEBUG("misc", "Tried to add skill {} but player {} ({}) cannot have additional skills", id, GetName(), GetGUID().ToString());
+            else
+                TC_LOG_ERROR("misc", "Tried to add skill {} but player {} ({}) cannot have additional skills", id, GetName(), GetGUID().ToString());
             return;
         }
 
@@ -6280,8 +6286,13 @@ void Player::CheckAreaExplore()
     AreaTableEntry const* areaEntry = sAreaTableStore.LookupEntry(areaId);
     if (!areaEntry)
     {
-        TC_LOG_ERROR("entities.player", "Player '{}' ({}) discovered unknown area (x: {} y: {} z: {} map: {})",
-            GetName(), GetGUID().ToString(), GetPositionX(), GetPositionY(), GetPositionZ(), GetMapId());
+        // Bots grind/teleport onto coords whose area id is missing from AreaTable.
+        if (GetSession() && GetSession()->IsBotSession())
+            TC_LOG_DEBUG("entities.player", "Player '{}' ({}) discovered unknown area (x: {} y: {} z: {} map: {})",
+                GetName(), GetGUID().ToString(), GetPositionX(), GetPositionY(), GetPositionZ(), GetMapId());
+        else
+            TC_LOG_ERROR("entities.player", "Player '{}' ({}) discovered unknown area (x: {} y: {} z: {} map: {})",
+                GetName(), GetGUID().ToString(), GetPositionX(), GetPositionY(), GetPositionZ(), GetMapId());
         return;
     }
 
@@ -26235,8 +26246,12 @@ void Player::_LoadSkills(PreparedQueryResult result)
         {
             if (mSkillStatus.size() >= PLAYER_MAX_SKILLS)                      // client limit
             {
-                TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}) has more than {} skills.",
-                    GetName(), GetGUID().ToString(), PLAYER_MAX_SKILLS);
+                if (GetSession() && GetSession()->IsBotSession())
+                    TC_LOG_DEBUG("entities.player", "Player::_LoadSkills: Player '{}' ({}) has more than {} skills.",
+                        GetName(), GetGUID().ToString(), PLAYER_MAX_SKILLS);
+                else
+                    TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}) has more than {} skills.",
+                        GetName(), GetGUID().ToString(), PLAYER_MAX_SKILLS);
                 break;
             }
 
@@ -26249,8 +26264,14 @@ void Player::_LoadSkills(PreparedQueryResult result)
             SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skill, race, GetClass());
             if (!rcEntry)
             {
-                TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
-                    GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
+                // Random bots previously saved every weapon skill. Keep deleting the
+                // leftover rows, but do not spam ERROR for socket-less bot sessions.
+                if (GetSession() && GetSession()->IsBotSession())
+                    TC_LOG_DEBUG("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
+                        GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
+                else
+                    TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
+                        GetName(), GetGUID().ToString(), uint32(race), uint32(GetClass()), skill);
 
                 mSkillStatus.insert(SkillStatusMap::value_type(skill, SkillStatusData(mSkillStatus.size(), SKILL_DELETED)));
                 continue;

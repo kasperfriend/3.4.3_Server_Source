@@ -152,8 +152,14 @@ namespace MMAP
         if (!file)
         {
             int error = errno;
-            TC_LOG_WARN("maps.mmaps", "MMAP: cannot open params for map {} in data directory '{}' (last path '{}', OS error {}: {})",
-                mapId, basePath, fileName, error, std::strerror(error));
+            // Ocean/empty/unmeshed maps have no .mmap params. That is expected,
+            // not a broken install; keep real I/O failures as warnings.
+            if (error == ENOENT)
+                TC_LOG_DEBUG("maps.mmaps", "MMAP: no params for map {} in data directory '{}' (last path '{}')",
+                    mapId, basePath, fileName);
+            else
+                TC_LOG_WARN("maps.mmaps", "MMAP: cannot open params for map {} in data directory '{}' (last path '{}', OS error {}: {})",
+                    mapId, basePath, fileName, error, std::strerror(error));
             return false;
         }
 
@@ -223,8 +229,14 @@ namespace MMAP
         if (!file)
         {
             int error = errno;
-            TC_LOG_WARN("maps.mmaps", "MMAP: cannot open tile for map {} grid {},{} (last path '{}', OS error {}: {})",
-                mapId, x, y, fileName, error, std::strerror(error));
+            // Grids over ocean or unused ADT tiles have no .mmtile. Height/area
+            // probes still try to load them; missing files are not mmap errors.
+            if (error == ENOENT)
+                TC_LOG_DEBUG("maps.mmaps", "MMAP: no tile for map {} grid {},{} (last path '{}')",
+                    mapId, x, y, fileName);
+            else
+                TC_LOG_WARN("maps.mmaps", "MMAP: cannot open tile for map {} grid {},{} (last path '{}', OS error {}: {})",
+                    mapId, x, y, fileName, error, std::strerror(error));
             return false;
         }
 
