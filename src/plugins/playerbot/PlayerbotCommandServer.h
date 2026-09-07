@@ -19,6 +19,10 @@ public:
     }
 
     void Start();
+
+    // World-thread entry point: executes the remote commands queued by the
+    // acceptor/sessions threads (those threads must never touch world objects)
+    void ProcessPending();
 };
 
 #define sPlayerbotCommandServer PlayerbotCommandServer::instance()

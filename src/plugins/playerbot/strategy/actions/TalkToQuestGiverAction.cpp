@@ -82,6 +82,10 @@ void TalkToQuestGiverAction::AskToSelectReward(Quest const* quest, ostringstream
     for (uint8 i=0; i < quest->GetRewChoiceItemsCount(); ++i)
     {
         ItemTemplate const* item = sObjectMgr->GetItemTemplate(quest->RewardChoiceItemId[i]);
+        // quest data may reference item ids that do not exist in this build's
+        // DB2 stores - a null template must not be dereferenced
+        if (!item)
+            continue;
         msg << chat->formatItem(item);
     }
     ai->TellMaster(msg);

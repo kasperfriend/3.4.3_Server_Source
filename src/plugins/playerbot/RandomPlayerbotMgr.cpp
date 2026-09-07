@@ -22,6 +22,10 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
 {
     SetNextCheckDelay(sPlayerbotAIConfig.randomBotUpdateInterval * 1000);
 
+    // answer remote command-server requests queued by its worker threads -
+    // those threads must never touch world objects themselves
+    sPlayerbotCommandServer.ProcessPending();
+
     if (!sPlayerbotAIConfig.randomBotAutologin || !sPlayerbotAIConfig.enabled)
         return;
 
