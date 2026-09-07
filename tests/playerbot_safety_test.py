@@ -119,6 +119,35 @@ class PlayerbotSafetyTest(unittest.TestCase):
         self.assertNotIn("GetNavMeshQuery", teleport)
         self.assertIn("no candidate passed terrain/area checks", teleport)
         self.assertNotIn("MMAP checks", teleport)
+        # Empty grind-location / game_tele / factory item lists are expected
+        # skips, not console ERROR (Logger.root=5 would print them).
+        self.assertIn("no locations available", teleport)
+        self.assertNotIn('TC_LOG_ERROR("playerbot",  "Cannot teleport bot {} - no locations available"', teleport)
+        first = function(MANAGER, "void RandomPlayerbotMgr::RandomizeFirst(")
+        self.assertIn("No game_tele locations", first)
+        self.assertNotIn('TC_LOG_ERROR("playerbot", "No game_tele locations', first)
+        self.assertIn('TC_LOG_ERROR("playerbot", "Cannot randomize bot {} - AiPlayerbot.RandomBotMaps is empty"', first)
+        for signature, needle in (
+            ("void PlayerbotFactory::InitPet()", "No pets available"),
+            ("void PlayerbotFactory::InitPet()", "Cannot create pet"),
+            ("void PlayerbotFactory::InitBags()", "no bags found"),
+            ("void PlayerbotFactory::InitInventoryTrade()", "No trade items available"),
+            ("void PlayerbotFactory::InitGlyphs()", "No glyphs found"),
+            ("void PlayerbotFactory::InitTalents(uint32 specNo)", "No spells for talent row"),
+            ("void PlayerbotFactory::InitGuild()", "No random guilds available"),
+        ):
+            body = function(FACTORY, signature)
+            self.assertIn(needle, body)
+            self.assertNotIn(f'TC_LOG_ERROR("playerbot"', body[body.index(needle) - 80:body.index(needle)])
+        gtask_item = function("src/plugins/playerbot/GuildTaskMgr.cpp", "bool GuildTaskMgr::CreateItemTask(")
+        self.assertIn("no items avaible for item task", gtask_item)
+        self.assertNotIn('TC_LOG_ERROR("gtask"', gtask_item)
+        gtask_kill = function("src/plugins/playerbot/GuildTaskMgr.cpp", "bool GuildTaskMgr::CreateKillTask(")
+        self.assertIn("no rare creatures available", gtask_kill)
+        self.assertNotIn('TC_LOG_ERROR("gtask"', gtask_kill)
+        rnditem = function("src/plugins/playerbot/RandomItemMgr.cpp", "RandomItemList RandomItemMgr::Query(RandomItemType type)")
+        self.assertIn("no items available for random item query", rnditem)
+        self.assertNotIn('TC_LOG_ERROR("gtask",  "no items available for random item query"', rnditem)
 
 
 if __name__ == "__main__":

@@ -197,7 +197,7 @@ void PlayerbotFactory::InitPet()
 
         if (ids.empty())
         {
-            TC_LOG_ERROR("playerbot", "No pets available for bot {} ({} level)", bot->GetName(), bot->GetLevel());
+            TC_LOG_DEBUG("playerbot", "No pets available for bot {} ({} level)", bot->GetName(), bot->GetLevel());
             return;
         }
 
@@ -238,7 +238,7 @@ void PlayerbotFactory::InitPet()
 
     if (!pet)
     {
-        TC_LOG_ERROR("playerbot", "Cannot create pet for bot {}", bot->GetName());
+        TC_LOG_DEBUG("playerbot", "Cannot create pet for bot {}", bot->GetName());
         return;
     }
 
@@ -250,7 +250,7 @@ void PlayerbotFactory::InitPet()
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(pair.first, DIFFICULTY_NONE);
         if (!spellInfo)
         {
-            TC_LOG_ERROR("playerbot", "Bot {} pet {} has missing spell {}; skipping autocast",
+            TC_LOG_DEBUG("playerbot", "Bot {} pet {} has missing spell {}; skipping autocast",
                 bot->GetGUID().ToString(), pet->GetEntry(), pair.first);
             continue;
         }
@@ -271,7 +271,7 @@ void PlayerbotFactory::ClearSpells()
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
         if (!spellInfo)
         {
-            TC_LOG_ERROR("playerbot", "Bot {} has missing spell {} during spell reset; skipping",
+            TC_LOG_DEBUG("playerbot", "Bot {} has missing spell {} during spell reset; skipping",
                 bot->GetGUID().ToString(), spellId);
             continue;
         }
@@ -846,7 +846,7 @@ void PlayerbotFactory::InitBags()
 
     if (ids.empty())
     {
-        TC_LOG_ERROR("playerbot",  "{}: no bags found", bot->GetName().c_str());
+        TC_LOG_DEBUG("playerbot",  "{}: no bags found", bot->GetName().c_str());
         return;
     }
 
@@ -1178,7 +1178,7 @@ void PlayerbotFactory::InitTalents(uint32 specNo)
         vector<TalentEntry const*> &spells = i->second;
         if (spells.empty())
         {
-            TC_LOG_ERROR("playerbot",  "{}: No spells for talent row {}", bot->GetName().c_str(), i->first);
+            TC_LOG_DEBUG("playerbot",  "{}: No spells for talent row {}", bot->GetName().c_str(), i->first);
             continue;
         }
 
@@ -1610,7 +1610,7 @@ void PlayerbotFactory::InitInventoryTrade()
 
     if (ids.empty())
     {
-        TC_LOG_ERROR("playerbot",  "No trade items available for bot {} ({} level)", bot->GetName().c_str(), bot->GetLevel());
+        TC_LOG_DEBUG("playerbot",  "No trade items available for bot {} ({} level)", bot->GetName().c_str(), bot->GetLevel());
         return;
     }
 
@@ -1758,7 +1758,7 @@ void PlayerbotFactory::InitGlyphs()
 
     if (glyphs.empty())
     {
-        TC_LOG_ERROR("playerbot",  "No glyphs found for bot {}", bot->GetName().c_str());
+        TC_LOG_DEBUG("playerbot",  "No glyphs found for bot {}", bot->GetName().c_str());
         return;
     }
 
@@ -1785,7 +1785,7 @@ void PlayerbotFactory::InitGlyphs()
         // indexing it would underflow urand()
         if (ids.empty())
         {
-            TC_LOG_ERROR("playerbot", "No glyphs found for bot {} index {} slot {}", bot->GetName().c_str(), slotIndex, slot);
+            TC_LOG_DEBUG("playerbot", "No glyphs found for bot {} index {} slot {}", bot->GetName().c_str(), slotIndex, slot);
             continue;
         }
 
@@ -1807,7 +1807,7 @@ void PlayerbotFactory::InitGlyphs()
             break;
         }
         if (!found)
-            TC_LOG_ERROR("playerbot",  "No glyphs found for bot {} index {} slot {}", bot->GetName().c_str(), slotIndex, slot);
+            TC_LOG_DEBUG("playerbot",  "No glyphs found for bot {} index {} slot {}", bot->GetName().c_str(), slotIndex, slot);
     }
 }
 
@@ -1825,7 +1825,7 @@ void PlayerbotFactory::InitGuild()
 
     if (guilds.empty())
     {
-        TC_LOG_ERROR("playerbot",  "No random guilds available");
+        TC_LOG_DEBUG("playerbot",  "No random guilds available");
         return;
     }
 

@@ -333,7 +333,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, vector<WorldLocation> &locs
 
     if (locs.empty())
     {
-        TC_LOG_ERROR("playerbot",  "Cannot teleport bot {} - no locations available", bot->GetName().c_str());
+        TC_LOG_DEBUG("playerbot",  "Cannot teleport bot {} - no locations available", bot->GetName().c_str());
         return;
     }
 
@@ -486,7 +486,7 @@ void RandomPlayerbotMgr::RandomizeFirst(Player* bot)
         // indexing locs would underflow urand() and dereference
         if (locs.empty())
         {
-            TC_LOG_ERROR("playerbot", "No game_tele locations for map {}, skipping for random teleport of bot {}",
+            TC_LOG_DEBUG("playerbot", "No game_tele locations for map {}, skipping for random teleport of bot {}",
                     mapId, bot->GetName());
             continue;
         }

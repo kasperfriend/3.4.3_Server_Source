@@ -369,7 +369,7 @@ void TestPet()
         spellMgr.spells = { { 1, { 1, false } }, { 2, { 2, true } } };
         warnings = 0;
         PlayerbotFactory(&bot, 13).InitPet();
-        CHECK(bot.pet->autocasts == vector<uint32>({ 1 }) && warnings == 1);
+        CHECK(bot.pet->autocasts == vector<uint32>({ 1 }) && warnings == 0);
     }
     CHECK(livePets == 0);
     for (uint32 flag = 0; flag < 3; ++flag)
@@ -393,7 +393,7 @@ void TestSpellReset()
     spellMgr.spells = { { 1, { 1, false } }, { 2, { 2, true } }, { 3, { 3, false } } };
     warnings = 0;
     PlayerbotFactory(&bot, 13).ClearSpells();
-    CHECK(bot.removed == vector<uint32>({ 1, 3 }) && warnings == 1);
+    CHECK(bot.removed == vector<uint32>({ 1, 3 }) && warnings == 0);
     CHECK(bot.spells.count(2) && bot.spells.count(999));
 }
 void TestCombatRefresh()

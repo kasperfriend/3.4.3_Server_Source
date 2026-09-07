@@ -150,7 +150,7 @@ RandomItemList RandomItemMgr::Query(RandomItemType type)
     }
 
     if (items.empty())
-        TC_LOG_ERROR("gtask",  "no items available for random item query {}", type);
+        TC_LOG_DEBUG("gtask",  "no items available for random item query {}", type);
 
     return items;
 }

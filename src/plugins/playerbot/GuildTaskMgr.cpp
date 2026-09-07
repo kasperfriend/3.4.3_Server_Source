@@ -102,7 +102,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         }
         else
         {
-            TC_LOG_ERROR("gtask",  "{} / {}: error sending advertisement",
+            TC_LOG_DEBUG("gtask",  "{} / {}: error sending advertisement",
                     guild->GetName().c_str(), player->GetName().c_str());
         }
     }
@@ -119,7 +119,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         }
         else
         {
-            TC_LOG_ERROR("gtask",  "{} / {}: error sending thanks",
+            TC_LOG_DEBUG("gtask",  "{} / {}: error sending thanks",
                     guild->GetName().c_str(), player->GetName().c_str());
         }
     }
@@ -136,7 +136,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         }
         else
         {
-            TC_LOG_ERROR("gtask",  "{} / {}: error sending reward",
+            TC_LOG_DEBUG("gtask",  "{} / {}: error sending reward",
                     guild->GetName().c_str(), player->GetName().c_str());
         }
     }
@@ -170,7 +170,7 @@ bool GuildTaskMgr::CreateItemTask(uint32 owner, uint32 guildId)
     uint32 itemId = sRandomItemMgr.GetRandomItem(RANDOM_ITEM_GUILD_TASK);
     if (!itemId)
     {
-        TC_LOG_ERROR("gtask",  "{} / {}: no items avaible for item task",
+        TC_LOG_DEBUG("gtask",  "{} / {}: no items avaible for item task",
                 guild->GetName().c_str(), player->GetName().c_str());
         return false;
     }
@@ -218,7 +218,7 @@ bool GuildTaskMgr::CreateKillTask(uint32 owner, uint32 guildId)
 
     if (ids.empty())
     {
-        TC_LOG_ERROR("gtask",  "{} / {}: no rare creatures available for kill task",
+        TC_LOG_DEBUG("gtask",  "{} / {}: no rare creatures available for kill task",
                 guild->GetName().c_str(), player->GetName().c_str());
         return false;
     }
