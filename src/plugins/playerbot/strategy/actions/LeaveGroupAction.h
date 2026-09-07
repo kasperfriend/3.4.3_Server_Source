@@ -65,7 +65,7 @@ namespace ai
 
     class UninviteAction : public LeaveGroupAction {
     public:
-        UninviteAction(PlayerbotAI* ai) : LeaveGroupAction(ai, "party command") {}
+        UninviteAction(PlayerbotAI* ai) : LeaveGroupAction(ai, "uninvite") {}
 
         virtual bool Execute(Event event)
         {
