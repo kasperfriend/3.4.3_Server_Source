@@ -255,17 +255,20 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot)
     TC_LOG_INFO("playerbot",  "Preparing location to random teleporting bot {} for level {}", bot->GetName().c_str(), bot->GetLevel());
 
     if (locsPerLevelCache[bot->GetLevel()].empty()) {
+        // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
+        // creature_template has no minlevel/maxlevel columns in this schema - querying them
+        // raises ER_BAD_FIELD_ERROR which ABORTs the server
         QueryResult results = WorldDatabase.PQuery("select map, position_x, position_y, position_z "
-            "from (select map, position_x, position_y, position_z, avg(t.maxlevel), avg(t.minlevel), "
-            "{} - (avg(t.maxlevel) + avg(t.minlevel)) / 2 delta "
-            "from creature c inner join creature_template t on c.id = t.entry group by t.entry) q "
+            "from (select map, position_x, position_y, position_z, avg(d.MaxLevel), avg(d.MinLevel), "
+            "{} - (avg(d.MaxLevel) + avg(d.MinLevel)) / 2 delta "
+            "from creature c inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 group by d.Entry) q "
             "where delta >= 0 and delta <= {} and map in ({}) and not exists ( "
             "select map, position_x, position_y, position_z from "
             "("
-            "select map, c.position_x, c.position_y, c.position_z, avg(t.maxlevel), avg(t.minlevel), "
-            "{} - (avg(t.maxlevel) + avg(t.minlevel)) / 2 delta "
+            "select map, c.position_x, c.position_y, c.position_z, avg(d.MaxLevel), avg(d.MinLevel), "
+            "{} - (avg(d.MaxLevel) + avg(d.MinLevel)) / 2 delta "
             "from creature c "
-            "inner join creature_template t on c.id = t.entry group by t.entry "
+            "inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 group by d.Entry "
             ") q1 "
             "where delta > {} and q1.map = q.map "
             "and sqrt("
@@ -404,9 +407,12 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
     uint32 maxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
 
 	uint32 level;
-    QueryResult results = WorldDatabase.PQuery("select avg(t.minlevel) minlevel, avg(t.maxlevel) maxlevel from creature c "
-            "inner join creature_template t on c.id = t.entry "
-            "where map = '{}' and minlevel > 1 and abs(position_x - '{}') < '{}' and abs(position_y - '{}') < '{}'",
+    // creature levels live in creature_template_difficulty (DifficultyID 0 = DIFFICULTY_NONE);
+    // creature_template has no minlevel/maxlevel columns in this schema - querying them
+    // raises ER_BAD_FIELD_ERROR which ABORTs the server
+    QueryResult results = WorldDatabase.PQuery("select avg(d.MinLevel) minlevel, avg(d.MaxLevel) maxlevel from creature c "
+            "inner join creature_template_difficulty d on d.Entry = c.id and d.DifficultyID = 0 "
+            "where c.map = '{}' and d.MinLevel > 1 and abs(c.position_x - '{}') < '{}' and abs(c.position_y - '{}') < '{}'",
             mapId, teleX, sPlayerbotAIConfig.randomBotTeleportDistance / 2, teleY, sPlayerbotAIConfig.randomBotTeleportDistance / 2);
 
     if (results)
@@ -416,12 +422,16 @@ uint32 RandomPlayerbotMgr::GetZoneLevel(uint16 mapId, float teleX, float teleY, 
         // reading such a field is undefined - fall through to the random level
         if (fields && !fields[0].IsNull() && !fields[1].IsNull())
         {
-            uint8 minLevel = fields[0].GetUInt8();
-            uint8 maxLevel = fields[1].GetUInt8();
-            if (minLevel > maxLevel)
-                std::swap(minLevel, maxLevel);
+            // AVG() comes back as DECIMAL - read it as double; GetUInt8() on a fractional
+            // value trips the Field truncation assert and crashes the server
+            uint32 minLevel = static_cast<uint32>(fields[0].GetDouble());
+            uint32 maxZoneLevel = static_cast<uint32>(fields[1].GetDouble());
+            if (!minLevel)
+                minLevel = 1;
+            if (maxZoneLevel < minLevel)
+                maxZoneLevel = minLevel;
 
-            level = urand(minLevel, maxLevel);
+            level = urand(minLevel, maxZoneLevel);
             if (level > maxLevel)
                 level = maxLevel;
         }
