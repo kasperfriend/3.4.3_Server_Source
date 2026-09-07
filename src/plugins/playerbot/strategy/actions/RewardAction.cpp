@@ -47,6 +47,11 @@ bool RewardAction::Reward(uint32 itemId, Object* questGiver)
         Quest const* pQuest = sObjectMgr->GetQuestTemplate(questID);
         QuestStatus status = bot->GetQuestStatus(questID);
 
+        // the quest menu can outlive a template/DB reload; a missing template
+        // must not crash the bot tick that is rewarding the quest
+        if (!pQuest)
+            continue;
+
         // if quest is complete, turn it in
         if (status == QUEST_STATUS_COMPLETE &&
             ! bot->GetQuestRewardStatus(questID) &&
@@ -56,6 +61,8 @@ bool RewardAction::Reward(uint32 itemId, Object* questGiver)
             for (uint8 rewardIdx=0; rewardIdx < pQuest->GetRewChoiceItemsCount(); ++rewardIdx)
             {
                 ItemTemplate const * const pRewardItem = sObjectMgr->GetItemTemplate(pQuest->RewardChoiceItemId[rewardIdx]);
+                if (!pRewardItem)
+                    continue;
                 if (itemId == pRewardItem->GetId())
                 {
                     bot->RewardQuest(pQuest, LootItemType::Item, rewardIdx, questGiver, false);

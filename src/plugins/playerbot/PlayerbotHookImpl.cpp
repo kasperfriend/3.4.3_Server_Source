@@ -10,6 +10,7 @@
 #include "../pchdef.h"
 #include "playerbot.h"
 #include "PlayerbotAI.h"
+#include <exception>
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotMgr.h"
 #include "PlayerbotCommandServer.h"
@@ -22,19 +23,57 @@ namespace
 {
     void PlayerbotWorldUpdate(uint32 diff)
     {
-        sRandomPlayerbotMgr.UpdateAI(diff);
-        sRandomPlayerbotMgr.UpdateSessions(diff);
+        // A bot AI tick must never be able to kill the whole worldserver: the
+        // bot code parses packets and walks containers without full exception
+        // safety, and these hooks run from World::Update / Player::Update where
+        // the core does not expect exceptions. Contain and log instead.
+        try
+        {
+            sRandomPlayerbotMgr.UpdateAI(diff);
+        }
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Random bot manager update failed: {}", e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Random bot manager update failed with an unknown exception");
+        }
+
+        try
+        {
+            sRandomPlayerbotMgr.UpdateSessions(diff);
+        }
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Random bot session update failed: {}", e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Random bot session update failed with an unknown exception");
+        }
     }
 
     void PlayerbotPlayerUpdate(Player* player, uint32 diff)
     {
-        if (PlayerbotAI* ai = player->GetPlayerbotAI())
-            ai->UpdateAI(diff);
-
-        if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+        try
         {
-            mgr->UpdateAI(diff);
-            mgr->UpdateSessions(diff);
+            if (PlayerbotAI* ai = player->GetPlayerbotAI())
+                ai->UpdateAI(diff);
+
+            if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+            {
+                mgr->UpdateAI(diff);
+                mgr->UpdateSessions(diff);
+            }
+        }
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Player update for {} failed: {}", player->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Player update for {} failed with an unknown exception", player->GetName());
         }
     }
 
@@ -43,11 +82,22 @@ namespace
         if (!player)
             return;
 
-        // real players get a manager so they can control their own bots
-        if (!player->GetPlayerbotAI() && !player->GetPlayerbotMgr())
-            player->SetPlayerbotMgr(new PlayerbotMgr(player));
+        try
+        {
+            // real players get a manager so they can control their own bots
+            if (!player->GetPlayerbotAI() && !player->GetPlayerbotMgr())
+                player->SetPlayerbotMgr(new PlayerbotMgr(player));
 
-        sRandomPlayerbotMgr.OnPlayerLogin(player);
+            sRandomPlayerbotMgr.OnPlayerLogin(player);
+        }
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Player login hook for {} failed: {}", player->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Player login hook for {} failed with an unknown exception", player->GetName());
+        }
     }
 
     void PlayerbotPlayerLogout(Player* player)
@@ -55,10 +105,21 @@ namespace
         if (!player)
             return;
 
-        if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
-            mgr->LogoutAllBots();
+        try
+        {
+            if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+                mgr->LogoutAllBots();
 
-        sRandomPlayerbotMgr.OnPlayerLogout(player);
+            sRandomPlayerbotMgr.OnPlayerLogout(player);
+        }
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Player logout hook for {} failed: {}", player->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Player logout hook for {} failed with an unknown exception", player->GetName());
+        }
     }
 
     void PlayerbotPlayerDelete(Player* player)
@@ -66,16 +127,27 @@ namespace
         if (!player)
             return;
 
-        if (PlayerbotAI* ai = player->GetPlayerbotAI())
+        try
         {
-            player->SetPlayerbotAI(nullptr);
-            delete ai;
-        }
+            if (PlayerbotAI* ai = player->GetPlayerbotAI())
+            {
+                player->SetPlayerbotAI(nullptr);
+                delete ai;
+            }
 
-        if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+            if (PlayerbotMgr* mgr = player->GetPlayerbotMgr())
+            {
+                player->SetPlayerbotMgr(nullptr);
+                delete mgr;
+            }
+        }
+        catch (std::exception const& e)
         {
-            player->SetPlayerbotMgr(nullptr);
-            delete mgr;
+            TC_LOG_ERROR("playerbot", "Player delete hook for {} failed: {}", player->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Player delete hook for {} failed with an unknown exception", player->GetName());
         }
     }
 
@@ -85,7 +157,24 @@ namespace
             return;
 
         if (PlayerbotAI* ai = bot->GetPlayerbotAI())
-            ai->HandleBotOutgoingPacket(*packet);
+        {
+            try
+            {
+                ai->HandleBotOutgoingPacket(*packet);
+            }
+            catch (std::exception const& e)
+            {
+                // server packet handlers parse wire layouts by hand; a layout
+                // mismatch throws and must not take down the worldserver
+                TC_LOG_ERROR("playerbot", "Bot {} failed to handle outgoing packet {}: {}",
+                        bot->GetName(), packet->GetOpcode(), e.what());
+            }
+            catch (...)
+            {
+                TC_LOG_ERROR("playerbot", "Bot {} failed to handle outgoing packet {} with an unknown exception",
+                        bot->GetName(), packet->GetOpcode());
+            }
+        }
     }
 
     void PlayerbotChat(Player* sender, uint32 type, uint32 /*lang*/, std::string const& msg, Player* receiver)
@@ -93,21 +182,32 @@ namespace
         if (!sender)
             return;
 
-        // a whisper to one of our bots
-        if (receiver)
+        try
         {
-            if (PlayerbotAI* ai = receiver->GetPlayerbotAI())
+            // a whisper to one of our bots
+            if (receiver)
             {
-                ai->HandleCommand(type, msg, *sender);
-                return;
+                if (PlayerbotAI* ai = receiver->GetPlayerbotAI())
+                {
+                    ai->HandleCommand(type, msg, *sender);
+                    return;
+                }
             }
+
+            // party/raid chat is broadcast to every bot the sender owns
+            if (PlayerbotMgr* mgr = sender->GetPlayerbotMgr())
+                mgr->HandleCommand(type, msg);
+
+            sRandomPlayerbotMgr.HandleCommand(type, msg, *sender);
         }
-
-        // party/raid chat is broadcast to every bot the sender owns
-        if (PlayerbotMgr* mgr = sender->GetPlayerbotMgr())
-            mgr->HandleCommand(type, msg);
-
-        sRandomPlayerbotMgr.HandleCommand(type, msg, *sender);
+        catch (std::exception const& e)
+        {
+            TC_LOG_ERROR("playerbot", "Chat handling from {} failed: {}", sender->GetName(), e.what());
+        }
+        catch (...)
+        {
+            TC_LOG_ERROR("playerbot", "Chat handling from {} failed with an unknown exception", sender->GetName());
+        }
     }
 }
 

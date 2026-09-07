@@ -52,10 +52,19 @@ bool GuildBankAction::MoveFromCharToBank(Item* item, GameObject* bank)
     uint32 playerSlot = item->GetSlot();
     uint32 playerBag = item->GetBagSlot();
 
+    // the bot's guild can be gone while the bot is still logged in (guild
+    // cleanup/disband); do not dereference a null guild on the tick
     Guild* guild = sGuildMgr->GetGuildById(bot->GetGuildId());
+    if (!guild)
+    {
+        ai->TellMaster("I'm not in a guild anymore");
+        return false;
+    }
+
     guild->SwapItems(bot, 0, playerSlot, 0, INVENTORY_SLOT_BAG_0, 0);
 
-    ostringstream out; out << chat->formatItem(item->GetTemplate()) << " put to guild bank";
+    ItemTemplate const* proto = item->GetTemplate();
+    ostringstream out; out << chat->formatItem(proto) << " put to guild bank";
     ai->TellMaster(out);
     return true;
 }

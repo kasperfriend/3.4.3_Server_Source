@@ -64,9 +64,16 @@ bool ReadyCheckAction::ReadyCheck()
         }
     }
 
-    WorldPacket* const packet = new WorldPacket(CMSG_DO_READY_CHECK);
-    *packet << bot->GetGUID();
-    *packet << uint8(1);
+    // CMSG_DO_READY_CHECK in 3.4.3 (WorldPackets::Party::DoReadyCheck::Read)
+    // carries only an optional party-index bit; the handler starts the check on
+    // the current party when the index is absent. The old payload (packed guid
+    // followed by a u8) made the reader take the first guid byte as the
+    // "has index" bit and, when it was set, read the next guid byte as a
+    // garbage subgroup index - so the check either never started or ran against
+    // the wrong subgroup. Send the absent-index (whole current party) form.
+    WorldPacket* const packet = new WorldPacket(CMSG_DO_READY_CHECK, 1);
+    packet->WriteBit(false);                    // no subgroup index
+    packet->FlushBits();
     bot->GetSession()->QueuePacket(packet);
 
     ai->ChangeStrategy("-ready check", BOT_STATE_NON_COMBAT);

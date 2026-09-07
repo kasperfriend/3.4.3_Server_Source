@@ -115,23 +115,33 @@ bool TradeStatusAction::CheckTrade()
     for (uint32 slot = 0; slot < TRADE_SLOT_TRADED_COUNT; ++slot)
     {
         Item* item = bot->GetTradeData()->GetItem((TradeSlots)slot);
-        if (item && !auctionbot.GetSellPrice(item->GetTemplate()))
+        if (item)
         {
-            ostringstream out;
-            out << chat->formatItem(item->GetTemplate()) << " - This is not for sale";
-            ai->TellMaster(out);
-            return false;
+            // a template deleted while the trade window is open must not crash
+            // the bot tick; treat the item as not sellable
+            ItemTemplate const* proto = item->GetTemplate();
+            if (!proto || !auctionbot.GetSellPrice(proto))
+            {
+                ostringstream out;
+                out << chat->formatItem(proto) << " - This is not for sale";
+                ai->TellMaster(out);
+                return false;
+            }
         }
 
         item = master->GetTradeData()->GetItem((TradeSlots)slot);
         if (item)
         {
-            ostringstream out; out << item->GetTemplate()->GetId();
+            ItemTemplate const* proto = item->GetTemplate();
+            if (!proto)
+                continue;
+
+            ostringstream out; out << proto->GetId();
             ItemUsage usage = AI_VALUE2(ItemUsage, "item usage", out.str());
-            if (!auctionbot.GetBuyPrice(item->GetTemplate()) || usage == ITEM_USAGE_NONE)
+            if (!auctionbot.GetBuyPrice(proto) || usage == ITEM_USAGE_NONE)
             {
                 ostringstream out;
-                out << chat->formatItem(item->GetTemplate()) << " - I don't need this";
+                out << chat->formatItem(proto) << " - I don't need this";
                 ai->TellMaster(out);
                 return false;
             }

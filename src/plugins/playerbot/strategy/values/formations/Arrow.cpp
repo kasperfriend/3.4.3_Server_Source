@@ -9,13 +9,17 @@ WorldLocation ArrowFormation::GetLocation()
 {
     Build();
 
+    // this formation is only meaningful while following a grouped master
+    Player* master = ai->GetMaster();
+    if (!master || !masterUnit || !botUnit)
+        return Formation::NullLocation;
+
     int tankLines = 1 + tanks.Size() / 6;
     int meleeLines = 1 + melee.Size() / 6;
     int rangedLines = 1 + ranged.Size() / 6;
     int healerLines = 1 + healers.Size() / 6;
     float offset = 0;
 
-    Player* master = ai->GetMaster();
     float orientation = master->GetOrientation();
     MultiLineUnitPlacer placer(orientation);
 
@@ -76,7 +80,14 @@ void ArrowFormation::FillSlotsExceptMaster()
     uint32 index = 0;
     while (gref)
     {
+        // offline members have a null source; FindSlot would call ai->IsTank on it
         Player* member = gref->GetSource();
+        if (!member)
+        {
+            gref = gref->next();
+            index++;
+            continue;
+        }
 
         if (member == bot)
             FindSlot(member)->AddLast(botUnit = new FormationUnit(index, false));
@@ -90,14 +101,18 @@ void ArrowFormation::FillSlotsExceptMaster()
 
 void ArrowFormation::AddMasterToSlot()
 {
+    Player* master = ai->GetMaster();
+    if (!master)
+        return;
+
     Group* group = bot->GetGroup();
     GroupReference *gref = group->GetFirstMember();
     uint32 index = 0;
     while (gref)
     {
         Player* member = gref->GetSource();
-
-        if (member == ai->GetMaster())
+        // offline members have a null source and can never be the master
+        if (member == master)
         {
             FindSlot(member)->InsertAtCenter(masterUnit = new FormationUnit(index, true));
             break;

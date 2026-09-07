@@ -16,7 +16,7 @@ uint32 SpellIdValue::Calculate()
     string namepart = qualifier;
     wstring wnamepart;
 
-    if (!Utf8toWStr(namepart, wnamepart))
+    if (!Utf8toWStr(namepart, wnamepart) || wnamepart.empty())
         return 0;
 
     wstrToLower(wnamepart);
@@ -33,7 +33,7 @@ uint32 SpellIdValue::Calculate()
         uint32 spellId = itr->first;
 
         const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
-        if (!pSpellInfo)
+        if (!pSpellInfo || !pSpellInfo->SpellName)
             continue;
 
         if (itr->second.state == PLAYERSPELL_REMOVED || itr->second.disabled || pSpellInfo->IsPassive())
@@ -43,7 +43,7 @@ uint32 SpellIdValue::Calculate()
             continue;
 
         char const* spellName = pSpellInfo->SpellName->Str[loc];
-        if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
+        if (!spellName || !spellName[0] || tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
             continue;
 
         bool usesNoReagents = (pSpellInfo->Reagent[0] <= 0);
@@ -72,14 +72,14 @@ uint32 SpellIdValue::Calculate()
 
             uint32 spellId = itr->first;
             const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
-            if (!pSpellInfo)
+            if (!pSpellInfo || !pSpellInfo->SpellName)
                 continue;
 
             if (pSpellInfo->GetEffect(SpellEffIndex(0)).Effect == SPELL_EFFECT_LEARN_SPELL)
                 continue;
 
             char const* spellName = pSpellInfo->SpellName->Str[loc];
-            if (tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
+            if (!spellName || !spellName[0] || tolower(spellName[0]) != firstSymbol || strlen(spellName) != spellLength || !Utf8FitTo(spellName, wnamepart))
                 continue;
 
             foundSpellId = spellId;

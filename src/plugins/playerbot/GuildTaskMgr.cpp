@@ -34,8 +34,15 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
     if (!sPlayerbotAIConfig.guildTaskEnabled)
         return;
 
+    // callers pass live, in-world players only; still refuse garbage pointers
+    // (a real player can log out / be kicked right between the caller picking
+    // him and this update running)
+    if (!player || !guildMaster || !player->IsInWorld() || !guildMaster->IsInWorld())
+        return;
+
     uint32 guildId = guildMaster->GetGuildId();
-    if (!guildId || !guildMaster->GetPlayerbotAI() || !guildMaster->GetGuild())
+    Guild* guild = guildMaster->GetGuild();
+    if (!guildId || !guildMaster->GetPlayerbotAI() || !guild)
         return;
 
     if (!player->IsFriendlyTo(guildMaster))
@@ -46,7 +53,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
     if (secLevel == PLAYERBOT_SECURITY_DENY_ALL || (secLevel == PLAYERBOT_SECURITY_TALK && reason != PLAYERBOT_DENY_FAR))
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: skipping guild task update - not enough security level, reason = {}",
-                guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str(), reason);
+                guild->GetName().c_str(), player->GetName().c_str(), reason);
         return;
     }
 
@@ -69,7 +76,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         if (task == GUILD_TASK_TYPE_NONE)
         {
             TC_LOG_ERROR("gtask",  "{} / {}: error creating guild task",
-                    guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                    guild->GetName().c_str(), player->GetName().c_str());
         }
 
         uint32 time = urand(sPlayerbotAIConfig.minGuildTaskChangeTime, sPlayerbotAIConfig.maxGuildTaskChangeTime);
@@ -78,7 +85,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
                 urand(sPlayerbotAIConfig.minGuildTaskAdvertisementTime, sPlayerbotAIConfig.maxGuildTaskAdvertisementTime));
 
         TC_LOG_DEBUG("gtask",  "{} / {}: guild task {} is set for {} secs",
-                guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str(),
+                guild->GetName().c_str(), player->GetName().c_str(),
                 task, time);
         return;
     }
@@ -87,7 +94,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
     if (!advertisement)
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: sending advertisement",
-                guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                guild->GetName().c_str(), player->GetName().c_str());
         if (SendAdvertisement(owner, guildId))
         {
             SetTaskValue(owner, guildId, "advertisement", 1,
@@ -96,7 +103,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         else
         {
             TC_LOG_ERROR("gtask",  "{} / {}: error sending advertisement",
-                    guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                    guild->GetName().c_str(), player->GetName().c_str());
         }
     }
 
@@ -104,7 +111,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
     if (!thanks)
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: sending thanks",
-                guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                guild->GetName().c_str(), player->GetName().c_str());
         if (SendThanks(owner, guildId))
         {
             SetTaskValue(owner, guildId, "thanks", 1, 2 * sPlayerbotAIConfig.maxGuildTaskChangeTime);
@@ -113,7 +120,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         else
         {
             TC_LOG_ERROR("gtask",  "{} / {}: error sending thanks",
-                    guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                    guild->GetName().c_str(), player->GetName().c_str());
         }
     }
 
@@ -121,7 +128,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
     if (!reward)
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: sending reward",
-                guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                guild->GetName().c_str(), player->GetName().c_str());
         if (Reward(owner, guildId))
         {
             SetTaskValue(owner, guildId, "reward", 1, 2 * sPlayerbotAIConfig.maxGuildTaskChangeTime);
@@ -130,7 +137,7 @@ void GuildTaskMgr::Update(Player* player, Player* guildMaster)
         else
         {
             TC_LOG_ERROR("gtask",  "{} / {}: error sending reward",
-                    guildMaster->GetGuild()->GetName().c_str(), player->GetName().c_str());
+                    guild->GetName().c_str(), player->GetName().c_str());
         }
     }
 }
@@ -154,18 +161,24 @@ bool GuildTaskMgr::CreateItemTask(uint32 owner, uint32 guildId)
     if (!player)
         return false;
 
+    // the guild may be gone while its task rows are still stored (bot guild
+    // disbanded/cleaned up); every code path below logs the guild name
+    Guild* guild = sGuildMgr->GetGuildById(guildId);
+    if (!guild)
+        return false;
+
     uint32 itemId = sRandomItemMgr.GetRandomItem(RANDOM_ITEM_GUILD_TASK);
     if (!itemId)
     {
         TC_LOG_ERROR("gtask",  "{} / {}: no items avaible for item task",
-                sGuildMgr->GetGuildById(guildId)->GetName().c_str(), player->GetName().c_str());
+                guild->GetName().c_str(), player->GetName().c_str());
         return false;
     }
 
     uint32 count = GetMaxItemTaskCount(itemId);
 
     TC_LOG_DEBUG("gtask",  "{} / {}: item task {} (x{})",
-            sGuildMgr->GetGuildById(guildId)->GetName().c_str(), player->GetName().c_str(),
+            guild->GetName().c_str(), player->GetName().c_str(),
             itemId, count);
 
     SetTaskValue(owner, guildId, "itemCount", count, sPlayerbotAIConfig.maxGuildTaskChangeTime);
@@ -177,6 +190,11 @@ bool GuildTaskMgr::CreateKillTask(uint32 owner, uint32 guildId)
 {
     Player* player = ObjectAccessor::FindPlayerByLowGUID(owner);
     if (!player)
+        return false;
+
+    // see CreateItemTask - task rows can outlive their guild
+    Guild* guild = sGuildMgr->GetGuildById(guildId);
+    if (!guild)
         return false;
 
     CreatureClassifications rank = !urand(0, 2) ? CreatureClassifications::RareElite : CreatureClassifications::Rare;
@@ -201,7 +219,7 @@ bool GuildTaskMgr::CreateKillTask(uint32 owner, uint32 guildId)
     if (ids.empty())
     {
         TC_LOG_ERROR("gtask",  "{} / {}: no rare creatures available for kill task",
-                sGuildMgr->GetGuildById(guildId)->GetName().c_str(), player->GetName().c_str());
+                guild->GetName().c_str(), player->GetName().c_str());
         return false;
     }
 
@@ -209,7 +227,7 @@ bool GuildTaskMgr::CreateKillTask(uint32 owner, uint32 guildId)
     uint32 creatureId = ids[index];
 
     TC_LOG_DEBUG("gtask",  "{} / {}: kill task {}",
-            sGuildMgr->GetGuildById(guildId)->GetName().c_str(), player->GetName().c_str(),
+            guild->GetName().c_str(), player->GetName().c_str(),
             creatureId);
 
     SetTaskValue(owner, guildId, "killTask", creatureId, sPlayerbotAIConfig.maxGuildTaskChangeTime);
@@ -548,14 +566,20 @@ bool GuildTaskMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
                 if (type == "killTask")
                 {
                     CreatureTemplate const* proto = sObjectMgr->GetCreatureTemplate(value);
-                    string rank = proto->Classification == CreatureClassifications::Rare ? "rare" : "elite";
-                    if (proto) name << " (" << proto->Name << "," << rank << ")";
+                    if (proto)
+                    {
+                        string rank = proto->Classification == CreatureClassifications::Rare ? "rare" : "elite";
+                        name << " (" << proto->Name << "," << rank << ")";
+                    }
                 }
                 else if (type == "itemTask")
                 {
                     ItemTemplate const* proto = sObjectMgr->GetItemTemplate(value);
-                    string rank = proto->GetQuality() == ITEM_QUALITY_UNCOMMON ? "uncommon" : "rare";
-                    if (proto) name << " (" << proto->GetDefaultLocaleName() << "," << rank << ")";
+                    if (proto)
+                    {
+                        string rank = proto->GetQuality() == ITEM_QUALITY_UNCOMMON ? "uncommon" : "rare";
+                        name << " (" << proto->GetDefaultLocaleName() << "," << rank << ")";
+                    }
                 }
 
                 TC_LOG_INFO("gtask",  "Player '{}' Guild '{}' {}={} ({} secs)",
@@ -563,8 +587,6 @@ bool GuildTaskMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
                         type.c_str(), name.str().c_str(), validIn);
 
             } while (result->NextRow());
-
-            Field* fields = result->Fetch();
         }
 
         return true;
@@ -604,7 +626,6 @@ bool GuildTaskMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
                 sGuildTaskMgr.Reward(owner, guildId);
             } while (result->NextRow());
 
-            Field* fields = result->Fetch();
             return true;
         }
     }
@@ -614,20 +635,28 @@ bool GuildTaskMgr::HandleConsoleCommand(ChatHandler* handler, char const* args)
 
 void GuildTaskMgr::CheckItemTask(uint32 itemId, uint32 obtained, Player* ownerPlayer, Player* bot, bool byMail)
 {
+    // called from bot loot/trade/mail flows with a real player (or one of his
+    // group members) as owner; that member may have dropped out in the meantime
+    if (!bot || !ownerPlayer || !ownerPlayer->IsInWorld())
+        return;
+
     uint32 guildId = bot->GetGuildId();
-    if (!guildId)
+    // a guild id alone is not enough: the guild object may be gone (disbanded
+    // after the task row was stored) and the code below logs the guild name
+    Guild* guild = bot->GetGuild();
+    if (!guildId || !guild)
         return;
 
     uint32 owner = uint32(ownerPlayer->GetGUID().GetCounter());
 
     TC_LOG_DEBUG("gtask",  "{} / {}: checking guild task",
-            bot->GetGuild()->GetName().c_str(), ownerPlayer->GetName().c_str());
+            guild->GetName().c_str(), ownerPlayer->GetName().c_str());
 
     uint32 itemTask = GetTaskValue(owner, guildId, "itemTask");
     if (itemTask != itemId)
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: item {} is not guild task item ({})",
-                bot->GetGuild()->GetName().c_str(), ownerPlayer->GetName().c_str(),
+                guild->GetName().c_str(), ownerPlayer->GetName().c_str(),
                 itemId, itemTask);
         return;
     }
@@ -647,7 +676,7 @@ void GuildTaskMgr::CheckItemTask(uint32 itemId, uint32 obtained, Player* ownerPl
     if (obtained >= count)
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: guild task complete",
-                bot->GetGuild()->GetName().c_str(), ownerPlayer->GetName().c_str());
+                guild->GetName().c_str(), ownerPlayer->GetName().c_str());
         SetTaskValue(owner, guildId, "reward", 1,
                 urand(sPlayerbotAIConfig.minGuildTaskRewardTime, sPlayerbotAIConfig.maxGuildTaskRewardTime));
         ChatHandler(ownerPlayer->GetSession()).PSendSysMessage("You have completed a guild task");
@@ -655,7 +684,7 @@ void GuildTaskMgr::CheckItemTask(uint32 itemId, uint32 obtained, Player* ownerPl
     else
     {
         TC_LOG_DEBUG("gtask",  "{} / {}: guild task progress",
-                bot->GetGuild()->GetName().c_str(), ownerPlayer->GetName().c_str());
+                guild->GetName().c_str(), ownerPlayer->GetName().c_str());
         SetTaskValue(owner, guildId, "itemCount", count - obtained, sPlayerbotAIConfig.maxGuildTaskChangeTime);
         SetTaskValue(owner, guildId, "thanks", 1,
                 urand(sPlayerbotAIConfig.minGuildTaskRewardTime, sPlayerbotAIConfig.maxGuildTaskRewardTime));
@@ -733,9 +762,16 @@ bool GuildTaskMgr::Reward(uint32 owner, uint32 guildId)
 
 void GuildTaskMgr::CheckKillTask(Player* player, Unit* victim)
 {
+    if (!player || !victim || !player->IsInWorld())
+        return;
+
     uint32 owner = player->GetGUID().GetCounter();
     Creature* creature = victim->ToCreature();
     if (!creature)
+        return;
+
+    CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+    if (!creatureTemplate)
         return;
 
     map<uint32,uint32> tasks = GetTaskValues(owner, "killTask");
@@ -744,8 +780,12 @@ void GuildTaskMgr::CheckKillTask(Player* player, Unit* victim)
         uint32 guildId = i->first;
         uint32 value = i->second;
         Guild* guild = sGuildMgr->GetGuildById(guildId);
+        // task rows can survive the guild (bot guilds are cleaned up while the
+        // ai_playerbot_guild_tasks rows stay behind)
+        if (!guild)
+            continue;
 
-        if (value != creature->GetCreatureTemplate()->Entry)
+        if (value != creatureTemplate->Entry)
             continue;
 
         TC_LOG_DEBUG("gtask",  "{} / {}: guild task complete",

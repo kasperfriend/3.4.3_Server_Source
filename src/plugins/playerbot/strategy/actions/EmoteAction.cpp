@@ -20,7 +20,7 @@ bool EmoteAction::Execute(Event event)
     string param = event.getParam();
     if (param.empty()) param = qualifier;
 
-    if (!param.empty() && textEmotes.find(param) != emotes.end())
+    if (!param.empty() && textEmotes.find(param) != textEmotes.end())
     {
         return ai->PlaySound(textEmotes[param]);
     }

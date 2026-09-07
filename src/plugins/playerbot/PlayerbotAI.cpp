@@ -176,6 +176,25 @@ void PlayerbotAI::UpdateAIInternal(uint32 elapsed)
 	DoNextAction();
 }
 
+void PlayerbotAI::DropCommandsFrom(Player* player)
+{
+    if (!player || chatCommands.empty())
+        return;
+
+    // chatCommands is a stack; drain it, keep unrelated entries, rebuild it
+    vector<ChatCommandHolder> keep;
+    while (!chatCommands.empty())
+    {
+        ChatCommandHolder holder = chatCommands.top();
+        chatCommands.pop();
+        if (holder.GetOwner() != player)
+            keep.push_back(holder);
+    }
+
+    for (vector<ChatCommandHolder>::reverse_iterator i = keep.rbegin(); i != keep.rend(); ++i)
+        chatCommands.push(*i);
+}
+
 void PlayerbotAI::HandleTeleportAck()
 {
 	bot->GetMotionMaster()->Clear();
@@ -297,12 +316,24 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
         {
             WorldPacket p(packet);
             p.rpos(0);
-            uint8 castCount, result;
-            uint32 spellId;
-            p >> castCount >> spellId >> result;
+
+            // SMSG_CAST_FAILED in 3.4.3 (WorldPackets::Spell::CastFailed::Write)
+            // starts with the cast id as a packed ObjectGuid, then the spell id,
+            // visual, reason and two failure args as int32s. The classic 3.3.5
+            // header this used to read (cast count u8, spell id u32, result u8)
+            // consumed six bytes out of the packed cast id guid, so the result
+            // never matched and failed casts were never reported. Mirror the
+            // writer; only the spell id and the result matter here.
+            ObjectGuid castId;
+            p >> castId;                // CastID
+            int32 spellId = 0;
+            p >> spellId;               // SpellID
+            p.read_skip<int32>();       // SpellCastVisual
+            int32 result = 0;
+            p >> result;                // SpellCastResult
             if (result != SPELL_CAST_OK)
             {
-                SpellInterrupted(spellId);
+                SpellInterrupted(spellId > 0 ? uint32(spellId) : 0);
                 botOutgoingPacketHandlers.AddPacket(packet);
             }
             return;
@@ -311,16 +342,23 @@ void PlayerbotAI::HandleBotOutgoingPacket(const WorldPacket& packet)
         {
             WorldPacket p(packet);
             p.rpos(0);
+
+            // SMSG_SPELL_FAILURE in 3.4.3 (WorldPackets::Spell::SpellFailure::Write)
+            // is caster guid and cast id (both packed ObjectGuids), int32 spell
+            // id, the visual and a uint16 reason. The old read of a uint8 cast
+            // count consumed the first byte of the packed cast id guid and then
+            // read the spell id out of the middle of that guid, interrupting a
+            // random spell. Only the caster and the spell id are needed here.
             ObjectGuid casterGuid;
             p >> casterGuid;
             if (casterGuid != bot->GetGUID())
                 return;
 
-            uint8 castCount;
-            uint32 spellId;
-            p >> castCount;
-            p >> spellId;
-            SpellInterrupted(spellId);
+            ObjectGuid castId;
+            p >> castId;                // CastID
+            int32 spellId = 0;
+            p >> spellId;               // SpellID
+            SpellInterrupted(spellId > 0 ? uint32(spellId) : 0);
             return;
         }
     case SMSG_SPELL_DELAYED:

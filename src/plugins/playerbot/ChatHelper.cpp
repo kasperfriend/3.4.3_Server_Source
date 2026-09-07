@@ -233,6 +233,9 @@ ItemIds ChatHelper::parseItems(string& text)
 
 string ChatHelper::formatQuest(Quest const* quest)
 {
+    if (!quest)
+        return "[unknown quest]";
+
     ostringstream out;
     out << "|cFFFFFF00|Hquest:" << quest->GetQuestId() << ':' << quest->GetQuestLevel() << "|h[" << quest->GetLogTitle() << "]|h|r";
     return out.str();
@@ -247,6 +250,10 @@ string ChatHelper::formatGameobject(GameObject* go)
 
 string ChatHelper::formatSpell(SpellInfo const *sInfo)
 {
+    // missing spell info must not crash chat formatting
+    if (!sInfo || !sInfo->SpellName)
+        return "[unknown spell]";
+
     ostringstream out;
     out << "|cffffffff|Hspell:" << sInfo->Id << "|h[" << sInfo->SpellName->Str[LOCALE_enUS] << "]|h|r";
     return out.str();
@@ -254,6 +261,11 @@ string ChatHelper::formatSpell(SpellInfo const *sInfo)
 
 string ChatHelper::formatItem(ItemTemplate const * proto, int count)
 {
+    // item templates can vanish from the DB while bots (and players) still hold
+    // the item; dozens of chat sites call this with an unguarded GetTemplate()
+    if (!proto)
+        return "[unknown item]";
+
     char color[32];
     sprintf(color, "%x", ItemQualityColors[proto->GetQuality()]);
 

@@ -75,7 +75,10 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
     if (bot->IsInCombat() && item->IsPotion() && bot->GetLastPotionId())
         return false;
 
+    // item template can be deleted while the item is still in the bag
     ItemTemplate const* proto = item->GetTemplate();
+    if (!proto)
+        return false;
 
     WorldPackets::Spells::UseItem useItem{WorldPacket(CMSG_USE_ITEM)};
     useItem.PackSlot = item->GetBagSlot();
@@ -219,6 +222,14 @@ bool UseItemAction::UseItem(Item* item, ObjectGuid goGuid, Item* itemTarget)
 
 bool UseItemAction::SocketItem(Item* item, Item* gem, bool replace)
 {
+    if (!item || !gem)
+        return false;
+
+    ItemTemplate const* itemProto = item->GetTemplate();
+    ItemTemplate const* gemProto = gem->GetTemplate();
+    if (!itemProto || !gemProto)
+        return false;
+
     WorldPackets::Item::SocketGems socketGems{WorldPacket(CMSG_SOCKET_GEMS)};
     socketGems.ItemGuid = item->GetGUID();
 
@@ -226,15 +237,15 @@ bool UseItemAction::SocketItem(Item* item, Item* gem, bool replace)
     for (uint32 enchant_slot = SOCK_ENCHANTMENT_SLOT; enchant_slot < SOCK_ENCHANTMENT_SLOT + MAX_GEM_SOCKETS; ++enchant_slot)
     {
         uint32 socketIndex = enchant_slot - SOCK_ENCHANTMENT_SLOT;
-        uint8 socketColor = item->GetTemplate()->GetSocketColor(socketIndex);
-        GemPropertiesEntry const* gemProperty = sGemPropertiesStore.LookupEntry(gem->GetTemplate()->GetGemProperties());
+        uint8 socketColor = itemProto->GetSocketColor(socketIndex);
+        GemPropertiesEntry const* gemProperty = sGemPropertiesStore.LookupEntry(gemProto->GetGemProperties());
         if (gemProperty && (gemProperty->Type & socketColor) && !fits)
         {
             uint32 enchant_id = item->GetEnchantmentId(EnchantmentSlot(enchant_slot));
             SpellItemEnchantmentEntry const* enchantEntry = enchant_id ? sSpellItemEnchantmentStore.LookupEntry(enchant_id) : nullptr;
 
             if (!enchant_id || !enchantEntry || !enchantEntry->GemItemID ||
-                (replace && uint32(enchantEntry->GemItemID) != gem->GetTemplate()->GetId()))
+                (replace && uint32(enchantEntry->GemItemID) != gemProto->GetId()))
             {
                 socketGems.GemItem[socketIndex] = gem->GetGUID();
                 fits = true;
@@ -247,8 +258,8 @@ bool UseItemAction::SocketItem(Item* item, Item* gem, bool replace)
 
     if (fits)
     {
-        ostringstream out; out << "Socketing " << chat->formatItem(item->GetTemplate());
-        out << " with " << chat->formatItem(gem->GetTemplate());
+        ostringstream out; out << "Socketing " << chat->formatItem(itemProto);
+        out << " with " << chat->formatItem(gemProto);
         ai->TellMasterNoFacing(out.str());
 
         bot->GetSession()->HandleSocketGems(socketGems);

@@ -114,20 +114,34 @@ bool QuestObjectiveCompletedAction::Execute(Event event)
     WorldPacket p(event.getPacket());
     p.rpos(0);
 
-    uint32 entry, questId, available, required;
-    ObjectGuid guid;
-    p >> questId >> entry >> available >> required >> guid;
+    // SMSG_QUEST_UPDATE_ADD_CREDIT in 3.4.3 (WorldPackets::Quest::QuestUpdateAddCredit)
+    // is victim guid, quest id, object id, count, required, objective type; the
+    // classic 3.3.5 order this action used to read needed more bytes and always
+    // overran, so the objective report never reached the master. Read the
+    // modern layout instead. The victim guid is serialized in the packed
+    // ObjectGuid format, so it must be consumed with operator>> - skipping a
+    // fixed sizeof(ObjectGuid) walks past the guid into the int32 fields and
+    // the reads below then run past the end of the packet.
+    ObjectGuid victimGuid;
+    p >> victimGuid;                    // VictimGUID
+    p.read_skip<int32>();               // QuestID
+    int32 objectId = 0;
+    p >> objectId;                      // credit entry; negative for game objects
+    uint16 available = 0;
+    p >> available;                     // Count
+    uint16 required = 0;
+    p >> required;                      // Required
+    p.read_skip<uint8>();               // ObjectiveType
 
-    if (entry & 0x80000000)
+    if (objectId < 0)
     {
-        entry &= 0x7FFFFFFF;
-        GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(entry);
+        GameObjectTemplate const* info = sObjectMgr->GetGameObjectTemplate(uint32(-(int64)objectId));
         if (info)
             ai->TellMaster(chat->formatQuestObjective(info->name, available, required));
     }
     else
     {
-        CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(entry);
+        CreatureTemplate const* info = sObjectMgr->GetCreatureTemplate(uint32(objectId));
         if (info)
             ai->TellMaster(chat->formatQuestObjective(info->Name, available, required));
     }

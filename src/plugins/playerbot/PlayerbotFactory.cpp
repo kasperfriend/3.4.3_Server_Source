@@ -316,7 +316,9 @@ private:
 
 
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(id);
-        if (proto->GetClass() == ITEM_CLASS_MISCELLANEOUS && (proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_REAGENT || proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_JUNK))
+        // items in the bot's bags may reference entries that no longer exist
+        // in the DB (deleted/changed item templates); treat those as junk
+        if (proto && proto->GetClass() == ITEM_CLASS_MISCELLANEOUS && (proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_REAGENT || proto->GetSubClass() == ITEM_SUBCLASS_MISCELLANEOUS_JUNK))
             return true;
 
         return false;
@@ -1235,6 +1237,11 @@ void PlayerbotFactory::InitQuests()
         uint32 questId = *i;
         Quest const *quest = sObjectMgr->GetQuestTemplate(questId);
 
+        // AddPrevQuests pushed this id from another quest's PrevQuestId chain;
+        // the referenced template may have been deleted, leaving a broken chain
+        if (!quest)
+            continue;
+
         if (!bot->SatisfyQuestClass(quest, false) ||
                 !bot->SatisfyQuestRace(quest, false))
             continue;
@@ -1391,6 +1398,8 @@ void PlayerbotFactory::InitPotions()
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            continue;
         bot->StoreNewItemInBestSlots(itemId, urand(1, proto->GetMaxStackSize()), ItemContext::NONE);
    }
 }
@@ -1437,6 +1446,8 @@ void PlayerbotFactory::InitFood()
 
         uint32 itemId = ids[index];
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            continue;
         bot->StoreNewItemInBestSlots(itemId, urand(1, proto->GetMaxStackSize()), ItemContext::NONE);
    }
 }

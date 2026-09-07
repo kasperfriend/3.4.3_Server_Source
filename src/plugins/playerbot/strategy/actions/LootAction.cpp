@@ -70,7 +70,18 @@ bool OpenLootAction::DoLoot(LootObject& lootObject)
 
     if (creature)
     {
-        SkillType skill = SkillType(creature->GetCreatureTemplate()->GetDifficulty(DIFFICULTY_NONE)->GetRequiredLootSkill());
+        // the creature template (and its difficulty row) can vanish on a reload
+        // while the bot still sees this lootable unit - bail out instead of
+        // dereferencing the missing entry
+        CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+        if (!creatureTemplate)
+            return false;
+
+        CreatureDifficulty const* difficulty = creatureTemplate->GetDifficulty(DIFFICULTY_NONE);
+        if (!difficulty)
+            return false;
+
+        SkillType skill = SkillType(difficulty->GetRequiredLootSkill());
         if (!CanOpenLock(skill, lootObject.reqSkillValue))
             return false;
 
@@ -203,90 +214,178 @@ bool OpenLootAction::CanOpenLock(uint32 skillId, uint32 reqSkillValue)
 
 bool StoreLootAction::Execute(Event event)
 {
-    WorldPacket p(event.getPacket()); // (8+1+4+1+1+4+4+4+4+4+1)
-    ObjectGuid guid;
-    uint8 loot_type;
-    uint32 gold = 0;
-    uint8 items = 0;
+    if (!bot || !bot->GetSession())
+        return false;
 
-    p.rpos(0);
-    p >> guid;      // 8 corpse guid
-    p >> loot_type; // 1 loot type
+    WorldPacket p(event.getPacket());
 
-    if (p.size() > 10)
+    // The event packet is the SMSG_LOOT_RESPONSE the core just built for this
+    // bot (WorldPackets::Loot::LootResponse::Write(), filled by
+    // Loot::BuildLootResponse in Player::SendLootResponse). This action used to
+    // parse the classic 3.3.5 wire layout (loot guid, loot type, gold, item
+    // count and fixed per-item index/id/count/slot fields), but the 3.4.3
+    // packet is a different format: it starts with the owner and loot guids,
+    // sizes are uint32, item headers are bit-packed and each item embeds an
+    // ItemInstance. Reading the old layout walked off the end of the buffer and
+    // ByteBufferException escaped the AI engine on a map worker thread, where
+    // an uncaught exception calls std::terminate and takes the whole
+    // worldserver (and every real player on it) down with the bot. Parse the
+    // 3.4.3 layout instead, and treat any packet that cannot be parsed
+    // (truncated, corrupt, layout drift) as "nothing to loot" rather than
+    // letting it throw out of the action.
+    try
     {
-        p >> gold;      // 4 money on corpse
-        p >> items;     // 1 number of items on corpse
-    }
+        p.rpos(0);
+        p.ResetBitPos(); // buffer may carry writer bit state; start byte aligned
 
-    if (gold > 0)
-    {
-        WorldPacket* const packet = new WorldPacket(CMSG_LOOT_MONEY, 0);
-        bot->GetSession()->QueuePacket(packet);
-    }
+        ObjectGuid ownerGuid;   // looted object that owns the window (source guid)
+        ObjectGuid lootObjGuid; // per-loot-object window guid (HighGuid::LootObject)
+        uint8 lootType = 0;     // client loot type (GetLootTypeForClient)
+        uint32 gold = 0;
 
-    for (uint8 i = 0; i < items; ++i)
-    {
-        uint32 itemid;
-        uint32 itemcount;
-        uint8 lootslot_type;
-        uint8 itemindex;
-        bool grab = false;
+        p >> ownerGuid;             // Owner
+        p >> lootObjGuid;           // LootObj
+        p.read_skip<uint8>();       // FailureReason (LootError); 0 when a window opens
+        p >> lootType;              // AcquireReason
+        p.read_skip<uint8>();       // LootMethod
+        p.read_skip<uint8>();       // Threshold
+        p >> gold;                  // Coins
 
-        p >> itemindex;
-        p >> itemid;
-        p >> itemcount;
-        p.read_skip<uint32>();  // display id
-        p.read_skip<uint32>();  // randomSuffix
-        p.read_skip<uint32>();  // randomPropertyId
-        p >> lootslot_type;     // 0 = can get, 1 = look only, 2 = master get
+        uint32 items = 0;           // Items.size()
+        uint32 currencies = 0;      // Currencies.size()
+        p >> items;
+        p >> currencies;
 
-        if (lootslot_type != LOOT_SLOT_TYPE_ALLOW_LOOT && lootslot_type != LOOT_SLOT_TYPE_OWNER)
-            continue;
+        p.ReadBit();                    // Acquired (false => error response)
+        p.ReadBit();                    // AELooting
+        p.ReadBit();                    // PersonalLooting
+        p.ResetBitPos();
+        // Note: error responses (Acquired == false, e.g. "didn't kill") carry no
+        // items, so the loop below queues nothing for them; the remove + release
+        // at the end still runs so the bot gives up this loot object exactly like
+        // the 3.3.5 flow did (otherwise it would re-open it every tick).
 
-        if (loot_type != LOOT_SKINNING && !IsLootAllowed(itemid))
-            continue;
-
-        if (sRandomPlayerbotMgr.IsRandomBot(bot))
+        if (gold > 0)
         {
-            ItemTemplate const *proto = sObjectMgr->GetItemTemplate(itemid);
-            if (proto)
-            {
-                uint32 price = itemcount * auctionbot.GetSellPrice(proto) * sRandomPlayerbotMgr.GetSellMultiplier(bot) + gold;
-                uint32 lootAmount = sRandomPlayerbotMgr.GetLootAmount(bot);
-                if (bot->GetGroup() && price)
-                {
-                    sRandomPlayerbotMgr.SetLootAmount(bot, lootAmount + price);
-                }
-                else if (lootAmount)
-                {
-                    sRandomPlayerbotMgr.SetLootAmount(bot, 0);
-                }
+            // CMSG_LOOT_MONEY in 3.4.3 carries a single IsSoftInteract bit
+            WorldPacket* const moneyPacket = new WorldPacket(CMSG_LOOT_MONEY, 1);
+            moneyPacket->WriteBit(false);
+            moneyPacket->FlushBits();
+            bot->GetSession()->QueuePacket(moneyPacket);
+        }
 
-                Group* group = bot->GetGroup();
-                if (group)
+        for (uint32 i = 0; i < items; ++i)
+        {
+            // LootItemData header (operator<< for WorldPackets::Loot::LootItemData):
+            // Type(2) UIType(3) CanTradeToTapList(1). UIType is the LootSlotType
+            // granted to this player (ALLOW_LOOT/OWNER/MASTER/LOCKED/...).
+            p.ReadBits(2);                  // Type (unused by the server)
+            uint32 lootslot_type = p.ReadBits(3); // UIType
+            p.ReadBit();                    // CanTradeToTapList
+            p.ResetBitPos();
+
+            // ItemInstance (operator<< for WorldPackets::Item::ItemInstance):
+            // ItemID, random properties, bonus bit, ItemModList and optional
+            // ItemBonuses. Only ItemID and Quantity are needed, skip the rest.
+            int32 itemid = 0;
+            p >> itemid;
+            p.read_skip<int32>();           // RandomPropertiesSeed
+            p.read_skip<int32>();           // RandomPropertiesID
+            bool hasItemBonus = p.ReadBit();
+            p.ResetBitPos();
+
+            uint32 mods = p.ReadBits(6);    // ItemModList::Values size
+            p.ResetBitPos();
+            for (uint32 m = 0; m < mods; ++m)
+            {
+                p.read_skip<int32>();       // Value
+                p.read_skip<uint8>();       // Type
+            }
+
+            if (hasItemBonus)
+            {
+                p.read_skip<uint8>();       // Context
+                uint32 bonusIds = 0;
+                p >> bonusIds;
+                for (uint32 b = 0; b < bonusIds; ++b)
+                    p.read_skip<uint32>();
+            }
+
+            uint32 itemcount = 0;
+            p >> itemcount;                 // Quantity
+            p.read_skip<uint8>();           // LootItemType
+            uint8 lootListId = 0;
+            p >> lootListId;                // 1-based slot, echoed back in CMSG_LOOT_ITEM
+
+            if (lootslot_type != LOOT_SLOT_TYPE_ALLOW_LOOT && lootslot_type != LOOT_SLOT_TYPE_OWNER)
+                continue;
+
+            if (lootType != LOOT_SKINNING && !IsLootAllowed(uint32(itemid)))
+                continue;
+
+            if (sRandomPlayerbotMgr.IsRandomBot(bot))
+            {
+                ItemTemplate const *proto = sObjectMgr->GetItemTemplate(uint32(itemid));
+                if (proto)
                 {
-                    for (GroupReference *ref = group->GetFirstMember(); ref; ref = ref->next())
+                    uint32 price = itemcount * auctionbot.GetSellPrice(proto) * sRandomPlayerbotMgr.GetSellMultiplier(bot) + gold;
+                    uint32 lootAmount = sRandomPlayerbotMgr.GetLootAmount(bot);
+                    if (bot->GetGroup() && price)
                     {
-                        if( ref->GetSource() != bot)
-                            sGuildTaskMgr.CheckItemTask(itemid, itemcount, ref->GetSource(), bot);
+                        sRandomPlayerbotMgr.SetLootAmount(bot, lootAmount + price);
+                    }
+                    else if (lootAmount)
+                    {
+                        sRandomPlayerbotMgr.SetLootAmount(bot, 0);
+                    }
+
+                    Group* group = bot->GetGroup();
+                    if (group)
+                    {
+                        for (GroupReference *ref = group->GetFirstMember(); ref; ref = ref->next())
+                        {
+                            // group members can drop (logout/disconnect) while the bot
+                            // loots; GetSource() then returns null
+                            Player* member = ref->GetSource();
+                            if (member && member != bot)
+                                sGuildTaskMgr.CheckItemTask(uint32(itemid), itemcount, member, bot);
+                        }
                     }
                 }
             }
+
+            // CMSG_LOOT_ITEM in 3.4.3 (WorldPackets::Loot::LootItem::Read):
+            // uint32 request count, per request the object guid + LootListID
+            // (slot + 1 as sent by the server) and one trailing IsSoftInteract
+            // bit. The core handler stores item (LootListID - 1) of the player's
+            // currently open loot.
+            WorldPacket* const packet = new WorldPacket(CMSG_LOOT_ITEM, 14);
+            *packet << uint32(1);
+            *packet << ownerGuid;
+            *packet << lootListId;
+            packet->WriteBit(false);        // IsSoftInteract
+            packet->FlushBits();
+            bot->GetSession()->QueuePacket(packet);
         }
 
-        WorldPacket* const packet = new WorldPacket(CMSG_LOOT_ITEM, 1);
-        *packet << itemindex;
+        AI_VALUE(LootObjectStack*, "available loot")->Remove(ownerGuid);
+
+        // release loot
+        WorldPacket* const packet = new WorldPacket(CMSG_LOOT_RELEASE, 8);
+        *packet << ownerGuid;
         bot->GetSession()->QueuePacket(packet);
+        return true;
+    }
+    catch (std::exception const& e)
+    {
+        TC_LOG_ERROR("playerbot", "Bot {} failed to store loot from a loot response: {}", bot->GetName(), e.what());
+    }
+    catch (...)
+    {
+        TC_LOG_ERROR("playerbot", "Bot {} failed to store loot from a loot response with an unknown exception", bot->GetName());
     }
 
-    AI_VALUE(LootObjectStack*, "available loot")->Remove(guid);
-
-    // release loot
-    WorldPacket* const packet = new WorldPacket(CMSG_LOOT_RELEASE, 8);
-    *packet << guid;
-    bot->GetSession()->QueuePacket(packet);
-    return true;
+    return false;
 }
 
 bool StoreLootAction::IsLootAllowed(uint32 itemid)
