@@ -38,14 +38,16 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     list<uint32> bots = GetBots();
     int botCount = bots.size();
     int randomBotsPerInterval = (int)urand(sPlayerbotAIConfig.minRandomBotsPerInterval, sPlayerbotAIConfig.maxRandomBotsPerInterval);
-    if (!processTicks)
+    if (sPlayerbotAIConfig.randomBotLoginAtStartup && processTicks < 10)
     {
-        // log the population in gradually over ~10 ticks instead of all in a
-        // single one: every ProcessBot loads a character on the world thread,
-        // and all-at-once stalls long enough for the FreezeDetector to kill
-        // the server whenever RandomBotLoginAtStartup is on
-        if (sPlayerbotAIConfig.randomBotLoginAtStartup && botCount / 10 > randomBotsPerInterval)
-            randomBotsPerInterval = botCount / 10;
+        // spread the startup population push over the first ~10 ticks at 10x
+        // the configured interval rate (bounded): every ProcessBot loads a
+        // character on the world thread, and logging in the whole population
+        // in a single tick stalls long enough for the FreezeDetector to kill
+        // the server when RandomBotLoginAtStartup is on
+        randomBotsPerInterval *= 10;
+        if (randomBotsPerInterval > 100)
+            randomBotsPerInterval = 100;
     }
     // processTicks was initialised but never incremented, making the startup
     // branch above fire on EVERY tick - every tick processed the whole bot list
