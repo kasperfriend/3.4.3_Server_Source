@@ -101,6 +101,15 @@ uint32 MySQLConnection::Open()
     //unsigned int timeout = 10;
 
     mysql_options(mysqlInit, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+
+    // Cap the time spent establishing a connection: the platform default TCP
+    // connect timeout (tens of seconds on Windows) multiplied by reconnect
+    // attempts on the synchronous connection stalls the world thread long
+    // enough for the FreezeDetector to kill the server while MySQL is merely
+    // unreachable
+    unsigned int connectTimeoutSec = 10;
+    mysql_options(mysqlInit, MYSQL_OPT_CONNECT_TIMEOUT, (char const*)&connectTimeoutSec);
+
     //mysql_options(mysqlInit, MYSQL_OPT_READ_TIMEOUT, (char const*)&timeout);
     #ifdef _WIN32
     if (m_connectionInfo.host == ".")                                           // named pipe use option (Windows)
@@ -189,7 +198,9 @@ bool MySQLConnection::PrepareStatements()
 
 bool MySQLConnection::Execute(char const* sql)
 {
-    if (!m_Mysql)
+    // a dropped connection does not recover on its own: attempt the full
+    // reconnect cycle (bounded by the sync fast-fail window) before giving up
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     {
@@ -235,13 +246,16 @@ static auto mysql_bind_param_no_deprecated(MYSQL_STMT* stmt, MYSQL_BIND* bnd)
 
 bool MySQLConnection::Execute(PreparedStatementBase* stmt)
 {
-    if (!m_Mysql)
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     uint32 index = stmt->GetIndex();
 
     MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
-    ASSERT(m_mStmt);            // Can only be null if preparation failed, server side error or bad query
+    // can be null after a failed (re-)prepare, e.g. following a reconnection
+    // to a database whose structure does not match - skip instead of crashing
+    if (!m_mStmt)
+        return false;
 
     m_mStmt->BindParameters(stmt);
 
@@ -282,13 +296,15 @@ bool MySQLConnection::Execute(PreparedStatementBase* stmt)
 
 bool MySQLConnection::_Query(PreparedStatementBase* stmt, MySQLPreparedStatement** mysqlStmt, MySQLResult** pResult, uint64* pRowCount, uint32* pFieldCount)
 {
-    if (!m_Mysql)
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     uint32 index = stmt->GetIndex();
 
     MySQLPreparedStatement* m_mStmt = GetPreparedStatement(index);
-    ASSERT(m_mStmt);            // Can only be null if preparation failed, server side error or bad query
+    // can be null after a failed (re-)prepare - skip instead of crashing
+    if (!m_mStmt)
+        return false;
 
     m_mStmt->BindParameters(stmt);
     *mysqlStmt = m_mStmt;
@@ -352,7 +368,7 @@ ResultSet* MySQLConnection::Query(char const* sql)
 
 bool MySQLConnection::_Query(const char* sql, MySQLResult** pResult, MySQLField** pFields, uint64* pRowCount, uint32* pFieldCount)
 {
-    if (!m_Mysql)
+    if (!m_Mysql && !_HandleMySQLErrno(CR_SERVER_GONE_ERROR))
         return false;
 
     {
@@ -441,11 +457,20 @@ size_t MySQLConnection::EscapeString(char* to, const char* from, size_t length)
 
 void MySQLConnection::Ping()
 {
+    // the KeepAlive timer fires regardless of connection health - mysql_ping
+    // on a null handle crashes, and a lost connection is real until the next
+    // query reconnects it
+    if (!m_Mysql)
+        return;
+
     mysql_ping(m_Mysql);
 }
 
 uint32 MySQLConnection::GetLastError()
 {
+    if (!m_Mysql)
+        return CR_SERVER_GONE_ERROR;
+
     return mysql_errno(m_Mysql);
 }
 
@@ -569,14 +594,32 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
             // full series can exceed the FreezeDetector limit and crash the
             // server while MySQL is down. Cap retries on the sync connection;
             // async worker threads have their own time budget.
-            if (!(m_connectionFlags & CONNECTION_ASYNC) && attempts > 2)
-                attempts = 2;
+            if (!(m_connectionFlags & CONNECTION_ASYNC))
+            {
+                if (attempts > 1)
+                    attempts = 1;
+
+                // after a full failure series, fail subsequent queries fast for
+                // a while instead of paying a connect timeout on every single
+                // sync query (an unreachable MySQL turns that into permanent
+                // world-thread starvation -> FreezeDetector abort)
+                uint32 now = getMSTime();
+                if (m_reconnectFailUntilMs && now < m_reconnectFailUntilMs)
+                {
+                    TC_LOG_ERROR("sql.sql", "MySQL is unreachable - failing this query fast and retrying with the next ones.");
+                    return false;
+                }
+            }
 
             m_reconnecting = true;
 
             uint32 const lErrno = Open();
             if (!lErrno)
             {
+                // otherwise a prepare error from a previous transient failure
+                // would keep PrepareStatements() failing forever
+                m_prepareError = false;
+
                 // Don't remove 'this' pointer unless you want to skip loading all prepared statements...
                 if (!this->PrepareStatements())
                 {
@@ -595,6 +638,7 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
                         (m_connectionFlags & CONNECTION_ASYNC) ? "asynchronous" : "synchronous");
 
                 m_reconnecting = false;
+                m_reconnectFailUntilMs = 0;
                 return true;
             }
 
@@ -605,6 +649,8 @@ bool MySQLConnection::_HandleMySQLErrno(uint32 errNo, uint8 attempts /*= 5*/)
                 // aborting the whole server. Loudly logged so an outage is visible.
                 TC_LOG_ERROR("sql.sql", "Failed to reconnect to the MySQL server! Skipping this query; the server keeps running and retries on the next query. Check that MySQL is reachable.");
                 m_reconnecting = false;
+                if (!(m_connectionFlags & CONNECTION_ASYNC))
+                    m_reconnectFailUntilMs = getMSTime() + 60000; // cool down: fail fast for a minute
                 return false;
             }
             else
