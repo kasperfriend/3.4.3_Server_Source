@@ -183,9 +183,7 @@ REM Root password was already set during initialization in Step 3.
 
 REM Create databases using the project's create script
 "!MYSQL!" -u root -p!DB_ROOT_PASS! < "!SQL_DIR!\create\create_mysql.sql"
-if errorlevel 1 (
-    echo [WARN] create_mysql.sql had errors (may be OK if databases already exist).
-)
+if errorlevel 1 echo   [WARN] create_mysql.sql had errors (may be OK if databases already exist).
 
 REM Create the trinity user with full access
 "!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'localhost' IDENTIFIED BY '!DB_PASS!';"
@@ -316,30 +314,29 @@ goto :EOF
 :CHECK_RUNNING
 REM Check if MariaDB is already running
 "!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
-if errorlevel 1 (
-    echo MariaDB is not running. Starting it...
-    if exist "!MYSQLD!" (
-        start "" /B "!MYSQLD!" --defaults-file="!MY_INI!" --console 2>"!DB_DIR!\mysqld-error.log"
-        set /a WAIT_COUNT=0
-        :WAIT_LOOP2
-        timeout /t 1 /nobreak >nul
-        set /a WAIT_COUNT+=1
-        "!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
-        if errorlevel 1 (
-            if !WAIT_COUNT! LSS 30 goto :WAIT_LOOP2
-            echo [ERROR] MariaDB did not start. Check !DB_DIR!\mysqld-error.log
-            goto :FAIL
-        )
-        echo [OK] MariaDB is running.
-    ) else (
-        echo [ERROR] mysqld.exe not found. Run this script from scratch.
-        goto :FAIL
-    )
-) else (
+if not errorlevel 1 (
     echo [OK] MariaDB is already running.
+    goto :STEP7_ONLY
 )
 
-REM Still update config files
+echo MariaDB is not running. Starting it...
+if not exist "!MYSQLD!" (
+    echo [ERROR] mysqld.exe not found. Run this script from scratch.
+    goto :FAIL
+)
+
+start "" /B "!MYSQLD!" --defaults-file="!MY_INI!" --console 2>"!DB_DIR!\mysqld-error.log"
+set /a WAIT_COUNT=0
+:WAIT_LOOP2
+timeout /t 1 /nobreak >nul
+set /a WAIT_COUNT+=1
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
+if errorlevel 1 (
+    if !WAIT_COUNT! LSS 30 goto :WAIT_LOOP2
+    echo [ERROR] MariaDB did not start. Check !DB_DIR!\mysqld-error.log
+    goto :FAIL
+)
+echo [OK] MariaDB is running.
 goto :STEP7_ONLY
 
 :STEP7_ONLY

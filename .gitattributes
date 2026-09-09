@@ -32,3 +32,7 @@ sql/*    linguist-documentation
 
 # Always LF endings
 *.sh     eol=lf
+
+# Always CRLF endings for Windows batch scripts
+*.bat    eol=crlf
+*.cmd    eol=crlf
