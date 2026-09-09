@@ -1,54 +1,19 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
 title TrinityCore 3.4.3 - Start Database
 color 0A
+cd /d "%~dp0"
 
-echo ============================================================
-echo   TrinityCore 3.4.3 - Start Database
-echo ============================================================
-echo.
+REM Logic lives in Start-Database.ps1. This file is a launcher only so that
+REM cmd.exe never parses parenthesized IF/FOR blocks.
 
-set "ROOT=%~dp0"
-set "DB_DIR=%ROOT%database"
-set "MYSQLD=%DB_DIR%\bin\mysqld.exe"
-set "MYSQL=%DB_DIR%\bin\mysql.exe"
-set "MY_INI=%DB_DIR%\my.ini"
-set "PORT=3306"
+where powershell.exe >nul 2>&1
+if errorlevel 1 goto :NOPS
 
-if not exist "%MYSQLD%" (
-    echo [ERROR] MariaDB not found. Run Setup-Database.bat first.
-    echo.
-    pause
-    goto :EOF
-)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start-Database.ps1" %*
+exit /b %ERRORLEVEL%
 
-REM Check if already running
-"%MYSQL%" -u trinity -ptrinity -e "SELECT 1" >nul 2>&1
-if not errorlevel 1 (
-    echo [OK] MariaDB is already running on port %PORT%.
-    echo.
-    pause
-    goto :EOF
-)
-
-echo Starting MariaDB...
-start "MariaDB" /B "%MYSQLD%" --defaults-file="%MY_INI%" --console 2>"%DB_DIR%\mysqld-error.log"
-
-set /a WAIT=0
-:WAIT_LOOP
-timeout /t 1 /nobreak >nul
-set /a WAIT+=1
-"%MYSQL%" -u trinity -ptrinity -e "SELECT 1" >nul 2>&1
-if errorlevel 1 (
-    if !WAIT! LSS 30 goto :WAIT_LOOP
-    echo [ERROR] MariaDB did not start within 30 seconds.
-    echo         Check %DB_DIR%\mysqld-error.log
-    pause
-    goto :EOF
-)
-
-echo [OK] MariaDB is running on port %PORT%.
-echo.
-echo To stop it: run Stop-Database.bat or close this window.
-echo.
+:NOPS
+echo [ERROR] PowerShell was not found. It is required to start the database.
 pause
+exit /b 1

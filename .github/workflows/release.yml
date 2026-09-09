@@ -326,17 +326,18 @@ jobs:
           }
 
           # --- Database setup scripts ---
-          if (Test-Path "Setup-Database.bat") {
-            Copy-Item "Setup-Database.bat" "$DEST\" -Force
-            Write-Host "  Copied Setup-Database.bat"
-          }
-          if (Test-Path "Start-Database.bat") {
-            Copy-Item "Start-Database.bat" "$DEST\" -Force
-            Write-Host "  Copied Start-Database.bat"
-          }
-          if (Test-Path "Stop-Database.bat") {
-            Copy-Item "Stop-Database.bat" "$DEST\" -Force
-            Write-Host "  Copied Stop-Database.bat"
+          # The .bat files are double-click launchers only. The real logic is
+          # in the sibling .ps1 files; shipping one without the other breaks
+          # first-run setup in the release zip.
+          $dbScripts = @(
+            'Setup-Database.bat', 'Setup-Database.ps1',
+            'Start-Database.bat', 'Start-Database.ps1',
+            'Stop-Database.bat',  'Stop-Database.ps1'
+          )
+          foreach ($s in $dbScripts) {
+            if (-not (Test-Path $s)) { throw "Missing database script: $s" }
+            Copy-Item $s "$DEST\" -Force
+            Write-Host "  Copied $s"
           }
 
           # --- Launcher batch files ---
@@ -391,6 +392,7 @@ jobs:
             Setup-Database.bat   - First-time setup (MariaDB + all game data)
             Start-Database.bat   - Start the database (run before worldserver)
             Stop-Database.bat    - Stop the database
+            *.ps1                - Keep these next to the .bat files; do not delete them
 
           Server launchers:
             start-worldserver.bat - Start the game server
@@ -432,9 +434,9 @@ jobs:
           Write-Host "  sql\ (database schemas)"
           Write-Host "  etc\ (configuration)"
           Write-Host "  docs\ (documentation)"
-          Write-Host "  Setup-Database.bat (database installer)"
-          Write-Host "  Start-Database.bat (database launcher)"
-          Write-Host "  Stop-Database.bat (database stopper)"
+          Write-Host "  Setup-Database.bat / Setup-Database.ps1 (database installer)"
+          Write-Host "  Start-Database.bat / Start-Database.ps1 (database launcher)"
+          Write-Host "  Stop-Database.bat / Stop-Database.ps1 (database stopper)"
           Write-Host "  start-worldserver.bat (game server launcher)"
           Write-Host "  start-bnetserver.bat (login server launcher)"
 
