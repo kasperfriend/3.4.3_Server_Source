@@ -28,6 +28,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 std::string DBUpdaterUtil::GetCorrectedMySQLExecutable()
 {
@@ -39,23 +40,248 @@ std::string DBUpdaterUtil::GetCorrectedMySQLExecutable()
 
 bool DBUpdaterUtil::CheckExecutable()
 {
-    boost::filesystem::path exe(GetCorrectedMySQLExecutable());
-    if (!is_regular_file(exe))
+    std::string const configured = GetCorrectedMySQLExecutable();
+
+    auto isUsableValue = [](std::string const& value) -> bool
     {
-        exe = Trinity::SearchExecutableInPath("mysql");
-        if (!exe.empty() && is_regular_file(exe))
+        if (value.empty())
+            return false;
+        // CMake bakes "<VAR>-NOTFOUND" when the binary wasn't found at configure time.
+        // Treat that sentinel as "not configured" so we fall through to PATH search
+        // instead of treating the literal sentinel as a user path.
+        static std::string const suffix = "-NOTFOUND";
+        if (value.size() >= suffix.size() &&
+            value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0)
+            return false;
+        return true;
+    };
+
+    auto toAbsoluteGeneric = [](boost::filesystem::path const& p) -> std::string
+    {
+        try
         {
-            // Correct the path to the cli
-            corrected_path() = absolute(exe).generic_string();
+            return boost::filesystem::absolute(p).generic_string();
+        }
+        catch (...)
+        {
+            return p.generic_string();
+        }
+    };
+
+    boost::system::error_code ec;
+
+    // 1. Configured value points directly at a file - done.
+    if (isUsableValue(configured))
+    {
+        boost::filesystem::path const exe(configured);
+        ec.clear();
+        if (boost::filesystem::is_regular_file(exe, ec) && !ec)
             return true;
+
+        // 2. Configured value is a directory (e.g. ".../mariadb/bin") - look for the
+        //    client binary inside it instead of failing outright.
+        ec.clear();
+        if (boost::filesystem::is_directory(exe, ec) && !ec)
+        {
+#ifdef _WIN32
+            char const* const candidates[] = { "mysql.exe", "mariadb.exe", "mysql", "mariadb" };
+#else
+            char const* const candidates[] = { "mysql", "mariadb" };
+#endif
+            for (char const* candidate : candidates)
+            {
+                boost::filesystem::path const full = exe / candidate;
+                ec.clear();
+                if (boost::filesystem::is_regular_file(full, ec) && !ec)
+                {
+                    // Correct the path to the cli
+                    corrected_path() = toAbsoluteGeneric(full);
+                    TC_LOG_INFO("sql.updates", "Resolved MySQLExecutable directory '{}' to client binary '{}'.",
+                        configured, corrected_path());
+                    return true;
+                }
+            }
         }
 
-        TC_LOG_FATAL("sql.updates", "Didn't find any executable MySQL binary at \'{}\' or in path, correct the path in the *.conf (\"MySQLExecutable\").",
-            absolute(exe).generic_string());
+#ifdef _WIN32
+        // 3. On Windows allow omitting ".exe" (e.g. ".../bin/mysql").
+        {
+            boost::filesystem::path exePath(configured);
+            if (!exePath.has_extension())
+            {
+                boost::filesystem::path withExe = exePath;
+                withExe += ".exe";
+                ec.clear();
+                if (boost::filesystem::is_regular_file(withExe, ec) && !ec)
+                {
+                    corrected_path() = toAbsoluteGeneric(withExe);
+                    TC_LOG_INFO("sql.updates", "Resolved MySQLExecutable '{}' to client binary '{}'.",
+                        configured, corrected_path());
+                    return true;
+                }
+            }
+        }
+#endif
 
-        return false;
+        // 4. Bare filename (e.g. "mysql.exe") - resolve it via PATH exactly as given.
+        {
+            boost::filesystem::path const exePath(configured);
+            if (exePath.parent_path().empty() && exePath.has_filename())
+            {
+                boost::filesystem::path const found(Trinity::SearchExecutableInPath(configured));
+                if (!found.empty())
+                {
+                    ec.clear();
+                    if (boost::filesystem::is_regular_file(found, ec) && !ec)
+                    {
+                        corrected_path() = toAbsoluteGeneric(found);
+                        return true;
+                    }
+                }
+            }
+        }
     }
-    return true;
+
+    // 5. Fallback: search PATH for the known client names. This covers an empty config,
+    //    a stale CMake-baked path (binary moved since compilation) and MariaDB installs
+    //    where the client may be named "mariadb" instead of "mysql".
+#ifdef _WIN32
+    char const* const pathCandidates[] = { "mysql", "mysql.exe", "mariadb", "mariadb.exe" };
+#else
+    char const* const pathCandidates[] = { "mysql", "mariadb" };
+#endif
+    for (char const* candidate : pathCandidates)
+    {
+        boost::filesystem::path const found(Trinity::SearchExecutableInPath(candidate));
+        if (found.empty())
+            continue;
+
+        ec.clear();
+        if (boost::filesystem::is_regular_file(found, ec) && !ec)
+        {
+            // Correct the path to the cli
+            corrected_path() = toAbsoluteGeneric(found);
+            TC_LOG_INFO("sql.updates", "Resolved MySQL client '{}' from PATH to '{}'.",
+                candidate, corrected_path());
+            return true;
+        }
+    }
+
+    // 6. Nothing worked - report the *configured* value (not the current working
+    //    directory) with actionable hints.
+    std::string display;
+    if (configured.empty())
+        display = "<empty> (MySQLExecutable is empty and no built-in CMake path is usable)";
+    else if (!isUsableValue(configured))
+        display = "'" + configured + "' (built-in CMake path was not found at configure time)";
+    else
+        display = "'" + configured + "'";
+
+    TC_LOG_FATAL("sql.updates", "Didn't find any executable MySQL/MariaDB client binary for {} nor in PATH (searched for mysql/mariadb client), "
+        "correct the path in the *.conf (\"MySQLExecutable\"). It must point to the mysql client binary itself, "
+        "e.g. \"C:/Program Files/MariaDB/bin/mysql.exe\" or \"/usr/bin/mysql\".", display);
+
+    if (isUsableValue(configured))
+    {
+        boost::filesystem::path const exe(configured);
+        ec.clear();
+        if (boost::filesystem::is_directory(exe, ec) && !ec)
+        {
+#ifdef _WIN32
+            TC_LOG_FATAL("sql.updates", "The configured MySQLExecutable '{}' is a directory but no mysql.exe/mariadb.exe was found inside it. "
+                "Point MySQLExecutable at the binary itself (e.g. '{}/mysql.exe') or add that directory to PATH.", configured, configured);
+#else
+            TC_LOG_FATAL("sql.updates", "The configured MySQLExecutable '{}' is a directory but no mysql/mariadb client was found inside it. "
+                "Point MySQLExecutable at the binary itself (e.g. '{}/mysql') or add that directory to PATH.", configured, configured);
+#endif
+        }
+    }
+
+    return false;
+}
+
+std::string DBUpdaterUtil::ResolveSourceDirectory()
+{
+    boost::system::error_code ec;
+
+    auto isDir = [&ec](boost::filesystem::path const& p) -> bool
+    {
+        if (p.empty())
+            return false;
+        ec.clear();
+        return boost::filesystem::is_directory(p, ec) && !ec;
+    };
+
+    auto hasUpdatesTree = [&](boost::filesystem::path const& root) -> bool
+    {
+        return isDir(root) && isDir(root / "sql" / "updates");
+    };
+
+    // 1. Explicitly configured value - any existing directory is accepted, preserving
+    //    historical behavior (update include rows may use absolute paths that do not
+    //    live under the source tree at all).
+    std::string const configured = sConfigMgr->GetStringDefault("SourceDirectory", "", true);
+    if (!configured.empty() && isDir(boost::filesystem::path(configured)))
+        return configured;
+
+    // 2. Baked-in CMake source directory - valid when running on the build machine layout.
+    char const* baked = GitRevision::GetSourceDirectory();
+    if (baked && *baked && isDir(boost::filesystem::path(baked)))
+        return baked;
+
+    // 3. Portable runtime fallbacks. Everything here is derived from the process
+    //    environment (working directory, config file location) - nothing hardcoded.
+    //    Unlike the explicit values above, fallbacks must actually contain the
+    //    sql/updates tree, otherwise resolving to them would be worse than useless:
+    //    configured include directories would silently match nothing.
+    std::vector<boost::filesystem::path> candidates;
+    candidates.reserve(8);
+
+    ec.clear();
+    boost::filesystem::path cwd = boost::filesystem::current_path(ec);
+    if (!ec && !cwd.empty())
+    {
+        candidates.push_back(cwd);
+        for (int i = 0; i < 3; ++i)
+        {
+            cwd = cwd.parent_path();
+            if (cwd.empty())
+                break;
+            candidates.push_back(cwd);
+        }
+    }
+
+    try
+    {
+        std::string const confFile = sConfigMgr->GetFilename();
+        if (!confFile.empty())
+        {
+            boost::filesystem::path confDir = boost::filesystem::absolute(boost::filesystem::path(confFile)).parent_path();
+            for (int i = 0; i < 3; ++i)
+            {
+                if (confDir.empty())
+                    break;
+                candidates.push_back(confDir);
+                confDir = confDir.parent_path();
+            }
+        }
+    }
+    catch (...)
+    {
+        // Ignore - fallbacks are best effort.
+    }
+
+    for (boost::filesystem::path const& candidate : candidates)
+    {
+        if (hasUpdatesTree(candidate))
+        {
+            std::string const found = candidate.generic_string();
+            TC_LOG_INFO("sql.updates", "Resolved source directory to '{}' (auto-detected, no usable SourceDirectory configured).", found);
+            return found;
+        }
+    }
+
+    return "";
 }
 
 std::string& DBUpdaterUtil::corrected_path()
@@ -80,7 +306,9 @@ std::string DBUpdater<LoginDatabaseConnection>::GetTableName()
 template<>
 std::string DBUpdater<LoginDatabaseConnection>::GetBaseFile()
 {
-    return BuiltInConfig::GetSourceDirectory() +
+    std::string const resolved = DBUpdaterUtil::ResolveSourceDirectory();
+    std::string const root = resolved.empty() ? BuiltInConfig::GetSourceDirectory() : resolved;
+    return root +
         "/sql/base/auth_database.sql";
 }
 
@@ -139,7 +367,9 @@ std::string DBUpdater<CharacterDatabaseConnection>::GetTableName()
 template<>
 std::string DBUpdater<CharacterDatabaseConnection>::GetBaseFile()
 {
-    return BuiltInConfig::GetSourceDirectory() +
+    std::string const resolved = DBUpdaterUtil::ResolveSourceDirectory();
+    std::string const root = resolved.empty() ? BuiltInConfig::GetSourceDirectory() : resolved;
+    return root +
         "/sql/base/characters_database.sql";
 }
 
@@ -192,6 +422,9 @@ BaseLocation DBUpdater<T>::GetBaseLocationType()
 template<class T>
 bool DBUpdater<T>::Create(DatabaseWorkerPool<T>& pool)
 {
+    if (!DBUpdaterUtil::CheckExecutable())
+        return false;
+
     TC_LOG_INFO("sql.updates", "Database \"{}\" does not exist, do you want to create it? [yes (default) / no]: ",
         pool.GetConnectionInfo()->database);
 
@@ -242,13 +475,39 @@ bool DBUpdater<T>::Update(DatabaseWorkerPool<T>& pool)
 
     TC_LOG_INFO("sql.updates", "Updating {} database...", DBUpdater<T>::GetTableName());
 
-    Path const sourceDirectory(BuiltInConfig::GetSourceDirectory());
-
-    if (!is_directory(sourceDirectory))
+    std::string const resolvedSource = DBUpdaterUtil::ResolveSourceDirectory();
+    if (resolvedSource.empty())
     {
-        TC_LOG_ERROR("sql.updates", "DBUpdater: The given source directory {} does not exist, change the path to the directory where your sql directory exists (for example c:\\source\\trinitycore). Shutting down.", sourceDirectory.generic_string());
+        // No source tree with sql/updates anywhere. If this database has no update
+        // include directories configured, the updater could not find any files even
+        // with a valid source directory, so failing startup here would serve no purpose
+        // (schemas/updates for such databases are applied externally) - skip with a
+        // loud warning. Otherwise fail closed: pending updates might exist that we
+        // cannot see without the update files.
+        QueryResult const includes = Retrieve(pool, "SELECT `path` FROM `updates_include` LIMIT 1");
+        if (!includes)
+        {
+            TC_LOG_WARN("sql.updates", "DBUpdater: No source directory containing sql/updates was found (SourceDirectory setting and built-in path are unusable and no sql/updates folder was detected next to the server binary or config file), "
+                "but the {} database has no update include directories configured, so there is nothing the automatic updater could apply. Skipping automatic updates for this database. "
+                "Set SourceDirectory in the *.conf to a folder containing sql/ (or ship the sql folder with the binaries) to silence this warning.",
+                DBUpdater<T>::GetTableName());
+            return true;
+        }
+
+        std::string const configuredSource = sConfigMgr->GetStringDefault("SourceDirectory", "", true);
+        char const* bakedSource = GitRevision::GetSourceDirectory();
+        TC_LOG_ERROR("sql.updates", "DBUpdater: Cannot update the {} database because no source directory was found. "
+            "SourceDirectory in the *.conf is {} and the built-in source path is {}. "
+            "Set SourceDirectory to the folder that contains your sql directory (the folder with sql/updates in it), "
+            "or place the sql folder next to the server binaries/config, "
+            "or set Updates.EnableDatabases to exclude this database if you manage its schema manually. Shutting down.",
+            DBUpdater<T>::GetTableName(),
+            configuredSource.empty() ? "<empty>" : "'" + configuredSource + "'",
+            (!bakedSource || !*bakedSource) ? "<empty>" : std::string("'") + bakedSource + "'");
         return false;
     }
+
+    Path const sourceDirectory(resolvedSource);
 
     UpdateFetcher updateFetcher(sourceDirectory, [&](std::string const& query) { DBUpdater<T>::Apply(pool, query); },
         [&](Path const& file) { DBUpdater<T>::ApplyFile(pool, file); },
@@ -307,7 +566,7 @@ bool DBUpdater<T>::Populate(DatabaseWorkerPool<T>& pool)
         {
             case LOCATION_REPOSITORY:
             {
-                TC_LOG_ERROR("sql.updates", ">> Base file \"{}\" is missing. Try fixing it by cloning the source again.",
+                TC_LOG_ERROR("sql.updates", ">> Base file \"{}\" is missing. Set SourceDirectory in the *.conf to a folder containing sql/ (or ship the sql folder with the server binaries).",
                     base.generic_string());
 
                 break;

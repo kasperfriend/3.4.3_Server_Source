@@ -58,6 +58,13 @@ public:
 
     static bool CheckExecutable();
 
+    // Resolves the source/repack root used to locate sql/updates and sql/base.
+    // Tries the SourceDirectory setting, then the built-in CMake path, then portable
+    // runtime fallbacks (working directory, config file location and their parents -
+    // nothing hardcoded). Fallbacks must contain an sql/updates tree to be accepted.
+    // Returns an empty string when nothing usable was found.
+    static std::string ResolveSourceDirectory();
+
 private:
     static std::string& corrected_path();
 };

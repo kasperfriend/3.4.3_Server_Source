@@ -130,34 +130,66 @@ static int CreateChildProcess(T waiter, std::string const& executable,
             fclose(ptr);
     });
 
-    // Start the child process
-    child c = [&]()
+    // Resolve the executable path. Values containing a directory component are made
+    // absolute against the working directory. Bare file names that exist in the working
+    // directory are resolved the same way for backwards compatibility, while other bare
+    // names are passed through untouched so the OS can resolve them via PATH -
+    // absolutizing those would break that lookup.
+    std::string const exePath = [&]() -> std::string
+    {
+        try
+        {
+            boost::filesystem::path const p(executable);
+            if (!executable.empty() && (p.has_parent_path() || boost::filesystem::exists(boost::filesystem::absolute(p))))
+                return boost::filesystem::absolute(p).string();
+        }
+        catch (...)
+        {
+        }
+        return executable;
+    }();
+
+    // Start the child process. Launch failures (missing binary, permissions, ...) are
+    // reported through the return value so callers take their normal failure path
+    // instead of unwinding an exception (which most call sites do not expect).
+    Optional<child> c;
+    try
     {
         if (inputFile)
         {
             // With binding stdin
-            return child{
-                exe = boost::filesystem::absolute(executable).string(),
+            c.emplace(
+                exe = exePath,
                 args = argsVector,
                 env = environment(boost::this_process::environment()),
                 std_in = inputFile.get(),
                 std_out = outStream,
                 std_err = errStream
-            };
+            );
         }
         else
         {
             // Without binding stdin
-            return child{
-                exe = boost::filesystem::absolute(executable).string(),
+            c.emplace(
+                exe = exePath,
                 args = argsVector,
                 env = environment(boost::this_process::environment()),
                 std_in = boost::process::close,
                 std_out = outStream,
                 std_err = errStream
-            };
+            );
         }
-    }();
+    }
+    catch (std::exception const& e)
+    {
+        TC_LOG_ERROR(logger, "Failed to start process \"{}\": {}", executable, e.what());
+        return EXIT_FAILURE;
+    }
+    catch (...)
+    {
+        TC_LOG_ERROR(logger, "Failed to start process \"{}\".", executable);
+        return EXIT_FAILURE;
+    }
 
     auto outInfo = MakeTCLogSink([&](std::string_view msg)
     {
@@ -174,7 +206,7 @@ static int CreateChildProcess(T waiter, std::string const& executable,
 
     // Call the waiter in the current scope to prevent
     // the streams from closing too early on leaving the scope.
-    int const result = waiter(c);
+    int const result = waiter(*c);
 
     if (!secure)
     {

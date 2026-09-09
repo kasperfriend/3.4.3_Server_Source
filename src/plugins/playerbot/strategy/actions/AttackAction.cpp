@@ -1,6 +1,7 @@
 #include "../../../pchdef.h"
 #include "../../playerbot.h"
 #include "strategy/actions/AttackAction.h"
+#include "../../PlayerbotAIConfig.h"
 #include "Movement/MovementGenerator.h"
 #include "AI/CreatureAI.h"
 #include "Entities/Pet/Pet.h"
@@ -20,6 +21,12 @@ bool AttackAction::Execute(Event event)
 
 bool AttackMyTargetAction::Execute(Event event)
 {
+    // This action only runs as a direct chat order ("attack"), never from
+    // grind/combat triggers, so failure reasons must reach the master -
+    // trigger-executed actions are non-verbose by default and would fail
+    // silently here.
+    MakeVerbose();
+
     Player* master = GetMaster();
     if (!master)
         return false;
@@ -27,7 +34,7 @@ bool AttackMyTargetAction::Execute(Event event)
     Unit* target = master->GetSelectedUnit();
     if (!target)
     {
-        if (verbose) ai->TellMaster("You have no target");
+        ai->TellMaster("You have no target");
         return false;
     }
 
@@ -60,6 +67,16 @@ bool AttackAction::Attack(Unit* target)
     if (!bot->IsWithinLOSInMap(target))
     {
         msg << " is not on my sight";
+        if (verbose) ai->TellMaster(msg.str());
+        return false;
+    }
+    if (!bot->IsWithinDistInMap(target, sPlayerbotAIConfig.sightDistance))
+    {
+        // Same rule InvalidTargetValue enforces: the combat engine drops an
+        // out-of-sight target at ACTION_HIGH+9 before any chase action
+        // (ACTION_NORMAL+8) can run, so starting the swing here would only
+        // produce an Attack -> instant drop cycle. Refuse with a reason.
+        msg << " is too far away";
         if (verbose) ai->TellMaster(msg.str());
         return false;
     }

@@ -241,6 +241,11 @@ void PlayerbotAI::Reset()
     currentEngine = engines[BOT_STATE_NON_COMBAT];
     nextAICheckDelay = 0;
 
+    // Same stuck-swing class as drop target: clearing the target value
+    // without AttackStop leaves the client's attack animation and the
+    // server-side victim running. Safe no-op when idle.
+    bot->AttackStop();
+
     aiObjectContext->GetValue<Unit*>("old target")->Set(NULL);
     aiObjectContext->GetValue<Unit*>("current target")->Set(NULL);
     aiObjectContext->GetValue<LootObject>("loot target")->Set(LootObject());

@@ -110,7 +110,11 @@ bool PlayerbotSecurity::CheckLevelFor(PlayerbotSecurityLevel level, bool silent,
     if (realLevel >= level)
         return true;
 
-    if (silent || from->GetPlayerbotAI())
+    // Server-side whispers bypass the two-side interaction rules the core
+    // enforces for player chat, so a bot must never whisper the enemy -
+    // not even a denial. (LevelFor already reports DENY_ALL for opposing
+    // players; this only silences the "I'm kind of busy now" reply itself.)
+    if (silent || from->GetPlayerbotAI() || bot->GetPlayerbotAI()->IsOpposing(from))
         return false;
 
     Player* master = bot->GetPlayerbotAI()->GetMaster();
