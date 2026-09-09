@@ -17,7 +17,6 @@
 namespace fs = std::filesystem;
 #define CHECK(...) do { if (!(__VA_ARGS__)) throw std::runtime_error("Check failed at line " + std::to_string(__LINE__) + ": " #__VA_ARGS__); } while (false)
 
-@TELEPORT_NAV@
 namespace MMAP
 {
     struct TileBuilder { bool shouldSkipTile(uint32, uint32, uint32, dtNavMesh const*) const; };
@@ -121,9 +120,16 @@ void TestLoader(fs::path const& dir)
             CHECK(!builder.shouldSkipTile(0, 32, 31, &changed)); // changed .mmap origin forces regeneration
             fs::current_path(cwd);
         }
-        CHECK(HasBotTeleportNavigation(mgr, 0, 0, 7, 2, 8, 0));
-        CHECK(!HasBotTeleportNavigation(mgr, 0, 0, 7, 200, 200, 0));
-        CHECK(!HasBotTeleportNavigation(mgr, 0, 0, 999, 2, 8, 0));
+        // Random-bot teleports deliberately do not depend on MMAP data (see the
+        // safety test's teleport guards); landing checks query the navmesh directly.
+        CHECK(mgr.GetNavMeshQuery(0, 0, 7));
+        CHECK(!mgr.GetNavMeshQuery(0, 0, 999)); // unknown instance has no navigation
+        {
+            dtQueryFilter filter;
+            float far[] = { 200, 0, 200 }, extents[] = { 3, 3, 3 }, nearest[3];
+            dtPolyRef ref = 0;
+            CHECK(dtStatusSucceed(mgr.GetNavMeshQuery(0, 0, 7)->findNearestPoly(far, extents, &filter, &ref, nearest)) && !ref);
+        }
         dtQueryFilter filter;
         float point[] = { 2, 0, 2 }, extents[] = { 3, 3, 3 }, nearest[3];
         dtPolyRef ref = 0;
