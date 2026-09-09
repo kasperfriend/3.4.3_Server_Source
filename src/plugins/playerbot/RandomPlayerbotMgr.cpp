@@ -2,6 +2,7 @@
 #include "playerbot.h"
 #include "PlayerbotAIConfig.h"
 #include "PlayerbotFactory.h"
+#include "RandomPlayerbotFactory.h"
 #include "../../server/database/Database/DatabaseEnv.h"
 #include "PlayerbotAI.h"
 #include "AiFactory.h"
@@ -166,6 +167,27 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     // at startup with a large MaxRandomBots)
     vector<uint32> freeAllianceBots = GetFreeBots(true);
     vector<uint32> freeHordeBots = GetFreeBots(false);
+
+    // Self-heal: no registered bots plus no free characters means zero usable
+    // bot characters exist at all (startup creation failed, was skipped, or
+    // the database came from elsewhere without them) - retry creation instead
+    // of staying empty forever. Throttled: CreateRandomBots is idempotent but
+    // does synchronous DB/creation work on the world thread. Skipped while the
+    // delete flag is on so a wipe is not immediately recreated every 10 min.
+    if (maxAllowedBotCount > 0 && bots.empty() && freeAllianceBots.empty() && freeHordeBots.empty() &&
+        !sPlayerbotAIConfig.deleteRandomBotAccounts)
+    {
+        static time_t lastCreateRetry = 0;
+        time_t now = time(nullptr);
+        if (now - lastCreateRetry >= 600)
+        {
+            lastCreateRetry = now;
+            TC_LOG_INFO("playerbot", "No random bot characters found - retrying bot creation...");
+            RandomPlayerbotFactory::CreateRandomBots();
+            freeAllianceBots = GetFreeBots(true);
+            freeHordeBots = GetFreeBots(false);
+        }
+    }
 
     int addsThisTick = 0;
     while (botCount++ < maxAllowedBotCount && addsThisTick < 200)
@@ -692,7 +714,7 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* handler, cha
 
     if (!args || !*args)
     {
-        TC_LOG_ERROR("playerbot",  "Usage: rndbot stats/update/reset/init/refresh/add/remove");
+        TC_LOG_ERROR("playerbot",  "Usage: rndbot stats/update/reset/init/refresh/add/remove (init also creates any missing bot accounts/characters)");
         return false;
     }
 
@@ -716,6 +738,15 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* handler, cha
     }
     else if (cmd == "init" || cmd == "refresh" || cmd == "teleport")
     {
+        if (cmd == "init")
+        {
+            // (Re)create any missing bot accounts/characters first: with no
+            // characters at all there is nothing online to randomize, so plain
+            // "init" used to silently do nothing on a fresh/empty database.
+            // New characters log in via the normal autologin ticks below.
+            TC_LOG_INFO("playerbot", "Ensuring random bot accounts/characters exist...");
+            RandomPlayerbotFactory::CreateRandomBots();
+        }
 		TC_LOG_INFO("playerbot",  "Randomizing bots for {} accounts", sPlayerbotAIConfig.randomBotAccounts.size());
         list<uint32> botIds;
         for (list<uint32>::iterator i = sPlayerbotAIConfig.randomBotAccounts.begin(); i != sPlayerbotAIConfig.randomBotAccounts.end(); ++i)
