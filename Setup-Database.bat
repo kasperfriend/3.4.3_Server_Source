@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableDelayedExpansion
-title TrinityCore 3.4.3 — Database Setup
+title TrinityCore 3.4.3 - Database Setup
 color 0A
 
 echo ============================================================
-echo   TrinityCore 3.4.3 — Portable Database Setup
+echo   TrinityCore 3.4.3 - Portable Database Setup
 echo ============================================================
 echo.
 echo This script will:
@@ -296,8 +296,16 @@ REM ------------------------------------------------------------------
 mkdir "!DL_DIR!" 2>nul
 
 REM --- world ---
+REM IMPORTANT: never put a quoted program inside for /f ('...') - cmd.exe
+REM re-runs that command through a child "cmd /c" process which corrupts the
+REM quotes and dies with "... was unexpected at this time.". Instead: run
+REM mysql as a plain command, capture its output in a temp file, then read
+REM that file back with for /f "usebackq" (file mode - no child cmd.exe, no
+REM quote problems, and it works even when the folder path contains spaces).
 set "WORLD_ROWS=0"
-for /f %%C in ('"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM world.version" 2^>nul') do set "WORLD_ROWS=%%C"
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM world.version" >"!DL_DIR!\rowcount.tmp" 2>nul
+for /f "usebackq delims=" %%C in ("!DL_DIR!\rowcount.tmp") do set "WORLD_ROWS=%%C"
+del "!DL_DIR!\rowcount.tmp" >nul 2>&1
 if not "!WORLD_ROWS!"=="0" (
     echo   World data already present (!WORLD_ROWS! rows in world.version) - skipping world import.
     goto :IMPORT_HOTFIXES
@@ -353,8 +361,12 @@ if errorlevel 1 (
 echo   [OK] world data imported and verified.
 
 :IMPORT_HOTFIXES
+REM Same pattern as the world check above: capture mysql output in a temp
+REM file - never run a quoted program inside for /f ('...').
 set "HOTFIX_ROWS=0"
-for /f %%C in ('"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM hotfixes.achievement" 2^>nul') do set "HOTFIX_ROWS=%%C"
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM hotfixes.achievement" >"!DL_DIR!\rowcount.tmp" 2>nul
+for /f "usebackq delims=" %%C in ("!DL_DIR!\rowcount.tmp") do set "HOTFIX_ROWS=%%C"
+del "!DL_DIR!\rowcount.tmp" >nul 2>&1
 if not "!HOTFIX_ROWS!"=="0" (
     echo   Hotfixes data already present (!HOTFIX_ROWS! rows in achievement) - skipping hotfixes import.
     goto :EOF
@@ -486,14 +498,20 @@ if not exist "!ETC_DIR!\bnetserver.conf" (
     )
 )
 
+REM NOTE: each continuation line below must contain an even number of
+REM double-quote characters - with an odd count the trailing ^ becomes a
+REM literal caret (cmd disables ^ escaping inside quotes) and the multi-line
+REM PowerShell command silently breaks in half. That is why the match
+REM expressions use the form 'name\s*=.*' instead of embedding escaped
+REM quotes in the pattern.
 if exist "!ETC_DIR!\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
         "$f = '!ETC_DIR!\worldserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
-        "$c = $c -replace 'HotfixDatabaseInfo\s*=\s*\"[^\"]*\"', 'HotfixDatabaseInfo    = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;hotfixes\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=.*', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
+        "$c = $c -replace 'WorldDatabaseInfo\s*=.*', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
+        "$c = $c -replace 'CharacterDatabaseInfo\s*=.*', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
+        "$c = $c -replace 'HotfixDatabaseInfo\s*=.*', 'HotfixDatabaseInfo    = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;hotfixes\"';"^
         "$c = $c -replace 'Updates\.EnableDatabases\s*=\s*[0-9]+', 'Updates.EnableDatabases = 0';"^
         "$c = $c -replace 'Updates\.AutoSetup\s*=\s*[0-9]+', 'Updates.AutoSetup = 0';"^
         "[IO.File]::WriteAllText($f, $c);"^
@@ -503,7 +521,7 @@ if exist "!ETC_DIR!\bnetserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
         "$f = '!ETC_DIR!\bnetserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=.*', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
         "$c = $c -replace 'Updates\.EnableDatabases\s*=\s*[0-9]+', 'Updates.EnableDatabases = 0';"^
         "$c = $c -replace 'Updates\.AutoSetup\s*=\s*[0-9]+', 'Updates.AutoSetup = 0';"^
         "[IO.File]::WriteAllText($f, $c);"^
