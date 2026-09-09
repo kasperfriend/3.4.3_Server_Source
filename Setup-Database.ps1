@@ -45,17 +45,21 @@ $MyIni       = Join-Path $DbDir 'my.ini'
 $SqlDir      = Join-Path $Root 'sql'
 $EtcDir      = Join-Path $Root 'etc'
 $DlDir       = Join-Path $Root 'db-downloads'
-$Port        = 3306
-$DbUser      = 'trinity'
-$DbPass      = 'trinity'
-$DbRootPass  = 'rootpassword'
+$Port                  = 3306
+$DbUser                = 'trinity'
+$DbPass                = 'trinity'
+$DbRootPass            = 'rootpassword'
+$MaxAllowedPacketBytes = 268435456 # 256 MiB; the full world dump is ~200 MiB and MariaDB defaults to 16 MiB.
+$ImportNetworkTimeout  = 600        # Seconds; avoid aborting a long local import between large statements.
 
 $DbDataRelease      = 'https://github.com/xHashii/WyrmrestCore/releases/download/DB.2608'
 $WorldDump          = 'world_full_2026_08_10.sql'
 $HotfixesDump       = 'hotfixes_full_2026_08_10.sql'
 $WorldDumpSha256    = '91401028dce1dc302e12709a268e4d46cb74f527f95396e2dea1ea5da17081de'
 $HotfixesDumpSha256 = '20170a1a52a93af556f4a875885cf2e462777f3a5a3b58e8b128bc171ea866dc'
-$MariaDbUrl         = 'https://archive.mariadb.org/mariadb-10.11.10/winx64-packages/mariadb-10.11.10-winx64.zip'
+$MariaDbVersion     = '10.11.19'
+$MariaDbZipSha256   = '398ea30e5036010bbebe01d2b1804280424dcc2626e36d8e95155c04d25a0490'
+$MariaDbUrl         = "https://archive.mariadb.org/mariadb-$MariaDbVersion/winx64-packages/mariadb-$MariaDbVersion-winx64.zip"
 
 try {
     $Host.UI.RawUI.WindowTitle = 'TrinityCore 3.4.3 - Database Setup'
@@ -103,10 +107,12 @@ function Fail-Setup {
     Write-Host '============================================================'
     Write-Host ''
     Write-Host 'Common fixes:'
+    Write-Host '  - Re-run this script and answer N to reuse the database and verified downloads'
+    Write-Host '  - Check database\last-import-error.log when an SQL import failed'
     Write-Host '  - Check your internet connection (download may have failed)'
     Write-Host "  - Make sure port $Port is not in use by another MySQL instance"
     Write-Host '  - Run this script as Administrator if you get permission errors'
-    Write-Host '  - Delete the "database" folder and try again'
+    Write-Host '  - Delete the "database" folder only if initialization itself failed'
     Write-Host '  - If a game-data download failed, delete the "db-downloads" folder and re-run'
     Write-Host ''
     Wait-Key 'Press any key to exit...'
@@ -164,11 +170,13 @@ function Invoke-Mysql {
         return @{ ExitCode = 1; Output = '' }
     }
     $argList = @(
+        '--no-defaults',
         "--user=$User",
         "--password=$Password",
         '--batch',
         '--skip-column-names',
-        '--default-character-set=utf8mb4'
+        '--default-character-set=utf8mb4',
+        "--max-allowed-packet=$script:MaxAllowedPacketBytes"
     )
     if ($Database) { $argList += $Database }
     $argList += @('-e', $Sql)
@@ -204,12 +212,14 @@ function Invoke-MysqlImport {
         [string]$SqlFile
     )
     if (-not (Test-Path -LiteralPath $SqlFile)) {
-        return @{ ExitCode = 1; StdErr = "SQL file not found: $SqlFile" }
+        return @{ ExitCode = 1; StdOut = ''; StdErr = "SQL file not found: $SqlFile" }
     }
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $script:MysqlExe
-    $arg = "--user=$User --password=$Password --default-character-set=utf8mb4"
+    # --no-defaults must be the first client option. It prevents another MySQL
+    # installation's my.ini from silently changing this portable connection.
+    $arg = "--no-defaults --user=$User --password=$Password --batch --default-character-set=utf8mb4 --binary-mode --max-allowed-packet=$script:MaxAllowedPacketBytes"
     if ($Database) { $arg = "$arg $Database" }
     $psi.Arguments = $arg
     $psi.UseShellExecute = $false
@@ -221,18 +231,30 @@ function Invoke-MysqlImport {
 
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
-    [void]$proc.Start()
+    try {
+        [void]$proc.Start()
+    } catch {
+        $startError = $_.Exception.Message
+        $proc.Dispose()
+        return @{ ExitCode = 1; StdOut = ''; StdErr = "Could not start mysql.exe: $startError" }
+    }
 
-    # Read stdout/stderr asynchronously so a chatty dump cannot deadlock the stdin copy.
+    # Read stdout/stderr asynchronously so a chatty dump cannot deadlock the
+    # stdin copy. In particular, preserve stderr when mysql exits early. The
+    # old code leaked only CopyTo's unhelpful "The pipe has been ended" error
+    # and hid the actual mysql error (usually an oversized packet).
     $outTask = $proc.StandardOutput.ReadToEndAsync()
     $errTask = $proc.StandardError.ReadToEndAsync()
-
-    $fs = [System.IO.File]::OpenRead($SqlFile)
+    $copyError = ''
+    $fs = $null
     try {
+        $fs = [System.IO.File]::OpenRead($SqlFile)
         $fs.CopyTo($proc.StandardInput.BaseStream)
         $proc.StandardInput.BaseStream.Flush()
+    } catch {
+        $copyError = $_.Exception.Message
     } finally {
-        $fs.Dispose()
+        if ($fs) { $fs.Dispose() }
         try { $proc.StandardInput.Close() } catch { }
     }
 
@@ -241,7 +263,68 @@ function Invoke-MysqlImport {
     $stderr = ''
     try { $stdout = $outTask.Result } catch { }
     try { $stderr = $errTask.Result } catch { }
-    return @{ ExitCode = $proc.ExitCode; StdOut = $stdout; StdErr = $stderr }
+    $exitCode = $proc.ExitCode
+    $proc.Dispose()
+
+    if ($copyError) {
+        $pipeMessage = "mysql.exe closed its input before the complete SQL file was sent: $copyError"
+        if ([string]::IsNullOrWhiteSpace($stderr)) {
+            $stderr = $pipeMessage
+        } else {
+            $stderr = "$($stderr.TrimEnd())`r`n$pipeMessage"
+        }
+        if ($exitCode -eq 0) { $exitCode = 1 }
+    }
+
+    return @{ ExitCode = $exitCode; StdOut = $stdout; StdErr = $stderr }
+}
+
+function Write-MysqlImportDiagnostics {
+    param(
+        [hashtable]$Result,
+        [string]$SqlFile
+    )
+
+    $details = ''
+    if ($Result -and $Result.StdErr) { $details = ([string]$Result.StdErr).Trim() }
+    if (-not $details -and $Result -and $Result.StdOut) { $details = ([string]$Result.StdOut).Trim() }
+    if (-not $details) { $details = 'mysql.exe exited without an error message.' }
+
+    Write-Host '  mysql.exe reported:'
+    foreach ($line in ($details -split "`r?`n")) {
+        Write-Host "    $line"
+    }
+
+    # Keep the complete client error available after the setup window closes.
+    try {
+        $logPath = Join-Path $script:DbDir 'last-import-error.log'
+        $log = @(
+            "SQL file: $SqlFile",
+            "Time: $([DateTime]::Now.ToString('s'))",
+            "Exit code: $($Result.ExitCode)",
+            '',
+            $details
+        ) -join [Environment]::NewLine
+        [System.IO.File]::WriteAllText($logPath, $log)
+        Write-Host "  Full error saved to: $logPath"
+    } catch { }
+}
+
+function Set-MysqlImportLimits {
+    # MariaDB defaults max_allowed_packet to 16 MiB. Full world/hotfix dumps
+    # can contain extended INSERT statements larger than that; the server then
+    # drops the connection and PowerShell sees only a broken stdin pipe. Set
+    # the running server's global value so this also repairs an existing setup
+    # without requiring the user to reinstall or restart MariaDB.
+    $sql = @(
+        "SET GLOBAL max_allowed_packet = $script:MaxAllowedPacketBytes;",
+        "SET GLOBAL net_read_timeout = $script:ImportNetworkTimeout;",
+        "SET GLOBAL net_write_timeout = $script:ImportNetworkTimeout;"
+    ) -join ' '
+    $r = Invoke-Mysql -User 'root' -Password $script:DbRootPass -Sql $sql
+    if ($r.ExitCode -ne 0) {
+        Fail-Setup 'Could not configure MariaDB for large SQL imports.'
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -336,6 +419,9 @@ default-storage-engine=innodb
 character-set-server=utf8mb4
 collation-server=utf8mb4_general_ci
 max_connections=200
+max_allowed_packet=256M
+net_read_timeout=$($script:ImportNetworkTimeout)
+net_write_timeout=$($script:ImportNetworkTimeout)
 innodb_buffer_pool_size=256M
 innodb_log_file_size=48M
 skip-name-resolve
@@ -344,6 +430,7 @@ log-error="$basedir/mysqld-error.log"
 [client]
 port=$($script:Port)
 default-character-set=utf8mb4
+max_allowed_packet=256M
 "@
     $dir = Split-Path -Parent $script:MyIni
     if (-not (Test-Path -LiteralPath $dir)) {
@@ -354,7 +441,7 @@ default-character-set=utf8mb4
 
 function Install-MariaDb {
     Write-Host ''
-    Write-Host '[1/7] Downloading MariaDB 10.11.10 portable...'
+    Write-Host "[1/7] Downloading MariaDB $script:MariaDbVersion portable..."
     Write-Host ''
 
     $zip = Join-Path $script:Root 'mariadb-download.zip'
@@ -367,6 +454,13 @@ function Install-MariaDb {
     }
     if (-not (Test-Path -LiteralPath $zip)) {
         Fail-Setup "Download failed. Check your internet connection.`n         URL: $($script:MariaDbUrl)"
+    }
+    Write-Host "Verifying MariaDB $script:MariaDbVersion checksum (SHA-256)..."
+    try {
+        Test-Sha256 -Path $zip -Expected $script:MariaDbZipSha256
+        Write-Host 'Checksum OK.'
+    } catch {
+        Fail-Setup "MariaDB checksum verification failed.`n         The corrupted archive was deleted - re-run this script to re-download it.`n         $($_.Exception.Message)"
     }
 
     Write-Host ''
@@ -451,6 +545,7 @@ function Ensure-Databases {
     if (Test-Path -LiteralPath $createSql) {
         $imp = Invoke-MysqlImport -User 'root' -Password $script:DbRootPass -Database 'mysql' -SqlFile $createSql
         if ($imp.ExitCode -ne 0) {
+            Write-MysqlImportDiagnostics -Result $imp -SqlFile $createSql
             Write-Host '  [WARN] create_mysql.sql had errors (may be OK if databases already exist).'
         }
     } else {
@@ -483,6 +578,7 @@ function Import-SqlIfPresent {
     Write-Host "  Importing $Label..."
     $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database $Database -SqlFile $SqlFile
     if ($imp.ExitCode -ne 0) {
+        Write-MysqlImportDiagnostics -Result $imp -SqlFile $SqlFile
         Write-Host "  [WARN] $(Split-Path -Leaf $SqlFile) had errors."
     }
 }
@@ -524,9 +620,13 @@ function Import-GameData {
     }
 
     $worldRows = Get-QueryCount -Sql 'SELECT COUNT(*) FROM world.version'
-    if ($worldRows -ne 0) {
+    $worldRequiredTables = Get-QueryCount -Sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'world' AND table_name IN ('version', 'waypoint_data', 'waypoint_scripts', 'world_safe_locs', 'world_state')"
+    if ($worldRows -ne 0 -and $worldRequiredTables -eq 5) {
         Write-Host "  World data already present ($worldRows rows in world.version) - skipping world import."
     } else {
+        if ($worldRows -ne 0) {
+            Write-Host '  [WARN] The existing world database appears incomplete; rebuilding it.'
+        }
         $dump = Get-OrDownloadDump -FileName $script:WorldDump -Sha256 $script:WorldDumpSha256 -Kind 'world'
 
         Write-Host "  Preparing a clean 'world' database..."
@@ -539,6 +639,10 @@ function Import-GameData {
         Write-Host "  Importing $($script:WorldDump) into the 'world' database (this can take several minutes)..."
         $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database 'world' -SqlFile $dump
         if ($imp.ExitCode -ne 0) {
+            Write-MysqlImportDiagnostics -Result $imp -SqlFile $dump
+            # Do not leave a partial database that a later run could mistake
+            # for a completed import merely because its version table exists.
+            [void](Invoke-Mysql -User 'root' -Password $script:DbRootPass -Sql "DROP DATABASE IF EXISTS world; CREATE DATABASE world DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;")
             Fail-Setup "Failed to import $($script:WorldDump) into the 'world' database."
         }
 
@@ -551,9 +655,13 @@ function Import-GameData {
     }
 
     $hotfixRows = Get-QueryCount -Sql 'SELECT COUNT(*) FROM hotfixes.achievement'
-    if ($hotfixRows -ne 0) {
+    $hotfixRequiredTables = Get-QueryCount -Sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'hotfixes' AND table_name IN ('achievement', 'world_state_expression')"
+    if ($hotfixRows -ne 0 -and $hotfixRequiredTables -eq 2) {
         Write-Host "  Hotfixes data already present ($hotfixRows rows in achievement) - skipping hotfixes import."
         return
+    }
+    if ($hotfixRows -ne 0) {
+        Write-Host '  [WARN] The existing hotfixes database appears incomplete; rebuilding it.'
     }
 
     $dump = Get-OrDownloadDump -FileName $script:HotfixesDump -Sha256 $script:HotfixesDumpSha256 -Kind 'hotfixes'
@@ -568,6 +676,9 @@ function Import-GameData {
     Write-Host "  Importing $($script:HotfixesDump) into the 'hotfixes' database (this can take a few minutes)..."
     $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database 'hotfixes' -SqlFile $dump
     if ($imp.ExitCode -ne 0) {
+        Write-MysqlImportDiagnostics -Result $imp -SqlFile $dump
+        # As with world, clear a partial import so retry detection is reliable.
+        [void](Invoke-Mysql -User 'root' -Password $script:DbRootPass -Sql "DROP DATABASE IF EXISTS hotfixes; CREATE DATABASE hotfixes DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;")
         Fail-Setup "Failed to import $($script:HotfixesDump) into the 'hotfixes' database."
     }
 
@@ -595,6 +706,7 @@ function Apply-Updates {
         foreach ($f in $files) {
             $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database $db -SqlFile $f.FullName
             if ($imp.ExitCode -ne 0) {
+                Write-MysqlImportDiagnostics -Result $imp -SqlFile $f.FullName
                 Write-Host "  [WARN] update $($f.Name) on $db had errors."
             }
         }
@@ -679,6 +791,7 @@ function Invoke-ContentSetup {
     Write-Host ''
     Write-Host '[5/7] Creating databases and user...'
     Write-Host ''
+    Set-MysqlImportLimits
     Ensure-Databases
     Write-Host '[OK] Databases created: auth, characters, world, hotfixes'
     Write-Host "[OK] User '$script:DbUser' created with password '$script:DbPass'"
