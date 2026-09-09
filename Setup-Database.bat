@@ -37,7 +37,7 @@ set "DB_ROOT_PASS=rootpassword"
 REM Check if already set up
 if exist "%MYSQLD%" (
     echo.
-    echo [INFO] MariaDB already exists at: %DB_DIR%
+    echo [INFO] MariaDB already exists at: !DB_DIR!
     echo.
     set /p REINSTALL="Reinstall? This will DELETE the existing database folder. (y/N): "
     if /i "!REINSTALL!"=="y" (
@@ -45,7 +45,7 @@ if exist "%MYSQLD%" (
         taskkill /f /im mysqld.exe >nul 2>&1
         timeout /t 2 /nobreak >nul
         echo Removing old database folder...
-        rmdir /s /q "%DB_DIR%" 2>nul
+        rmdir /s /q "!DB_DIR!" 2>nul
     ) else (
         echo.
         echo Skipping download. Checking if server is running...
@@ -84,19 +84,19 @@ echo.
 echo [2/7] Extracting MariaDB to database\ ...
 echo.
 
-mkdir "%DB_DIR%" 2>nul
+mkdir "!DB_DIR!" 2>nul
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "Expand-Archive -Path '%MARIADB_ZIP%' -DestinationPath '%ROOT%db-extract-tmp' -Force;"^
     "$inner = Get-ChildItem '%ROOT%db-extract-tmp' -Directory | Select-Object -First 1;"^
-    "if ($inner) { Copy-Item -Recurse -Force \"$($inner.FullName)\*\" '%DB_DIR%\' };"^
+    "if ($inner) { Copy-Item -Recurse -Force \"$($inner.FullName)\*\" '!DB_DIR!\' };"^
     "Remove-Item -Recurse -Force '%ROOT%db-extract-tmp' -ErrorAction SilentlyContinue;"^
     "Remove-Item -Force '%MARIADB_ZIP%' -ErrorAction SilentlyContinue;"^
     "Write-Host 'Extraction complete.'"
 
-if not exist "%MYSQLD%" (
+if not exist "!MYSQLD!" (
     echo [ERROR] mysqld.exe not found after extraction.
-    echo         Expected at: %MYSQLD%
+    echo         Expected at: !MYSQLD!
     goto :FAIL
 )
 
@@ -105,47 +105,45 @@ echo.
 echo [3/7] Initializing database...
 echo.
 
-REM Write a minimal my.ini
-(
-echo [mysqld]
-echo basedir="%DB_DIR:\=/%"
-echo datadir="%DB_DATA:\=/%"
-echo port=%PORT%
-echo bind-address=127.0.0.1
-echo default-storage-engine=innodb
-echo character-set-server=utf8mb4
-echo collation-server=utf8mb4_general_ci
-echo max_connections=200
-echo innodb_buffer_pool_size=256M
-echo innodb_log_file_size=48M
-echo skip-name-resolve
-echo.
-echo [client]
-echo port=%PORT%
-echo default-character-set=utf8mb4
-) > "%MY_INI%"
+REM Write a minimal my.ini (do not use a parenthesized block to avoid parse-time expansion issues)
+> "!MY_INI!" echo [mysqld]
+>> "!MY_INI!" echo basedir="!DB_DIR:\=/%!"
+>> "!MY_INI!" echo datadir="!DB_DATA:\=/%!"
+>> "!MY_INI!" echo port=!PORT!
+>> "!MY_INI!" echo bind-address=127.0.0.1
+>> "!MY_INI!" echo default-storage-engine=innodb
+>> "!MY_INI!" echo character-set-server=utf8mb4
+>> "!MY_INI!" echo collation-server=utf8mb4_general_ci
+>> "!MY_INI!" echo max_connections=200
+>> "!MY_INI!" echo innodb_buffer_pool_size=256M
+>> "!MY_INI!" echo innodb_log_file_size=48M
+>> "!MY_INI!" echo skip-name-resolve
+>> "!MY_INI!" echo.
+>> "!MY_INI!" echo [client]
+>> "!MY_INI!" echo port=!PORT!
+>> "!MY_INI!" echo default-character-set=utf8mb4
 
-if exist "%DB_DATA%" rmdir /s /q "%DB_DATA%" 2>nul
-mkdir "%DB_DATA%" 2>nul
+if exist "!DB_DATA!" rmdir /s /q "!DB_DATA!" 2>nul
+mkdir "!DB_DATA!" 2>nul
 
-set "INSTALL_DB=%DB_BIN%\mariadb-install-db.exe"
-if not exist "!INSTALL_DB!" set "INSTALL_DB=%DB_BIN%\mysql_install_db.exe"
+set "INSTALL_DB=!DB_BIN!\mariadb-install-db.exe"
+if not exist "!INSTALL_DB!" set "INSTALL_DB=!DB_BIN!\mysql_install_db.exe"
 if not exist "!INSTALL_DB!" (
     echo [ERROR] Database installer not found. Expected one of:
-    echo         %DB_BIN%\mariadb-install-db.exe
-    echo         %DB_BIN%\mysql_install_db.exe
+    echo         !DB_BIN!\mariadb-install-db.exe
+    echo         !DB_BIN!\mysql_install_db.exe
     echo         The MariaDB download may be incomplete. Delete the "database"
     echo         folder and run this script again.
     goto :FAIL
 )
 
 echo   Running mariadb-install-db.exe (this can take a minute)...
-"!INSTALL_DB!" --datadir="%DB_DATA%" --password="%DB_ROOT_PASS%" --port=%PORT%
+"!INSTALL_DB!" --datadir="!DB_DATA!" --password="!DB_ROOT_PASS!" --port=!PORT!
 if errorlevel 1 (
     echo [ERROR] Database initialization failed.
     goto :FAIL
 )
-if not exist "%DB_DATA%\mysql" (
+if not exist "!DB_DATA!\mysql" (
     echo [ERROR] Database initialization failed - system tables were not created.
     echo         Check the messages above. You may need to delete the "database"
     echo         folder and run this script again.
@@ -159,22 +157,22 @@ echo.
 echo [4/7] Starting MariaDB server...
 echo.
 
-start "" /B "%MYSQLD%" --defaults-file="%MY_INI%" --console 2>"%DB_DIR%\mysqld-error.log"
+start "" /B "!MYSQLD!" --defaults-file="!MY_INI!" --console 2>"!DB_DIR!\mysqld-error.log"
 
 REM Wait for the server to be ready
 set /a WAIT_COUNT=0
 :WAIT_LOOP
 timeout /t 1 /nobreak >nul
 set /a WAIT_COUNT+=1
-"%MYSQL%" -u root -p"%DB_ROOT_PASS%" -e "SELECT 1" >nul 2>&1
+"!MYSQL!" -u root -p"!DB_ROOT_PASS!" -e "SELECT 1" >nul 2>&1
 if errorlevel 1 (
-    if %WAIT_COUNT% LSS 30 goto :WAIT_LOOP
+    if !WAIT_COUNT! LSS 30 goto :WAIT_LOOP
     echo [ERROR] MariaDB did not start within 30 seconds.
-    echo         Check %DB_DIR%\mysqld-error.log for details.
+    echo         Check !DB_DIR!\mysqld-error.log for details.
     goto :FAIL
 )
 
-echo [OK] MariaDB is running on port %PORT%.
+echo [OK] MariaDB is running on port !PORT!.
 
 REM Step 5: Create databases
 echo.
@@ -184,22 +182,22 @@ echo.
 REM Root password was already set during initialization in Step 3.
 
 REM Create databases using the project's create script
-"%MYSQL%" -u root -p%DB_ROOT_PASS% < "%SQL_DIR%\create\create_mysql.sql"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! < "!SQL_DIR!\create\create_mysql.sql"
 if errorlevel 1 (
     echo [WARN] create_mysql.sql had errors (may be OK if databases already exist).
 )
 
 REM Create the trinity user with full access
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "CREATE USER IF NOT EXISTS '%DB_USER%'@'localhost' IDENTIFIED BY '%DB_PASS%';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "CREATE USER IF NOT EXISTS '%DB_USER%'@'127.0.0.1' IDENTIFIED BY '%DB_PASS%';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "GRANT ALL PRIVILEGES ON `auth`.* TO '%DB_USER%'@'localhost', '%DB_USER%'@'127.0.0.1';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "GRANT ALL PRIVILEGES ON `characters`.* TO '%DB_USER%'@'localhost', '%DB_USER%'@'127.0.0.1';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "GRANT ALL PRIVILEGES ON `world`.* TO '%DB_USER%'@'localhost', '%DB_USER%'@'127.0.0.1';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "GRANT ALL PRIVILEGES ON `hotfixes`.* TO '%DB_USER%'@'localhost', '%DB_USER%'@'127.0.0.1';"
-"%MYSQL%" -u root -p%DB_ROOT_PASS% -e "FLUSH PRIVILEGES;"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'localhost' IDENTIFIED BY '!DB_PASS!';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'127.0.0.1' IDENTIFIED BY '!DB_PASS!';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `auth`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `characters`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `world`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `hotfixes`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "FLUSH PRIVILEGES;"
 
 echo [OK] Databases created: auth, characters, world, hotfixes
-echo [OK] User '%DB_USER%' created with password '%DB_PASS%'
+echo [OK] User '!DB_USER!' created with password '!DB_PASS!'
 
 REM Step 6: Import SQL schemas
 echo.
@@ -208,39 +206,39 @@ echo.
 
 REM Base schemas
 echo   Importing auth database...
-"%MYSQL%" -u %DB_USER% -p%DB_PASS% auth < "%SQL_DIR%\base\auth_database.sql" 2>nul
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "!SQL_DIR!\base\auth_database.sql" 2>nul
 if errorlevel 1 echo   [WARN] auth_database.sql had errors.
 
 echo   Importing characters database...
-"%MYSQL%" -u %DB_USER% -p%DB_PASS% characters < "%SQL_DIR%\base\characters_database.sql" 2>nul
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\base\characters_database.sql" 2>nul
 if errorlevel 1 echo   [WARN] characters_database.sql had errors.
 
-if exist "%SQL_DIR%\base\hotfixes_database.sql" (
+if exist "!SQL_DIR!\base\hotfixes_database.sql" (
     echo   Importing hotfixes database...
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% hotfixes < "%SQL_DIR%\base\hotfixes_database.sql" 2>nul
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "!SQL_DIR!\base\hotfixes_database.sql" 2>nul
     if errorlevel 1 echo   [WARN] hotfixes_database.sql had errors.
 )
 
 REM Playerbot custom tables
-if exist "%SQL_DIR%\custom\playerbot\characters_playerbot.sql" (
+if exist "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" (
     echo   Importing playerbot tables...
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% characters < "%SQL_DIR%\custom\playerbot\characters_playerbot.sql" 2>nul
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" 2>nul
     if errorlevel 1 echo   [WARN] characters_playerbot.sql had errors.
 )
 
 REM Apply updates (sorted by filename for correct ordering)
 echo   Applying database updates...
-for /f "delims=" %%f in ('dir /b /s /a-d "%SQL_DIR%\updates\auth\*.sql" 2^>nul ^| sort') do (
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% auth < "%%f" 2>nul
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\auth\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "%SQL_DIR%\updates\characters\*.sql" 2^>nul ^| sort') do (
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% characters < "%%f" 2>nul
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\characters\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "%SQL_DIR%\updates\world\*.sql" 2^>nul ^| sort') do (
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% world < "%%f" 2>nul
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\world\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! world < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "%SQL_DIR%\updates\hotfixes\*.sql" 2^>nul ^| sort') do (
-    "%MYSQL%" -u %DB_USER% -p%DB_PASS% hotfixes < "%%f" 2>nul
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\hotfixes\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "%%f" 2>nul
 )
 
 echo [OK] SQL import complete.
@@ -251,37 +249,37 @@ echo [7/7] Configuring server files...
 echo.
 
 REM Copy .dist files to actual config files if they don't exist
-if not exist "%ETC_DIR%\worldserver.conf" (
-    if exist "%ETC_DIR%\worldserver.conf.dist" (
-        copy "%ETC_DIR%\worldserver.conf.dist" "%ETC_DIR%\worldserver.conf" >nul
+if not exist "!ETC_DIR!\worldserver.conf" (
+    if exist "!ETC_DIR!\worldserver.conf.dist" (
+        copy "!ETC_DIR!\worldserver.conf.dist" "!ETC_DIR!\worldserver.conf" >nul
         echo   Created etc\worldserver.conf from .dist template
     )
 )
-if not exist "%ETC_DIR%\bnetserver.conf" (
-    if exist "%ETC_DIR%\bnetserver.conf.dist" (
-        copy "%ETC_DIR%\bnetserver.conf.dist" "%ETC_DIR%\bnetserver.conf" >nul
+if not exist "!ETC_DIR!\bnetserver.conf" (
+    if exist "!ETC_DIR!\bnetserver.conf.dist" (
+        copy "!ETC_DIR!\bnetserver.conf.dist" "!ETC_DIR!\bnetserver.conf" >nul
         echo   Created etc\bnetserver.conf from .dist template
     )
 )
 
 REM Update worldserver.conf with correct database credentials
-if exist "%ETC_DIR%\worldserver.conf" (
+if exist "!ETC_DIR!\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\worldserver.conf';"^
+        "$f = '!ETC_DIR!\worldserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';"^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
+        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
+        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\worldserver.conf'"
 )
 
 REM Update bnetserver.conf with correct database credentials
-if exist "%ETC_DIR%\bnetserver.conf" (
+if exist "!ETC_DIR!\bnetserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\bnetserver.conf';"^
+        "$f = '!ETC_DIR!\bnetserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\bnetserver.conf'"
 )
@@ -294,11 +292,11 @@ echo ============================================================
 echo   Setup complete!
 echo ============================================================
 echo.
-echo   Database:    MariaDB 10.11 running on 127.0.0.1:%PORT%
-echo   User:        %DB_USER%
-echo   Password:    %DB_PASS%
+echo   Database:    MariaDB 10.11 running on 127.0.0.1:!PORT!
+echo   User:        !DB_USER!
+echo   Password:    !DB_PASS!
 echo   Databases:   auth, characters, world, hotfixes
-echo   Data dir:    %DB_DIR%\data
+echo   Data dir:    !DB_DIR!\data
 echo.
 echo   Server config files have been updated:
 echo     etc\worldserver.conf
@@ -317,19 +315,19 @@ goto :EOF
 
 :CHECK_RUNNING
 REM Check if MariaDB is already running
-"%MYSQL%" -u %DB_USER% -p%DB_PASS% -e "SELECT 1" >nul 2>&1
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
 if errorlevel 1 (
     echo MariaDB is not running. Starting it...
-    if exist "%MYSQLD%" (
-        start "" /B "%MYSQLD%" --defaults-file="%MY_INI%" --console 2>"%DB_DIR%\mysqld-error.log"
+    if exist "!MYSQLD!" (
+        start "" /B "!MYSQLD!" --defaults-file="!MY_INI!" --console 2>"!DB_DIR!\mysqld-error.log"
         set /a WAIT_COUNT=0
         :WAIT_LOOP2
         timeout /t 1 /nobreak >nul
         set /a WAIT_COUNT+=1
-        "%MYSQL%" -u %DB_USER% -p%DB_PASS% -e "SELECT 1" >nul 2>&1
+        "!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
         if errorlevel 1 (
             if !WAIT_COUNT! LSS 30 goto :WAIT_LOOP2
-            echo [ERROR] MariaDB did not start. Check %DB_DIR%\mysqld-error.log
+            echo [ERROR] MariaDB did not start. Check !DB_DIR!\mysqld-error.log
             goto :FAIL
         )
         echo [OK] MariaDB is running.
@@ -350,21 +348,21 @@ echo Updating configuration files...
 goto :STEP7_CONFIG
 
 :STEP7_CONFIG
-if exist "%ETC_DIR%\worldserver.conf" (
+if exist "!ETC_DIR!\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\worldserver.conf';"^
+        "$f = '!ETC_DIR!\worldserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';"^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
+        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
+        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\worldserver.conf'"
 )
-if exist "%ETC_DIR%\bnetserver.conf" (
+if exist "!ETC_DIR!\bnetserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\bnetserver.conf';"^
+        "$f = '!ETC_DIR!\bnetserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\bnetserver.conf'"
 )
@@ -382,7 +380,7 @@ echo ============================================================
 echo.
 echo Common fixes:
 echo   - Check your internet connection (download may have failed)
-echo   - Make sure port %PORT% is not in use by another MySQL instance
+echo   - Make sure port !PORT! is not in use by another MySQL instance
 echo   - Run this script as Administrator if you get permission errors
 echo   - Delete the "database" folder and try again
 echo.
