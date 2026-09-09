@@ -637,7 +637,11 @@ function Import-GameData {
         Ensure-Databases
 
         Write-Host "  Importing $($script:WorldDump) into the 'world' database (this can take several minutes)..."
-        $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database 'world' -SqlFile $dump
+        # Import as root: the WyrmrestCore game-data dump defines views with an
+        # explicit DEFINER=`root`@`localhost`. Creating an object with a definer
+        # other than yourself requires the SUPER / SET USER privilege, which the
+        # low-privilege 'trinity' account does not (and should not) have.
+        $imp = Invoke-MysqlImport -User 'root' -Password $script:DbRootPass -Database 'world' -SqlFile $dump
         if ($imp.ExitCode -ne 0) {
             Write-MysqlImportDiagnostics -Result $imp -SqlFile $dump
             # Do not leave a partial database that a later run could mistake
@@ -674,7 +678,10 @@ function Import-GameData {
     Ensure-Databases
 
     Write-Host "  Importing $($script:HotfixesDump) into the 'hotfixes' database (this can take a few minutes)..."
-    $imp = Invoke-MysqlImport -User $script:DbUser -Password $script:DbPass -Database 'hotfixes' -SqlFile $dump
+    # Import as root for the same reason as the world dump: the game-data dump
+    # declares objects with DEFINER=`root`@`localhost`, which 'trinity' lacks the
+    # privilege to create (see Import-GameData for the full explanation).
+    $imp = Invoke-MysqlImport -User 'root' -Password $script:DbRootPass -Database 'hotfixes' -SqlFile $dump
     if ($imp.ExitCode -ne 0) {
         Write-MysqlImportDiagnostics -Result $imp -SqlFile $dump
         # As with world, clear a partial import so retry detection is reliable.
