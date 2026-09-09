@@ -186,21 +186,36 @@ namespace
         }
     }
 
-    void PlayerbotChat(Player* sender, uint32 type, uint32 /*lang*/, std::string const& msg, Player* receiver)
+    void PlayerbotChat(Player* sender, uint32 type, uint32 lang, std::string const& msg, Player* receiver)
     {
         if (!sender)
             return;
 
+        // Addon protocol chatter (DBM/CTRA/GearScore-style version and data
+        // exchanges travel as whispers or party/raid messages with an addon
+        // language) is machine traffic, not player chat: it must never be
+        // parsed as bot commands. Without this every addon whisper makes each
+        // random bot in the world answer with a denial whisper.
+        if (lang == LANG_ADDON || lang == LANG_ADDON_LOGGED)
+            return;
+
         try
         {
-            // a whisper to one of our bots
-            if (receiver)
+            // Whispers are private: only the addressed bot may process one.
+            // Anything whispered to another real player is none of the bots'
+            // business - broadcasting it makes every bot in the world treat a
+            // private conversation as a command and whisper back a denial
+            // ("Invite me to your group first", "I'm kind of busy now", ...),
+            // including cross-faction bots whose server-side whispers bypass
+            // the two-side rules the core enforces for player chat.
+            if (type == CHAT_MSG_WHISPER)
             {
-                if (PlayerbotAI* ai = receiver->GetPlayerbotAI())
+                if (receiver)
                 {
-                    ai->HandleCommand(type, msg, *sender);
-                    return;
+                    if (PlayerbotAI* ai = receiver->GetPlayerbotAI())
+                        ai->HandleCommand(type, msg, *sender);
                 }
+                return;
             }
 
             // party/raid chat is broadcast to every bot the sender owns
@@ -227,7 +242,11 @@ namespace Playerbot
     {
         if (!sPlayerbotAIConfig.Initialize())
         {
-            TC_LOG_INFO("playerbot", "Playerbots are disabled");
+            // Warn, not info: a silent bot system with no ai_playerbot_* tables
+            // and no random bots is almost never what the operator wants, and
+            // an INFO line is invisible when loggers filter it out. The config
+            // loader above already logged which key/file disabled the system.
+            TC_LOG_WARN("playerbot", "Playerbots are disabled (AiPlayerbot.Enabled is off or the bot configuration is invalid) - no bot tables will be created and no bots will appear");
             return;
         }
 

@@ -188,8 +188,16 @@ BanExpiryCheckInterval = 60
 
 #
 #    SourceDirectory
-#        Description: The path to your TrinityCore source directory.
-#                     If the path is left empty, the built-in CMAKE_SOURCE_DIR is used.
+#        Description: The path to your TrinityCore source directory (the folder containing
+#                     the sql directory with sql/updates and sql/base in it).
+#                     If the path is left empty, the built-in CMAKE_SOURCE_DIR is used, and if
+#                     that is unusable the server looks for an sql/updates folder next to the
+#                     working directory and the config file (repack layout) automatically.
+#                     If no source directory can be found at all, automatic updates are skipped
+#                     with a warning for databases that have no update include directories
+#                     configured, and startup fails for databases that do (set this option or
+#                     ship the sql folder, or set Updates.EnableDatabases to 0 to manage the
+#                     schema manually).
 #        Example:     "../TrinityCore"
 #        Default:     ""
 
@@ -197,9 +205,14 @@ SourceDirectory  = ""
 
 #
 #    MySQLExecutable
-#        Description: The path to your MySQL CLI binary.
-#                     If the path is left empty, built-in path from cmake is used.
-#        Example:     "C:/Program Files/MySQL/MySQL Server 5.6/bin/mysql.exe"
+#        Description: The path to your MySQL/MariaDB CLI binary.
+#                     A directory containing the binary (e.g. ".../bin") is also accepted and
+#                     will be resolved to mysql(.exe) or mariadb(.exe) inside it.
+#                     If the path is left empty, the built-in path from cmake is used, falling
+#                     back to searching for the mysql/mariadb client in PATH.
+#        Example:     "C:/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe"
+#                     "C:/Program Files/MariaDB/bin/mysql.exe"
+#                     "C:/Program Files/MariaDB/bin"
 #                     "mysql.exe"
 #                     "/usr/bin/mysql"
 #        Default:     ""

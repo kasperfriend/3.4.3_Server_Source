@@ -69,6 +69,18 @@ namespace ai
 
         virtual bool Execute(Event event)
         {
+            // Stopping the swing is mandatory: Unit::Attack (sent by
+            // AttackAction) starts the client's attack animation and the
+            // server-side victim, and merely forgetting the target value
+            // leaves both running - the bot stands frozen mid-swing forever
+            // while dealing no damage. AttackStop is a safe no-op when idle.
+            bot->AttackStop();
+            if (Pet* pet = bot->GetPet())
+            {
+                pet->AttackStop();
+                if (pet->GetCharmInfo())
+                    pet->GetCharmInfo()->SetIsCommandAttack(false);
+            }
             context->GetValue<Unit*>("current target")->Set(NULL);
             bot->SetSelection(ObjectGuid());
             ai->ChangeEngine(BOT_STATE_NON_COMBAT);

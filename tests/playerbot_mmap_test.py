@@ -37,7 +37,6 @@ namespace TestLog { inline std::vector<std::string> messages; }
         sources = ["src/common/Collision/Management/MMapManager.cpp"]
         sources.extend(str(p.relative_to(ROOT)) for p in sorted((ROOT / "dep/recastnavigation/Detour/Source").glob("*.cpp")))
         text = Path(__file__).with_name("mmap_loader_test.cpp.in").read_text()
-        text = text.replace("@TELEPORT_NAV@", function(MANAGER, "static bool HasBotTeleportNavigation("))
         text = text.replace("@TILE_CACHE@", function("src/tools/mmaps_generator/MapBuilder.cpp", "bool TileBuilder::shouldSkipTile("))
         run_cpp(self, text, sources=sources,
                 includes=["src/common", "src/common/Utilities", "src/common/Collision/Management", "src/common/Collision/Maps",

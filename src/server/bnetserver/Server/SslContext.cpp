@@ -86,7 +86,7 @@ bool Battlenet::SslContext::Initialize()
     if (!store)
     {
         err = GetLastOpenSSLError();
-        TC_LOG_ERROR("server.ssl", "OSSL_STORE_open failed: {}", err.message());
+        TC_LOG_ERROR("server.ssl", "OSSL_STORE_open failed for certificate file \"{}\": {}", certificateChainFile, err.message());
         return false;
     }
 
@@ -122,7 +122,12 @@ bool Battlenet::SslContext::Initialize()
     if (!key)
     {
         std::string privateKeyFile = sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem");
-        LOAD_CHECK(instance().use_private_key_file(privateKeyFile, boost::asio::ssl::context::pem, err));
+        instance().use_private_key_file(privateKeyFile, boost::asio::ssl::context::pem, err);
+        if (err)
+        {
+            TC_LOG_ERROR("server.ssl", "Failed to load private key file \"{}\": {}", privateKeyFile, err.message());
+            return false;
+        }
     }
 
 #undef LOAD_CHECK

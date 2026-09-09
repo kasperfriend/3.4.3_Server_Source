@@ -261,7 +261,12 @@ void WorldSession::SendPacket(WorldPacket const* packet, bool forced /*= false*/
 
     if (!m_Socket[conIdx] && !_isBotSession)
     {
-        TC_LOG_ERROR("network.opcode", "Prevented sending of {} to non existent socket {} to {}", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
+        // During server shutdown sockets are torn down while sessions flush their final
+        // packets - a missing socket is expected there, not an error worth reporting.
+        if (sWorld->IsStopped())
+            TC_LOG_DEBUG("network.opcode", "Prevented sending of {} to non existent socket {} to {} (server shutting down)", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
+        else
+            TC_LOG_ERROR("network.opcode", "Prevented sending of {} to non existent socket {} to {}", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
         return;
     }
 
@@ -852,6 +857,13 @@ void WorldSession::Handle_EarlyProccess(WorldPackets::Null& null)
 {
     TC_LOG_ERROR("network.opcode", "Received opcode {} that must be processed in WorldSocket::ReadDataHandler from {}"
         , GetOpcodeNameForLogging(null.GetOpcode()), GetPlayerInfo());
+}
+
+void WorldSession::Handle_IgnoredOpcode(WorldPackets::Null& null)
+{
+    // Client message the server deliberately does not act on (see per-opcode comments in
+    // Opcodes.cpp). Debug level: expected traffic, not a missing feature worth an ERROR.
+    TC_LOG_DEBUG("network.opcode", "Received intentionally ignored opcode {} from {}", GetOpcodeNameForLogging(null.GetOpcode()), GetPlayerInfo());
 }
 
 void WorldSession::SendConnectToInstance(WorldPackets::Auth::ConnectToSerial serial)

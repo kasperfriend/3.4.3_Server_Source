@@ -271,6 +271,11 @@ static string RandomBotAccountPattern(string const& prefix)
 
 void RandomPlayerbotFactory::CreateRandomBots()
 {
+    // This runs at startup and can re-run later (creation retry, "rndbot init"):
+    // rebuild the account list from scratch so repeated runs do not accumulate
+    // duplicate entries (every extra entry costs character queries each tick).
+    sPlayerbotAIConfig.randomBotAccounts.clear();
+
     string accountPattern = RandomBotAccountPattern(sPlayerbotAIConfig.randomBotAccountPrefix);
     if (sPlayerbotAIConfig.deleteRandomBotAccounts)
     {
@@ -312,7 +317,14 @@ void RandomPlayerbotFactory::CreateRandomBots()
     LoginDatabase.PExecute("UPDATE account SET expansion = '{}' where username LIKE '{}' ESCAPE '='", 2, accountPattern);
 
     int totalRandomBotChars = 0;
-    bool stopCreating = false;
+    // A single failure (one invalid name row, one rejected appearance) must not
+    // abort creation for every account, but a genuinely exhausted name pool must
+    // not spam failures either: retry each slot with a fresh random pick and stop
+    // only after sustained consecutive failures. Existing characters on later
+    // accounts are still registered either way.
+    int const maxSlotAttempts = 3;
+    int const maxConsecutiveFailures = 10;
+    int consecutiveFailures = 0;
     for (int accountNumber = 0; accountNumber < sPlayerbotAIConfig.randomBotAccountCount; ++accountNumber)
     {
         ostringstream out; out << sPlayerbotAIConfig.randomBotAccountPrefix << accountNumber;
@@ -328,7 +340,7 @@ void RandomPlayerbotFactory::CreateRandomBots()
         sPlayerbotAIConfig.randomBotAccounts.push_back(accountId);
 
         int count = sAccountMgr->GetCharactersCount(accountId);
-        if (count >= 10 || stopCreating)
+        if (count >= 10 || consecutiveFailures >= maxConsecutiveFailures)
         {
             totalRandomBotChars += count;
             continue;
@@ -336,29 +348,42 @@ void RandomPlayerbotFactory::CreateRandomBots()
 
         RandomPlayerbotFactory factory(accountId);
 
-        bool creationFailed = false;
         for (uint8 cls = CLASS_WARRIOR; cls <= CLASS_DRUID && count < 10; ++cls)
         {
             if (cls == CLASS_MONK || cls == CLASS_DEATH_KNIGHT)
                 continue;
 
-            if (!factory.CreateRandomBot(cls))
+            bool created = false;
+            for (int attempt = 0; attempt < maxSlotAttempts && consecutiveFailures < maxConsecutiveFailures; ++attempt)
             {
-                // Stop this creation pass on exhausted names or invalid creation
-                // data instead of repeating the same failure for every account.
-                creationFailed = true;
-                break;
+                if (factory.CreateRandomBot(cls))
+                {
+                    created = true;
+                    consecutiveFailures = 0;
+                    break;
+                }
+                ++consecutiveFailures;
             }
+            if (!created)
+                continue;
+
             ++count;
         }
 
         totalRandomBotChars += sAccountMgr->GetCharactersCount(accountId);
-
-        if (creationFailed)
-            stopCreating = true; // still register existing characters on later accounts
     }
 
-    TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
+    // Zero accounts or zero characters means no random bot can ever log in -
+    // say so loudly instead of burying it in an INFO line: the usual causes
+    // are an exhausted ai_playerbot_names pool ("No more names left" above),
+    // rejected character creation ("Unable to create random bot" above), or
+    // account creation failures in the login database.
+    if (sPlayerbotAIConfig.randomBotAccounts.empty() || !totalRandomBotChars)
+        TC_LOG_ERROR("playerbot", "Only {} random bot accounts with {} characters available - no random bots can appear in game. "
+            "Check the errors above, the ai_playerbot_names name pool, and that AiPlayerbot.RandomBotAccountCount characters could be created.",
+            sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
+    else
+        TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
 }
 
 

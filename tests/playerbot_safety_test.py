@@ -78,7 +78,11 @@ class PlayerbotSafetyTest(unittest.TestCase):
             "STOCK": source_slice(FACTORY, "    uint32 count = 1, stacks = 1;", "void PlayerbotFactory::InitInventoryEquip()"),
             "ACCOUNT_PATTERN": function("src/plugins/playerbot/RandomPlayerbotFactory.cpp", "static string RandomBotAccountPattern"),
             "RACE_SETUP": function("src/plugins/playerbot/RandomPlayerbotFactory.cpp", "RandomPlayerbotFactory::RandomPlayerbotFactory("),
-            "CLASS_LOOP": function("src/plugins/playerbot/RandomPlayerbotFactory.cpp", "        for (uint8 cls = CLASS_WARRIOR;"),
+            "CLASS_LOOP": (
+                # The retry budget is declared outside the class loop; extract it verbatim
+                # too so the harness compiles the real tuning, not a stale copy.
+                source_slice("src/plugins/playerbot/RandomPlayerbotFactory.cpp", "    int const maxSlotAttempts = 3;", "    for (int accountNumber = 0;")
+                + function("src/plugins/playerbot/RandomPlayerbotFactory.cpp", "        for (uint8 cls = CLASS_WARRIOR;")),
             "SPELL_DEPENDENCIES": function("src/server/game/Spells/SpellMgr.cpp", "static bool WouldCreateSpellRequirementCycle"),
             "RANDOM_TRIGGER": function("src/plugins/playerbot/strategy/triggers/GenericTriggers.cpp", "bool RandomTrigger::IsActive()"),
         }
