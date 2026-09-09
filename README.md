@@ -199,3 +199,47 @@ whichever directory worldserver is started: a relative `DataDir`, `LogsDir`,
 directory, the directory of the executable and the directory of the config file,
 and a missing log directory is created.  When nothing matches, the server names the
 paths it searched instead of reporting a few thousand unreadable files.
+
+## The release-zip workflow, end to end
+
+The Windows release artifact is meant to be usable without building anything:
+
+1. unzip, double-click `Setup-Database.bat`.  It downloads a portable MariaDB into
+   `database\`, creates `auth`, `characters`, `world` and `hotfixes`, downloads the
+   world and hotfixes dumps (SHA-256 verified), applies `sql\updates`, writes
+   `etc\worldserver.conf` and `etc\bnetserver.conf` with the database credentials
+   filled in, and seeds the realm row in `auth.realmlist` that `sql\base` does not
+   ship (without it bnetserver hands out an empty realm list and the login stops
+   after the password).  The database stays running.
+2. extract the client data once: `Extract-ClientData.bat "C:\World of Warcraft"`,
+   or copy an existing `dbc`, `maps`, `vmaps`, `mmaps` set into `bin\`.  This step is
+   required, not optional: `worldserver.exe` needs `dbc` (the DB2 stores) and
+   `vmaps\gameobjects.raw` and exits when they are missing - it now says which
+   directory it resolved them from instead of failing on a bare file name.
+3. `start-bnetserver.bat`, then `start-worldserver.bat`.  Both `cd` into `bin\` and
+   start the portable MariaDB first if nothing is listening (a reboot stops it),
+   so the only prerequisite is step 1 and 2.
+4. in the worldserver window: `bnetaccount create you@example.com yourpassword`,
+   then `account set seclevel <the game account name it prints> 2`.  Battle.net
+   accounts are named by e-mail address, hence the `@`.
+
+Where things have to be, and what checks them:
+
+* `etc\*.conf` is the only configuration the servers read; `ConfigMgr` searches the
+  working directory, the executable directory and `..\etc`, and `Trinity::DataPaths`
+  (`src/common/Utilities/DataPaths.h`) resolves every other relative path
+  (`DataDir`, `LogsDir`, `IPLocationFile`, `CertificatesFile`, `PrivateKeyFile`)
+  through the same list, creates a missing `LogsDir`, and names the paths it tried
+  when nothing matches.  A missing log file or packet log is reported once, on
+  stderr, because the appenders exist before any logger does.
+* `bin\` must keep `worldserver.exe`, `bnetserver.exe`, all `.dll` files (including
+  `openssl_ed25519.dll` and `libmysql.dll`, both loaded from the executable
+  directory) and `bnetserver.cert.pem`/`bnetserver.key.pem`.  The release job fails
+  if any of those is not in the package.
+* the client build is 3.4.3.54261; `auth.build_info` has to carry a row for it
+  (`sql\updates/auth/3.4.3/2026_08_10_00_auth.sql`, re-seeded by the setup script if
+  absent), otherwise every login is refused with `ERROR_BAD_VERSION`.
+* if the client logs in but the realm never connects, the realm name it was handed
+  is `Region-Battlegroup-RealmID` (`1-1-1` for the seeded row) and it resolves that
+  itself: add `127.0.0.1  1-1-1` to `C:\Windows\System32\drivers\etc\hosts`, or put
+  the real address of the machine in `auth.realmlist.address` for LAN play.

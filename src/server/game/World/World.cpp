@@ -1799,7 +1799,8 @@ void World::SetInitialWorldSettings()
     TC_LOG_INFO("server.loading", "Loading GameObject models...");
     if (!LoadGameObjectModelList(m_dataPath))
     {
-        TC_LOG_FATAL("server.loading", "Unable to load gameobject models (part of vmaps), objects using WMO models will crash the client - server shutting down!");
+        TC_LOG_FATAL("server.loading", "Unable to load gameobject models ({}vmaps/), objects using WMO models will crash the client - server shutting down! The extracted client data is required, and it has to sit in DataDir (\"{}\") - run the client data extraction or correct DataDir in {}.",
+            m_dataPath, m_dataPath, sConfigMgr->GetFilename());
         exit(1);
     }
 
@@ -1808,7 +1809,7 @@ void World::SetInitialWorldSettings()
     m_availableDbcLocaleMask = sDB2Manager.LoadStores(m_dataPath, m_defaultDbcLocale);
     if (!(m_availableDbcLocaleMask & (1 << m_defaultDbcLocale)))
     {
-        TC_LOG_FATAL("server.loading", "Unable to load db2 files for {} locale specified in DBC.Locale config!", localeNames[m_defaultDbcLocale]);
+        TC_LOG_FATAL("server.loading", "Unable to load db2 files for {} locale specified in DBC.Locale config (no usable dbc directory below DataDir \"{}\")!", localeNames[m_defaultDbcLocale], m_dataPath);
         exit(1);
     }
 

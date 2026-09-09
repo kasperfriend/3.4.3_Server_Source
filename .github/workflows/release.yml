@@ -346,6 +346,19 @@ jobs:
             Write-Host "Copying MySQL DLL from vcpkg"
             Copy-Item $vcpkg_mysql "$BINDIR\" -Force
           }
+          # If the servers were linked against the shared client library, a package
+          # without it is a package whose worldserver.exe will not even start:
+          #   The code execution cannot proceed because libmysql.dll was not found
+          # which is the same dead end the ed25519 DLL above produces, so fail the
+          # release instead of publishing it. A static MySQL link is fine without it.
+          $cache = Join-Path $env:GITHUB_WORKSPACE "build\CMakeCache.txt"
+          if ((-not (Test-Path "$BINDIR\libmysql.dll")) -and (Test-Path $cache)) {
+            if ((Get-Content $cache -Raw) -match "(?m)^MYSQL_LIBRARY:FILEPATH=.*libmysql") {
+              Write-Host "::error::the servers link against the shared libmysql, but bin\libmysql.dll is missing - no MySQL Server installation could be found to copy it from"
+              exit 1
+            }
+            Write-Host "  libmysql.dll not in bin\ (MYSQL_LIBRARY is not the shared client library, so that is fine)"
+          }
 
           # --- MSVC Runtime DLLs ---
           # Deploy the VC++ redistributable DLLs next to the executables
@@ -391,6 +404,21 @@ jobs:
           }
 
           # --- Launcher batch files ---
+          # Setup-Database.bat leaves the portable MariaDB running, but a reboot
+          # stops it, and the servers then sit in their reconnect loop with only a
+          # "Can't connect to MySQL server" line to explain it. Both launchers
+          # therefore make sure the database is up before starting the server.
+          $ensureDb = @(
+            'rem The servers need MariaDB on 127.0.0.1:3306; start the portable',
+            'rem instance that Setup-Database.bat installed when nothing is running.',
+            'tasklist /FI "IMAGENAME eq mysqld.exe" 2>nul | find /i "mysqld.exe" >nul',
+            'if not errorlevel 1 goto dbready',
+            'if not exist "%~dp0Start-Database.ps1" goto dbready',
+            'echo [INFO] MariaDB is not running - starting the portable instance ...',
+            'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start-Database.ps1" -NonInteractive',
+            ':dbready'
+          ) -join "`r`n"
+
           @"
           @echo off
           title TrinityCore 3.4.3 World Server
@@ -405,6 +433,7 @@ jobs:
           echo Starting worldserver...
           echo.
           cd /d "%~dp0bin"
+          $ensureDb
           rem Both executables import openssl_ed25519.dll (dep/openssl_ed25519 is the
           rem one dependency that is always built as a shared library) and Windows
           rem refuses to start them without it.
@@ -430,6 +459,7 @@ jobs:
           echo Starting bnetserver...
           echo.
           cd /d "%~dp0bin"
+          $ensureDb
           if exist bnetserver.cert.pem if exist bnetserver.key.pem goto start
           rem GenerateSelfSignedCertificate lets bnetserver create the files itself,
           rem so the check below only applies when it is off (the default).
@@ -495,8 +525,8 @@ jobs:
 
           echo.
           echo Done.  bin\ should now hold dbc, maps, Cameras, vmaps and mmaps.
-          echo Keep them there, or set DataDir in bin\worldserver.conf to the
-          echo directory holding them.
+          echo Keep them there, or set DataDir in etc\worldserver.conf to the
+          echo directory that holds them.
           pause
           "@ | Set-Content "$DEST\Extract-ClientData.bat" -Encoding ASCII
 
@@ -505,17 +535,56 @@ jobs:
           TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
           =======================================================
 
-          QUICK START:
+          QUICK START - four steps, in this order:
             1. Double-click Setup-Database.bat
-               (downloads portable MariaDB, creates the databases, and downloads
-               + checksum-verifies + imports the world & hotfixes game data)
-            2. Extract the client data (see below, takes a while)
-            3. Double-click start-worldserver.bat
-               (start-bnetserver.bat starts the Battle.net login server)
+               Downloads a portable MariaDB into database\, creates auth,
+               characters, world and hotfixes, downloads + checksum-verifies +
+               imports the world and hotfixes game data, applies sql\updates,
+               seeds the realm row in auth.realmlist and writes
+               etc\worldserver.conf and etc\bnetserver.conf with the database
+               credentials already filled in.  It leaves the database running.
+            2. Extract the client data (see "Client data" below; a one-time,
+               slow step).  This is not optional: worldserver exits when the
+               dbc or vmaps directory it resolved from DataDir is missing, and
+               says which directory that was.  If you already have dbc, maps,
+               vmaps and mmaps folders from another server, copy them into
+               bin\ instead of extracting again.
+            3. Double-click start-bnetserver.bat, then start-worldserver.bat,
+               and keep both windows open.  Each launcher starts the portable
+               MariaDB first if nothing is running (for instance after a
+               reboot), then runs its server from bin\.
+            4. In the worldserver window, type:
+                 bnetaccount create you@example.com yourpassword
+               The login name has to contain an @ - Battle.net accounts are
+               addressed by e-mail.  It prints the game account name it created
+               alongside; to make yourself a GM, type
+                 account set seclevel <that game account name> 2
+               Then start a WoW 3.4.3.54261 client pointed at this machine and
+               log in: bnetserver answers on 1119, the REST login on 8081, the
+               realm itself on 8085.
+
+          Client data, in short:
+            Extract-ClientData.bat "C:\path\to\WoW"
+            It runs the four tools from inside bin\, which is where their output
+            has to land; mapextractor takes -i for the client, vmap4extractor -d,
+            vmap4assembler takes Buildings and vmaps as plain arguments and
+            mmaps_generator takes no client at all - it reads .\vmaps and writes
+            .\mmaps, both relative to the current directory.  Relative settings
+            such as DataDir, LogsDir and the certificate files are looked for in
+            the working directory, next to the executable and next to the .conf,
+            so bin\ is the one place that always works.
+
+          If the login screen accepts the password but the realm never connects:
+            the realm list hands the client a realm name built from
+            Region-Battlegroup-RealmID of the auth.realmlist row (1-1-1 for the
+            row Setup-Database.bat seeds), and the client resolves that name
+            itself.  Add "127.0.0.1  1-1-1" to
+            C:\Windows\System32\drivers\etc\hosts when it does not resolve,
+            or put the real address of this machine in auth.realmlist.address.
 
           Database scripts:
             Setup-Database.bat   - First-time setup (MariaDB + all game data)
-            Start-Database.bat   - Start the database (run before worldserver)
+            Start-Database.bat   - Start the database (the launchers do this too)
             Stop-Database.bat    - Stop the database
             *.ps1                - Keep these next to the .bat files; do not delete them
 
@@ -525,24 +594,16 @@ jobs:
 
           Contents:
             bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
-                            and bnetserver.cert.pem + bnetserver.key.pem.  The two
-                            .pem files must stay in bin\ next to bnetserver.exe: it
-                            refuses to start without them ("Failed to initialize
-                            SSL context").  Everything else in bin\ has to stay
-                            there too - both .exe files load openssl_ed25519.dll from
-                            their own directory and Windows refuses to start them
-                            without it.
+                            and bnetserver.cert.pem + bnetserver.key.pem.  Keep the
+                            .pem files here: without a certificate bnetserver
+                            refuses to start ("Failed to initialize SSL context").
+                            The .dll files have to stay here too - both .exe files
+                            load openssl_ed25519.dll and libmysql.dll from their own
+                            directory, and Windows refuses to start them without it.
+                            Client data, when extracted, lands here as well.
             sql\          - database schemas (base, create, custom, updates)
             etc\          - configuration files (auto-configured by Setup-Database.bat)
             docs\         - Playerbots.md documentation
-
-          Client data extraction (one-time):
-            Extract-ClientData.bat "C:\path\to\WoW"
-            (it runs the four tools from inside bin\, which is where their output
-             has to land; mapextractor takes -i for the client, vmap4extractor -d,
-             vmap4assembler takes Buildings and vmaps as plain arguments and
-             mmaps_generator takes no client at all - it reads .\vmaps and writes
-             .\mmaps, both relative to the current directory)
 
           For AI Playerbot documentation, see docs\Playerbots.md
           "@ | Set-Content "$DEST\WINDOWS-README.txt" -Encoding ASCII

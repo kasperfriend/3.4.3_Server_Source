@@ -567,7 +567,21 @@ uint32 DB2Manager::LoadStores(std::string const& dataPath, LocaleConstant defaul
     std::bitset<TOTAL_LOCALES> availableDb2Locales = [&]()
     {
         std::bitset<TOTAL_LOCALES> foundLocales;
-        boost::filesystem::directory_iterator db2PathItr(db2Path), end;
+
+        boost::system::error_code ec;
+        boost::filesystem::directory_iterator db2PathItr(db2Path, ec), end;
+        if (ec)
+        {
+            // The throwing overload used to abort worldserver inside "Initialize
+            // data stores..." with a boost::filesystem exception, which does not
+            // reach the log at all and does not mention where it had looked. The
+            // caller reports the fatal "unable to load db2 files" instead, and this
+            // names the actual reason: the directory, not one file, is missing.
+            TC_LOG_ERROR("server.loading", "Could not read the DB2 data directory \"{}\" ({}) - that is the dbc folder inside DataDir (\"{}\"), which the client data extraction writes. DataDir is set in worldserver.conf.",
+                db2Path, ec.message(), dataPath);
+            return foundLocales;
+        }
+
         while (db2PathItr != end)
         {
             LocaleConstant locale = GetLocaleByName(db2PathItr->path().filename().string());
