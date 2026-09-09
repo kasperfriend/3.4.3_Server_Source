@@ -261,7 +261,12 @@ void WorldSession::SendPacket(WorldPacket const* packet, bool forced /*= false*/
 
     if (!m_Socket[conIdx] && !_isBotSession)
     {
-        TC_LOG_ERROR("network.opcode", "Prevented sending of {} to non existent socket {} to {}", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
+        // During server shutdown sockets are torn down while sessions flush their final
+        // packets - a missing socket is expected there, not an error worth reporting.
+        if (sWorld->IsStopped())
+            TC_LOG_DEBUG("network.opcode", "Prevented sending of {} to non existent socket {} to {} (server shutting down)", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
+        else
+            TC_LOG_ERROR("network.opcode", "Prevented sending of {} to non existent socket {} to {}", GetOpcodeNameForLogging(static_cast<OpcodeServer>(packet->GetOpcode())), uint32(conIdx), GetPlayerInfo());
         return;
     }
 
