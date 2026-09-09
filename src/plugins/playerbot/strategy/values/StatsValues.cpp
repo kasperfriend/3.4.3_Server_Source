@@ -9,6 +9,8 @@ uint8 HealthValue::Calculate()
     Unit* target = GetTarget();
     if (!target)
         return 100;
+    if (!target->GetMaxHealth())
+        return 0;
     return (static_cast<float> (target->GetHealth()) / target->GetMaxHealth()) * 100;
 }
 
@@ -42,6 +44,12 @@ uint8 ManaValue::Calculate()
     Unit* target = GetTarget();
     if (!target)
         return 100;
+    // Classes without mana (warrior, rogue, death knight, ...) have zero max
+    // mana: 0/0 is NaN and converting it to uint8 is undefined behavior. They
+    // count as having no mana, which is what every mana gate ("!mana || ...")
+    // already expects.
+    if (!target->GetMaxPower(POWER_MANA))
+        return 0;
     return (static_cast<float> (target->GetPower(POWER_MANA)) / target->GetMaxPower(POWER_MANA)) * 100;
 }
 

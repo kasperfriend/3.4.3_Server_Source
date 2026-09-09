@@ -51,6 +51,53 @@
 #define MIN_MARIADB_CLIENT_VERSION 30003u
 #define MIN_MARIADB_CLIENT_VERSION_STRING "3.0.3"
 
+namespace
+{
+    /// Parses a MySQL/MariaDB server version string ("8.0.46", "5.7.44-log",
+    /// "10.4.32-MariaDB", "5.5.5-10.11.19-MariaDB") into a numeric id of the
+    /// form major * 10000 + minor * 100 + patch, like mysql_get_server_version().
+    /// MariaDB prefixes its version string with "5.5.5-" for compatibility with
+    /// old MySQL clients, which mysql_get_server_version() misparses as 50505 -
+    /// the prefix is skipped here so the real server version is compared.
+    uint32 ParseServerVersionId(std::string_view versionString)
+    {
+        constexpr std::string_view MariaDbCompatPrefix = "5.5.5-";
+        if (versionString.compare(0, MariaDbCompatPrefix.size(), MariaDbCompatPrefix) == 0)
+            versionString.remove_prefix(MariaDbCompatPrefix.size());
+
+        uint32 parts[3] = { 0, 0, 0 };
+        std::string_view::size_type pos = 0;
+        for (uint32& part : parts)
+        {
+            uint32 value = 0;
+            bool hasDigits = false;
+            while (pos < versionString.size() && versionString[pos] >= '0' && versionString[pos] <= '9')
+            {
+                value = value * 10 + static_cast<uint32>(versionString[pos] - '0');
+                ++pos;
+                hasDigits = true;
+            }
+
+            if (!hasDigits)
+                break;
+
+            part = value;
+
+            if (pos >= versionString.size() || versionString[pos] != '.')
+                break;
+
+            ++pos;
+        }
+
+        return parts[0] * 10000 + parts[1] * 100 + parts[2];
+    }
+
+    bool IsMariaDBServer(std::string_view versionString)
+    {
+        return versionString.find("MariaDB") != std::string_view::npos;
+    }
+}
+
 template<typename T>
 struct DatabaseWorkerPool<T>::QueueSizeTracker
 {
@@ -442,22 +489,29 @@ uint32 DatabaseWorkerPool<T>::OpenConnections(InternalIndex type, uint8 numConne
             _connections[type].clear();
             return error;
         }
-#ifndef LIBMARIADB
-        else if (connection->GetServerVersion() < MIN_MYSQL_SERVER_VERSION)
-#else
-        else if (connection->GetServerVersion() < MIN_MARIADB_SERVER_VERSION)
-#endif
-        {
-#ifndef LIBMARIADB
-            TC_LOG_ERROR("sql.driver", "TrinityCore does not support MySQL versions below " MIN_MYSQL_SERVER_VERSION_STRING " (found id {}, need id >= {}), please update your MySQL server", connection->GetServerVersion(), MIN_MYSQL_SERVER_VERSION);
-#else
-            TC_LOG_ERROR("sql.driver", "TrinityCore does not support MariaDB versions below " MIN_MARIADB_SERVER_VERSION_STRING " (found id {}, need id >= {}), please update your MySQL server", connection->GetServerVersion(), MIN_MARIADB_SERVER_VERSION);
-#endif
-
-            return 1;
-        }
         else
         {
+            // Detect the server flavor at runtime from its version string instead
+            // of relying on which client library this was built with: a MySQL-linked
+            // build talking to MariaDB (or vice versa) must check against the right
+            // minimum. mysql_get_server_version() cannot be used here - MariaDB's
+            // "5.5.5-..." compatibility prefix misparses as version 50505.
+            std::string serverInfo = connection->GetServerInfo();
+            bool const isMariaDB = IsMariaDBServer(serverInfo);
+            uint32 const serverVersion = ParseServerVersionId(serverInfo);
+            uint32 const minVersion = isMariaDB ? MIN_MARIADB_SERVER_VERSION : MIN_MYSQL_SERVER_VERSION;
+
+            if (serverVersion < minVersion)
+            {
+                TC_LOG_ERROR("sql.driver", "TrinityCore does not support {} versions below {} (found id {}, need id >= {}), please update your {} server",
+                    isMariaDB ? "MariaDB" : "MySQL",
+                    isMariaDB ? MIN_MARIADB_SERVER_VERSION_STRING : MIN_MYSQL_SERVER_VERSION_STRING,
+                    serverVersion, minVersion,
+                    isMariaDB ? "MariaDB" : "MySQL");
+
+                return 1;
+            }
+
             _connections[type].push_back(std::move(connection));
         }
     }

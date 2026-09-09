@@ -277,6 +277,10 @@ jobs:
           Copy-Item -Recurse -Force "sql\create"  "$DEST\sql\" -ErrorAction SilentlyContinue
           Copy-Item -Recurse -Force "sql\custom"  "$DEST\sql\" -ErrorAction SilentlyContinue
           Copy-Item -Recurse -Force "sql\updates" "$DEST\sql\" -ErrorAction SilentlyContinue
+          # Never ship the dev-only seed dumps: they wipe account/character
+          # tables (see sql/custom/dev-seed/README.md) and are only for a
+          # disposable local dev database.
+          Remove-Item -Recurse -Force "$DEST\sql\custom\dev-seed" -ErrorAction SilentlyContinue
 
           # --- Config ---
           # All playerbot defaults are in the main template moved above.

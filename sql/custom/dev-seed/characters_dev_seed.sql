@@ -1,3 +1,10 @@
+-- !!! DEV-ONLY SEED DUMP - DO NOT PUT UNDER sql/updates/ !!!
+-- This file WIPES the characters database (DELETE FROM characters, item_instance, ...)
+-- and inserts throwaway developer test rows. It must only ever be applied by hand
+-- to a disposable dev database. See sql/custom/dev-seed/README.md.
+-- Applying it to a live realm deletes every existing character and cannot be undone -
+-- restore from backup.
+
 --
 -- Test/dev seed data for the characters database (test characters, guild, items, etc). This
 -- is throwaway test data for this project's dev environment, not real player data.

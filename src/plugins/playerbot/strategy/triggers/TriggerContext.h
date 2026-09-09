@@ -80,6 +80,7 @@ namespace ai
             creators["behind target"] = &TriggerContext::behind_target;
             creators["not facing target"] = &TriggerContext::not_facing_target;
             creators["far from master"] = &TriggerContext::far_from_master;
+            creators["out of react range"] = &TriggerContext::out_of_react_range;
             creators["far from loot target"] = &TriggerContext::far_from_loot_target;
             creators["can loot"] = &TriggerContext::can_loot;
             creators["swimming"] = &TriggerContext::swimming;
@@ -104,6 +105,7 @@ namespace ai
         static Trigger* can_loot(PlayerbotAI* ai) { return new CanLootTrigger(ai); }
         static Trigger* far_from_loot_target(PlayerbotAI* ai) { return new FarFromCurrentLootTrigger(ai); }
         static Trigger* far_from_master(PlayerbotAI* ai) { return new FarFromMasterTrigger(ai); }
+        static Trigger* out_of_react_range(PlayerbotAI* ai) { return new OutOfReactRangeTrigger(ai); }
         static Trigger* behind_target(PlayerbotAI* ai) { return new IsBehindTargetTrigger(ai); }
         static Trigger* not_facing_target(PlayerbotAI* ai) { return new IsNotFacingTargetTrigger(ai); }
         static Trigger* panic(PlayerbotAI* ai) { return new PanicTrigger(ai); }
@@ -153,6 +155,10 @@ namespace ai
         static Trigger* PartyMemberCriticalHealth(PlayerbotAI* ai) { return new PartyMemberCriticalHealthTrigger(ai); }
         static Trigger* no_pet(PlayerbotAI* ai) { return new NoPetTrigger(ai); }
         static Trigger* has_attackers(PlayerbotAI* ai) { return new HasAttackersTrigger(ai); }
+
+    };
+};
+er(ai); }
 
     };
 };
