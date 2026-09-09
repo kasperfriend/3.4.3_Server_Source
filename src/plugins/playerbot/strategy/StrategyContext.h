@@ -55,7 +55,6 @@ namespace ai
             creators["threat"] = &StrategyContext::threat;
             creators["tell target"] = &StrategyContext::tell_target;
             creators["pvp"] = &StrategyContext::pvp;
-            creators["move random"] = &StrategyContext::move_random;
             creators["lfg"] = &StrategyContext::lfg;
             creators["custom"] = &StrategyContext::custom;
         }
@@ -95,9 +94,14 @@ namespace ai
             creators["runaway"] = &MovementStrategyContext::runaway;
             creators["flee from adds"] = &MovementStrategyContext::flee_from_adds;
             creators["guard"] = &MovementStrategyContext::guard;
+            // Roaming is a movement mode: it is exclusive with follow/stay/guard/etc.,
+            // so "+move random" cleanly replaces the current movement instead of
+            // stacking a second default movement action on top of it.
+            creators["move random"] = &MovementStrategyContext::move_random;
         }
 
     private:
+        static Strategy* move_random(PlayerbotAI* ai) { return new MoveRandomStrategy(ai); }
         static Strategy* guard(PlayerbotAI* ai) { return new GuardStrategy(ai); }
         static Strategy* follow_master(PlayerbotAI* ai) { return new FollowMasterStrategy(ai); }
         static Strategy* stay(PlayerbotAI* ai) { return new StayStrategy(ai); }

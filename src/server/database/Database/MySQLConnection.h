@@ -88,7 +88,7 @@ class TC_DATABASE_API MySQLConnection
         /// Called by parent databasepool. Will let other threads access this connection
         void Unlock();
 
-        uint32 GetServerVersion() const;
+        std::string GetServerInfo() const;
         MySQLPreparedStatement* GetPreparedStatement(uint32 index);
         void PrepareStatement(uint32 index, std::string_view sql, ConnectionFlags flags);
 

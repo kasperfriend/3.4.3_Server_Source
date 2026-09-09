@@ -74,8 +74,18 @@ bool GrindChatShortcutAction::Execute(Event event)
         return false;
 
     ai->Reset();
-    ai->ChangeStrategy("+grind,-passive", BOT_STATE_NON_COMBAT);
-    ai->TellMaster("Grinding");
+    // Grind selects the target (assist strategy) while "move random" provides
+    // the legs (movement strategy): grinding bots roam on their own and kill
+    // everything they see. A leash in the grind strategy walks them back when
+    // they wander out of the master's react range. Say "follow" or "stay"
+    // after "grind" to change back to escorted or stationary grinding.
+    ai->ChangeStrategy("+grind,+move random,-passive", BOT_STATE_NON_COMBAT);
+    if (bot->GetMapId() != master->GetMapId() || bot->GetDistance(master) > sPlayerbotAIConfig.reactDistance)
+    {
+        ai->TellMaster("Grinding on my own where I stand - summon me to you, I am too far away");
+        return true;
+    }
+    ai->TellMaster("Grinding on my own");
     return true;
 }
 

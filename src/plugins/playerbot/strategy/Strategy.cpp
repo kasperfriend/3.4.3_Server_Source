@@ -56,9 +56,12 @@ private:
     }
     static ActionNode* move_random(PlayerbotAI* ai)
     {
+        // If roaming fails (no valid destination), walk back to the master
+        // instead of idling. ("stay line" used to be here but no such action
+        // exists, so the fallback silently did nothing.)
         return new ActionNode ("move random",
             /*P*/ NULL,
-            /*A*/ NextAction::array(0, new NextAction("stay line"), NULL),
+            /*A*/ NextAction::array(0, new NextAction("follow"), NULL),
             /*C*/ NULL);
     }
     static ActionNode* move_to_loot(PlayerbotAI* ai)

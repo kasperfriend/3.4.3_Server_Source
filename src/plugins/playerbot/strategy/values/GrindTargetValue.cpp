@@ -28,7 +28,6 @@ Unit* GrindTargetValue::FindTargetForGrinding(int assistCount)
 {
     uint32 memberCount = 1;
     Group* group = bot->GetGroup();
-    Player* master = GetMaster();
 
     list<ObjectGuid> attackers = context->GetValue<list<ObjectGuid> >("attackers")->Get();
     for (list<ObjectGuid>::iterator i = attackers.begin(); i != attackers.end(); i++)
@@ -53,14 +52,16 @@ Unit* GrindTargetValue::FindTargetForGrinding(int assistCount)
         if (!unit)
             continue;
 
-        if (abs(bot->GetPositionZ() - unit->GetPositionZ()) > sPlayerbotAIConfig.spellDistance)
+        if (fabsf(bot->GetPositionZ() - unit->GetPositionZ()) > sPlayerbotAIConfig.spellDistance)
             continue;
 
         if (GetTargetingPlayerCount(unit) > assistCount)
             continue;
 
-		if (master && master->GetDistance(unit) >= sPlayerbotAIConfig.grindDistance && !sRandomPlayerbotMgr.IsRandomBot(bot))
-            continue;
+		// No master-distance gate: a grinding bot kills everything it sees
+		// (unless too strong - see the level/elite filters below). The bot's
+		// own sight range and the leash in the grind strategy bound how far
+		// this reaches, not the master's position.
 
 		if ((int)unit->GetLevel() - (int)bot->GetLevel() > 4 && !unit->GetGUID().IsPlayer())
 		    continue;

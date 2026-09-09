@@ -16,5 +16,13 @@ void GrindingStrategy::InitTriggers(std::list<TriggerNode*> &triggers)
         "no target",
         NextAction::array(0,
         new NextAction("attack anything", 5.0f), NULL)));
+
+    // Leash: grinding bots roam on their own ("move random" movement), but if
+    // they wander too far from the master they walk back into react range
+    // instead of roaming across the zone.
+    triggers.push_back(new TriggerNode(
+        "out of react range",
+        NextAction::array(0,
+        new NextAction("follow", 6.0f), NULL)));
 }
 

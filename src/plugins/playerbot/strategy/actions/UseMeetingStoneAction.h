@@ -14,6 +14,8 @@ namespace ai
 
     protected:
         bool Teleport();
+        bool TeleportBot(uint32 mapId, float x, float y, float z);
+        bool CanBeSummonedBy(Player* master);
     };
 
     class UseMeetingStoneAction : public SummonAction

@@ -1,3 +1,10 @@
+-- !!! DEV-ONLY SEED DUMP - DO NOT PUT UNDER sql/updates/ !!!
+-- This file WIPES the auth database (DELETE FROM account, battlenet_accounts, ...)
+-- and inserts throwaway developer test rows. It must only ever be applied by hand
+-- to a disposable dev database. See sql/custom/dev-seed/README.md.
+-- Applying it to a live realm deletes every existing account (logins fail with
+-- "unknown account" while new accounts work) and cannot be undone - restore from backup.
+
 --
 -- Test/dev seed data for the auth database (accounts, battle.net links, realm character
 -- counts, etc). This is throwaway test data for this project's dev environment, not real

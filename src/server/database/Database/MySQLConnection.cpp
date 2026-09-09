@@ -522,9 +522,9 @@ void MySQLConnection::Unlock()
     m_Mutex.unlock();
 }
 
-uint32 MySQLConnection::GetServerVersion() const
+std::string MySQLConnection::GetServerInfo() const
 {
-    return mysql_get_server_version(m_Mysql);
+    return mysql_get_server_info(m_Mysql);
 }
 
 MySQLPreparedStatement* MySQLConnection::GetPreparedStatement(uint32 index)

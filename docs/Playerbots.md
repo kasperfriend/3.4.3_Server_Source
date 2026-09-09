@@ -237,7 +237,12 @@ follow            follow the master
 stay              hold position
 flee              run away when in trouble
 attack my target  focus the master's target
-grind             kill nearby mobs
+grind             roam on their own and kill everything they see
+                (unless too strong); bots walk back if they wander
+                too far from the master (say "follow" or "stay"
+                afterwards for escorted or stationary grinding)
+summon            teleport the bot to the master (own bots and grouped
+                bots; GMs can summon any bot; not while in combat)
 los / nc          list strategies (combat / non-combat)
 +dps -threat      enable / disable a strategy
 quests            report quest log
