@@ -37,6 +37,10 @@ bool BankAction::Execute(string text, Unit* bank)
     if (text[0] == '-')
     {
         ItemIds found = chat->parseItems(text);
+        if (found.empty())
+            return false;
+
+        result = true;
         for (ItemIds::iterator i = found.begin(); i != found.end(); i++)
         {
             uint32 itemId = *i;
@@ -49,6 +53,7 @@ bool BankAction::Execute(string text, Unit* bank)
         if (found.empty())
             return false;
 
+        result = true;
         for (list<Item*>::iterator i = found.begin(); i != found.end(); i++)
         {
             Item* item = *i;
@@ -110,19 +115,23 @@ void BankAction::ListItems()
     ai->TellMaster("=== Bank ===");
 
     map<uint32, int> items;
+    for (uint8 slot = BANK_SLOT_ITEM_START; slot < BANK_SLOT_ITEM_END; ++slot)
+    {
+        Item* const item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+        if (item && item->GetTemplate())
+            items[item->GetTemplate()->GetId()] += item->GetCount();
+    }
+
     for (uint8 bag = BANK_SLOT_BAG_START; bag < BANK_SLOT_BAG_END; ++bag)
     {
         const Bag* const pBag = static_cast<Bag *>(bot->GetItemByPos(INVENTORY_SLOT_BAG_0, bag));
         if (pBag)
         {
-            const ItemTemplate* const pBagProto = pBag->GetTemplate();
-            std::string bagName = pBagProto->GetDefaultLocaleName();
-
             for (uint8 slot = 0; slot < pBag->GetBagSize(); ++slot)
             {
                 Item* const item = bot->GetItemByPos(bag, slot);
-                if (item)
-                    items[item->GetTemplate()->GetId()] = item->GetCount();
+                if (item && item->GetTemplate())
+                    items[item->GetTemplate()->GetId()] += item->GetCount();
             }
         }
     }

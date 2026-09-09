@@ -165,8 +165,8 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
     // characters of every random account per bot added, i.e. accountCount x
     // addedBots character queries in a single world tick (a FreezeDetector trip
     // at startup with a large MaxRandomBots)
-    vector<uint32> freeAllianceBots = GetFreeBots(true);
-    vector<uint32> freeHordeBots = GetFreeBots(false);
+    vector<uint32> freeAllianceBots, freeHordeBots;
+    GetAllFreeBots(freeAllianceBots, freeHordeBots);
 
     // Self-heal: no registered bots plus no free characters means zero usable
     // bot characters exist at all (startup creation failed, was skipped, or
@@ -184,8 +184,9 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed)
             lastCreateRetry = now;
             TC_LOG_INFO("playerbot", "No random bot characters found - retrying bot creation...");
             RandomPlayerbotFactory::CreateRandomBots();
-            freeAllianceBots = GetFreeBots(true);
-            freeHordeBots = GetFreeBots(false);
+            freeAllianceBots.clear();
+            freeHordeBots.clear();
+            GetAllFreeBots(freeAllianceBots, freeHordeBots);
         }
     }
 
@@ -625,7 +626,7 @@ list<uint32> RandomPlayerbotMgr::GetBots()
     return bots;
 }
 
-vector<uint32> RandomPlayerbotMgr::GetFreeBots(bool alliance)
+void RandomPlayerbotMgr::GetAllFreeBots(vector<uint32>& freeAllianceBots, vector<uint32>& freeHordeBots)
 {
     set<uint32> bots;
 
@@ -642,7 +643,6 @@ vector<uint32> RandomPlayerbotMgr::GetFreeBots(bool alliance)
         } while (results->NextRow());
     }
 
-    vector<uint32> guids;
     for (list<uint32>::iterator i = sPlayerbotAIConfig.randomBotAccounts.begin(); i != sPlayerbotAIConfig.randomBotAccounts.end(); i++)
     {
         uint32 accountId = *i;
@@ -658,15 +658,22 @@ vector<uint32> RandomPlayerbotMgr::GetFreeBots(bool alliance)
             Field* fields = result->Fetch();
             uint32 guid = fields[0].GetUInt32();
             uint8 race = fields[1].GetUInt8();
-            if (bots.find(guid) == bots.end() &&
-                    ((alliance && IsAlliance(race)) || ((!alliance && !IsAlliance(race))
-            )))
-                guids.push_back(guid);
+            if (bots.find(guid) == bots.end())
+            {
+                if (IsAlliance(race))
+                    freeAllianceBots.push_back(guid);
+                else
+                    freeHordeBots.push_back(guid);
+            }
         } while (result->NextRow());
     }
+}
 
-
-    return guids;
+vector<uint32> RandomPlayerbotMgr::GetFreeBots(bool alliance)
+{
+    vector<uint32> freeAllianceBots, freeHordeBots;
+    GetAllFreeBots(freeAllianceBots, freeHordeBots);
+    return alliance ? freeAllianceBots : freeHordeBots;
 }
 
 uint32 RandomPlayerbotMgr::GetEventValue(uint32 bot, string event)

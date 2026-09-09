@@ -38,7 +38,7 @@ void AttackersValue::AddAttackersOf(Group* group, set<Unit*>& targets)
             continue;
 
         if (member->IsBeingTeleported())
-            return;
+            continue;
 
         AddAttackersOf(member, targets);
 
@@ -83,7 +83,6 @@ bool AttackersValue::hasRealThreat(Unit *attacker)
         attacker->IsInWorld() &&
         attacker->IsAlive() &&
         !attacker->IsPolymorphed() &&
-        !attacker->HasUnitState(UNIT_STATE_ROOT) &&
         !attacker->IsFriendlyTo(bot) &&
         (attacker->GetThreatManager().GetCurrentVictim() || dynamic_cast<Player*>(attacker));
 }

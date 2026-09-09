@@ -15,11 +15,11 @@ map<uint8, string> ChatHelper::races;
 map<uint8, map<uint8, string> > ChatHelper::specs;
 
 template<class T>
-static bool substrContainsInMap(string searchTerm, map<string, T> searchIn)
+static bool substrContainsInMap(string const& searchTerm, map<string, T> const& searchIn)
 {
-    for (typename map<string, T>::iterator i = searchIn.begin(); i != searchIn.end(); ++i)
+    for (typename map<string, T>::const_iterator i = searchIn.begin(); i != searchIn.end(); ++i)
     {
-		string term = i->first;
+		string const& term = i->first;
 		if (term.size() > 1 && searchTerm.find(term) != string::npos)
             return true;
     }
@@ -117,7 +117,7 @@ ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
     specs[CLASS_PRIEST][2] = "shadow";
 
     classes[CLASS_ROGUE] = "rogue";
-    specs[CLASS_ROGUE][0] = "assasination";
+    specs[CLASS_ROGUE][0] = "assassination";
     specs[CLASS_ROGUE][1] = "combat";
     specs[CLASS_ROGUE][2] = "subtlety";
 
@@ -135,6 +135,11 @@ ChatHelper::ChatHelper(PlayerbotAI* ai) : PlayerbotAIAware(ai)
     specs[CLASS_WARRIOR][0] = "arms";
     specs[CLASS_WARRIOR][1] = "fury";
     specs[CLASS_WARRIOR][2] = "protection";
+
+    classes[CLASS_DEATH_KNIGHT] = "death knight";
+    specs[CLASS_DEATH_KNIGHT][0] = "blood";
+    specs[CLASS_DEATH_KNIGHT][1] = "frost";
+    specs[CLASS_DEATH_KNIGHT][2] = "unholy";
 
     races[RACE_BLOODELF] = "Blood Elf";
     races[RACE_DRAENEI] = "Draenei";

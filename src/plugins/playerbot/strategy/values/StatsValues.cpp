@@ -58,7 +58,7 @@ bool HasManaValue::Calculate()
     Unit* target = GetTarget();
     if (!target)
         return false;
-    return target->GetPower(POWER_MANA);
+    return target->GetMaxPower(POWER_MANA) > 0;
 }
 
 
@@ -112,9 +112,12 @@ uint8 BagSpaceValue::Calculate()
                 totalfree += pBag->GetFreeSlots();
             }
         }
-
     }
 
+    if (!total)
+        return 0;
+
+    totalused = total >= totalfree ? total - totalfree : 0;
     return (static_cast<float> (totalused) / total) * 100;
 }
 

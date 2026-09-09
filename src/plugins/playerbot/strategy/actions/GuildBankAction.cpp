@@ -61,7 +61,7 @@ bool GuildBankAction::MoveFromCharToBank(Item* item, GameObject* bank)
         return false;
     }
 
-    guild->SwapItems(bot, 0, playerSlot, 0, INVENTORY_SLOT_BAG_0, 0);
+    guild->SwapItemsWithInventory(bot, false, 0, NULL_SLOT, playerBag, playerSlot, 0);
 
     ItemTemplate const* proto = item->GetTemplate();
     ostringstream out; out << chat->formatItem(proto) << " put to guild bank";

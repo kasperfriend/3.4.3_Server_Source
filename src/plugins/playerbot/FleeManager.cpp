@@ -33,7 +33,15 @@ void FleeManager::calculateDistanceToPlayers(FleePoint *point)
 			case CLASS_PALADIN:
 			case CLASS_ROGUE:
 			case CLASS_WARRIOR:
+			case CLASS_DEATH_KNIGHT:
 				point->toMeleePlayers.probe(d);
+				break;
+			case CLASS_SHAMAN:
+			case CLASS_DRUID:
+				if (player->GetPlayerbotAI() && player->GetPlayerbotAI()->IsRanged(player))
+					point->toRangedPlayers.probe(d);
+				else
+					point->toMeleePlayers.probe(d);
 				break;
 		}
 	}

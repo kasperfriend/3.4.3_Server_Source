@@ -21,13 +21,13 @@ namespace ai
 		RevengeAvailableTrigger(PlayerbotAI* ai) : SpellCanBeCastTrigger(ai, "revenge") {}
 	};
 
-    class BloodrageDebuffTrigger : public DebuffTrigger
+    class BloodrageBuffTrigger : public BuffTrigger
     {
     public:
-        BloodrageDebuffTrigger(PlayerbotAI* ai) : DebuffTrigger(ai, "bloodrage") {}
+        BloodrageBuffTrigger(PlayerbotAI* ai) : BuffTrigger(ai, "bloodrage") {}
         virtual bool IsActive()
         {
-            return DebuffTrigger::IsActive() &&
+            return BuffTrigger::IsActive() &&
                 AI_VALUE2(uint8, "health", "self target") >= 75 &&
                 AI_VALUE2(uint8, "rage", "self target") < 20;
         }
