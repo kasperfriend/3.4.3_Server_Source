@@ -62,15 +62,15 @@ set "MARIADB_URL=https://archive.mariadb.org/mariadb-10.11.10/winx64-packages/ma
 set "MARIADB_ZIP=%ROOT%mariadb-download.zip"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Write-Host 'Downloading from archive.mariadb.org ...';" ^
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
-    "$ProgressPreference = 'SilentlyContinue';" ^
-    "try {" ^
-    "  Invoke-WebRequest -Uri '%MARIADB_URL%' -OutFile '%MARIADB_ZIP%' -UseBasicParsing;" ^
-    "  Write-Host 'Download complete.';" ^
-    "} catch {" ^
-    "  Write-Host \"ERROR: Download failed: $_\";" ^
-    "  exit 1;" ^
+    "Write-Host 'Downloading from archive.mariadb.org ...';"^
+    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;"^
+    "$ProgressPreference = 'SilentlyContinue';"^
+    "try {"^
+    "  Invoke-WebRequest -Uri '%MARIADB_URL%' -OutFile '%MARIADB_ZIP%' -UseBasicParsing;"^
+    "  Write-Host 'Download complete.';"^
+    "} catch {"^
+    "  Write-Host \"ERROR: Download failed: $_\";"^
+    "  exit 1;"^
     "}"
 
 if not exist "%MARIADB_ZIP%" (
@@ -87,11 +87,11 @@ echo.
 mkdir "%DB_DIR%" 2>nul
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Expand-Archive -Path '%MARIADB_ZIP%' -DestinationPath '%ROOT%db-extract-tmp' -Force;" ^
-    "$inner = Get-ChildItem '%ROOT%db-extract-tmp' -Directory | Select-Object -First 1;" ^
-    "if ($inner) { Copy-Item -Recurse -Force \"$($inner.FullName)\*\" '%DB_DIR%\' };" ^
-    "Remove-Item -Recurse -Force '%ROOT%db-extract-tmp' -ErrorAction SilentlyContinue;" ^
-    "Remove-Item -Force '%MARIADB_ZIP%' -ErrorAction SilentlyContinue;" ^
+    "Expand-Archive -Path '%MARIADB_ZIP%' -DestinationPath '%ROOT%db-extract-tmp' -Force;"^
+    "$inner = Get-ChildItem '%ROOT%db-extract-tmp' -Directory | Select-Object -First 1;"^
+    "if ($inner) { Copy-Item -Recurse -Force \"$($inner.FullName)\*\" '%DB_DIR%\' };"^
+    "Remove-Item -Recurse -Force '%ROOT%db-extract-tmp' -ErrorAction SilentlyContinue;"^
+    "Remove-Item -Force '%MARIADB_ZIP%' -ErrorAction SilentlyContinue;"^
     "Write-Host 'Extraction complete.'"
 
 if not exist "%MYSQLD%" (
@@ -267,22 +267,22 @@ if not exist "%ETC_DIR%\bnetserver.conf" (
 REM Update worldserver.conf with correct database credentials
 if exist "%ETC_DIR%\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\worldserver.conf';" ^
-        "$c = [IO.File]::ReadAllText($f);" ^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';" ^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';" ^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';" ^
-        "[IO.File]::WriteAllText($f, $c);" ^
+        "$f = '%ETC_DIR%\worldserver.conf';"^
+        "$c = [IO.File]::ReadAllText($f);"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';"^
+        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';"^
+        "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\worldserver.conf'"
 )
 
 REM Update bnetserver.conf with correct database credentials
 if exist "%ETC_DIR%\bnetserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\bnetserver.conf';" ^
-        "$c = [IO.File]::ReadAllText($f);" ^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';" ^
-        "[IO.File]::WriteAllText($f, $c);" ^
+        "$f = '%ETC_DIR%\bnetserver.conf';"^
+        "$c = [IO.File]::ReadAllText($f);"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\bnetserver.conf'"
 )
 
@@ -352,20 +352,20 @@ goto :STEP7_CONFIG
 :STEP7_CONFIG
 if exist "%ETC_DIR%\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\worldserver.conf';" ^
-        "$c = [IO.File]::ReadAllText($f);" ^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';" ^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';" ^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';" ^
-        "[IO.File]::WriteAllText($f, $c);" ^
+        "$f = '%ETC_DIR%\worldserver.conf';"^
+        "$c = [IO.File]::ReadAllText($f);"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;world\"';"^
+        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;characters\"';"^
+        "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\worldserver.conf'"
 )
 if exist "%ETC_DIR%\bnetserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '%ETC_DIR%\bnetserver.conf';" ^
-        "$c = [IO.File]::ReadAllText($f);" ^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';" ^
-        "[IO.File]::WriteAllText($f, $c);" ^
+        "$f = '%ETC_DIR%\bnetserver.conf';"^
+        "$c = [IO.File]::ReadAllText($f);"^
+        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;%PORT%;%DB_USER%;%DB_PASS%;auth\"';"^
+        "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\bnetserver.conf'"
 )
 echo [OK] Done.
