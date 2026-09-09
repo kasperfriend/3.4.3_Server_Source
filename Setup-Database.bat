@@ -19,7 +19,7 @@ echo.
 echo Press any key to continue, or Ctrl+C to cancel...
 pause >nul
 
-REM ── Paths ──────────────────────────────────────────────────
+REM Paths
 set "ROOT=%~dp0"
 set "DB_DIR=%ROOT%database"
 set "DB_DATA=%DB_DIR%\data"
@@ -34,7 +34,7 @@ set "DB_USER=trinity"
 set "DB_PASS=trinity"
 set "DB_ROOT_PASS=rootpassword"
 
-REM ── Check if already set up ────────────────────────────────
+REM Check if already set up
 if exist "%MYSQLD%" (
     echo.
     echo [INFO] MariaDB already exists at: %DB_DIR%
@@ -53,7 +53,7 @@ if exist "%MYSQLD%" (
     )
 )
 
-REM ── Step 1: Download MariaDB ───────────────────────────────
+REM Step 1: Download MariaDB
 echo.
 echo [1/7] Downloading MariaDB 10.11.10 portable...
 echo.
@@ -79,7 +79,7 @@ if not exist "%MARIADB_ZIP%" (
     goto :FAIL
 )
 
-REM ── Step 2: Extract ────────────────────────────────────────
+REM Step 2: Extract
 echo.
 echo [2/7] Extracting MariaDB to database\ ...
 echo.
@@ -100,7 +100,7 @@ if not exist "%MYSQLD%" (
     goto :FAIL
 )
 
-REM ── Step 3: Create my.ini and initialize ────────────────────
+REM Step 3: Create my.ini and initialize
 echo.
 echo [3/7] Initializing database...
 echo.
@@ -125,10 +125,6 @@ echo port=%PORT%
 echo default-character-set=utf8mb4
 ) > "%MY_INI%"
 
-REM NOTE: MariaDB does NOT support MySQL's "mysqld --initialize-insecure".
-REM The portable ZIP is initialized with mariadb-install-db.exe instead.
-REM (This Windows tool has its own parameters: --datadir / --password / --port.
-REM  No --service here on purpose: this is a portable install, not a service.)
 if exist "%DB_DATA%" rmdir /s /q "%DB_DATA%" 2>nul
 mkdir "%DB_DATA%" 2>nul
 
@@ -158,7 +154,7 @@ if not exist "%DB_DATA%\mysql" (
 
 echo [OK] Database initialized (root password set).
 
-REM ── Step 4: Start MariaDB ───────────────────────────────────
+REM Step 4: Start MariaDB
 echo.
 echo [4/7] Starting MariaDB server...
 echo.
@@ -180,7 +176,7 @@ if errorlevel 1 (
 
 echo [OK] MariaDB is running on port %PORT%.
 
-REM ── Step 5: Create databases ────────────────────────────────
+REM Step 5: Create databases
 echo.
 echo [5/7] Creating databases and user...
 echo.
@@ -205,7 +201,7 @@ REM Create the trinity user with full access
 echo [OK] Databases created: auth, characters, world, hotfixes
 echo [OK] User '%DB_USER%' created with password '%DB_PASS%'
 
-REM ── Step 6: Import SQL schemas ──────────────────────────────
+REM Step 6: Import SQL schemas
 echo.
 echo [6/7] Importing SQL schemas...
 echo.
@@ -249,7 +245,7 @@ for /f "delims=" %%f in ('dir /b /s /a-d "%SQL_DIR%\updates\hotfixes\*.sql" 2^>n
 
 echo [OK] SQL import complete.
 
-REM ── Step 7: Configure server ────────────────────────────────
+REM Step 7: Configure server
 echo.
 echo [7/7] Configuring server files...
 echo.
@@ -292,7 +288,7 @@ if exist "%ETC_DIR%\bnetserver.conf" (
 
 echo [OK] Configuration files updated.
 
-REM ── Done ────────────────────────────────────────────────────
+REM Done
 echo.
 echo ============================================================
 echo   Setup complete!
@@ -381,7 +377,7 @@ goto :EOF
 :FAIL
 echo.
 echo ============================================================
-echo   Setup FAILED — see error messages above.
+echo   Setup FAILED - see error messages above.
 echo ============================================================
 echo.
 echo Common fixes:
