@@ -125,14 +125,38 @@ echo port=%PORT%
 echo default-character-set=utf8mb4
 ) > "%MY_INI%"
 
-REM Initialize MariaDB data directory (creates system tables, root with no password)
-"%MYSQLD%" --defaults-file="%MY_INI%" --initialize-insecure --console 2>&1
+REM NOTE: MariaDB does NOT support MySQL's "mysqld --initialize-insecure".
+REM The portable ZIP is initialized with mariadb-install-db.exe instead.
+REM (This Windows tool has its own parameters: --datadir / --password / --port.
+REM  No --service here on purpose: this is a portable install, not a service.)
+if exist "%DB_DATA%" rmdir /s /q "%DB_DATA%" 2>nul
+mkdir "%DB_DATA%" 2>nul
+
+set "INSTALL_DB=%DB_BIN%\mariadb-install-db.exe"
+if not exist "!INSTALL_DB!" set "INSTALL_DB=%DB_BIN%\mysql_install_db.exe"
+if not exist "!INSTALL_DB!" (
+    echo [ERROR] Database installer not found. Expected one of:
+    echo         %DB_BIN%\mariadb-install-db.exe
+    echo         %DB_BIN%\mysql_install_db.exe
+    echo         The MariaDB download may be incomplete. Delete the "database"
+    echo         folder and run this script again.
+    goto :FAIL
+)
+
+echo   Running mariadb-install-db.exe (this can take a minute)...
+"!INSTALL_DB!" --datadir="%DB_DATA%" --password="%DB_ROOT_PASS%" --port=%PORT%
 if errorlevel 1 (
     echo [ERROR] Database initialization failed.
     goto :FAIL
 )
+if not exist "%DB_DATA%\mysql" (
+    echo [ERROR] Database initialization failed - system tables were not created.
+    echo         Check the messages above. You may need to delete the "database"
+    echo         folder and run this script again.
+    goto :FAIL
+)
 
-echo [OK] Database initialized.
+echo [OK] Database initialized (root password set).
 
 REM ── Step 4: Start MariaDB ───────────────────────────────────
 echo.
@@ -146,7 +170,7 @@ set /a WAIT_COUNT=0
 :WAIT_LOOP
 timeout /t 1 /nobreak >nul
 set /a WAIT_COUNT+=1
-"%MYSQL%" -u root --skip-password -e "SELECT 1" >nul 2>&1
+"%MYSQL%" -u root -p"%DB_ROOT_PASS%" -e "SELECT 1" >nul 2>&1
 if errorlevel 1 (
     if %WAIT_COUNT% LSS 30 goto :WAIT_LOOP
     echo [ERROR] MariaDB did not start within 30 seconds.
@@ -161,8 +185,7 @@ echo.
 echo [5/7] Creating databases and user...
 echo.
 
-REM Set root password
-"%MYSQL%" -u root --skip-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '%DB_ROOT_PASS%';" 2>nul
+REM Root password was already set during initialization in Step 3.
 
 REM Create databases using the project's create script
 "%MYSQL%" -u root -p%DB_ROOT_PASS% < "%SQL_DIR%\create\create_mysql.sql"
