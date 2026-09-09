@@ -358,7 +358,17 @@ void RandomPlayerbotFactory::CreateRandomBots()
             stopCreating = true; // still register existing characters on later accounts
     }
 
-    TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
+    // Zero accounts or zero characters means no random bot can ever log in -
+    // say so loudly instead of burying it in an INFO line: the usual causes
+    // are an exhausted ai_playerbot_names pool ("No more names left" above),
+    // rejected character creation ("Unable to create random bot" above), or
+    // account creation failures in the login database.
+    if (sPlayerbotAIConfig.randomBotAccounts.empty() || !totalRandomBotChars)
+        TC_LOG_ERROR("playerbot", "Only {} random bot accounts with {} characters available - no random bots can appear in game. "
+            "Check the errors above, the ai_playerbot_names name pool, and that AiPlayerbot.RandomBotAccountCount characters could be created.",
+            sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
+    else
+        TC_LOG_INFO("playerbot",  "{} random bot accounts with {} characters available", sPlayerbotAIConfig.randomBotAccounts.size(), totalRandomBotChars);
 }
 
 
