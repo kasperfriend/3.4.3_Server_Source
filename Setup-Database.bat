@@ -12,8 +12,9 @@ echo   1. Download MariaDB 10.11 LTS (portable, no install needed)
 echo   2. Extract it into the "database" folder
 echo   3. Initialize and start the database server
 echo   4. Create all required databases
-echo   5. Import SQL schemas (auth, characters, hotfixes, playerbot)
-echo   6. Apply all database updates
+echo   5. Import SQL schemas (auth, characters, playerbot)
+echo   6. Download + verify + import the world and hotfixes game data
+echo      (WyrmrestCore DB release), then apply database updates
 echo   7. Configure worldserver.conf and bnetserver.conf
 echo.
 echo Press any key to continue, or Ctrl+C to cancel...
@@ -33,6 +34,15 @@ set "PORT=3306"
 set "DB_USER=trinity"
 set "DB_PASS=trinity"
 set "DB_ROOT_PASS=rootpassword"
+
+REM World / hotfixes game data - downloaded from the WyrmrestCore release and
+REM verified against their published SHA-256 checksums before import.
+set "DB_DATA_RELEASE=https://github.com/xHashii/WyrmrestCore/releases/download/DB.2608"
+set "WORLD_DUMP=world_full_2026_08_10.sql"
+set "HOTFIXES_DUMP=hotfixes_full_2026_08_10.sql"
+set "WORLD_DUMP_SHA256=91401028dce1dc302e12709a268e4d46cb74f527f95396e2dea1ea5da17081de"
+set "HOTFIXES_DUMP_SHA256=20170a1a52a93af556f4a875885cf2e462777f3a5a3b58e8b128bc171ea866dc"
+set "DL_DIR=%ROOT%db-downloads"
 
 REM Check if already set up
 if exist "%MYSQLD%" (
@@ -179,65 +189,18 @@ echo.
 echo [5/7] Creating databases and user...
 echo.
 
-REM Root password was already set during initialization in Step 3.
-
-REM Create databases using the project's create script
-"!MYSQL!" -u root -p!DB_ROOT_PASS! < "!SQL_DIR!\create\create_mysql.sql"
-if errorlevel 1 echo   [WARN] create_mysql.sql had errors (may be OK if databases already exist).
-
-REM Create the trinity user with full access
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'localhost' IDENTIFIED BY '!DB_PASS!';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'127.0.0.1' IDENTIFIED BY '!DB_PASS!';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `auth`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `characters`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `world`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `hotfixes`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
-"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "FLUSH PRIVILEGES;"
+call :ENSURE_DATABASES
 
 echo [OK] Databases created: auth, characters, world, hotfixes
 echo [OK] User '!DB_USER!' created with password '!DB_PASS!'
 
 REM Step 6: Import SQL schemas
 echo.
-echo [6/7] Importing SQL schemas...
+echo [6/7] Importing SQL schemas and game data...
 echo.
 
-REM Base schemas
-echo   Importing auth database...
-"!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "!SQL_DIR!\base\auth_database.sql" 2>nul
-if errorlevel 1 echo   [WARN] auth_database.sql had errors.
-
-echo   Importing characters database...
-"!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\base\characters_database.sql" 2>nul
-if errorlevel 1 echo   [WARN] characters_database.sql had errors.
-
-if exist "!SQL_DIR!\base\hotfixes_database.sql" (
-    echo   Importing hotfixes database...
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "!SQL_DIR!\base\hotfixes_database.sql" 2>nul
-    if errorlevel 1 echo   [WARN] hotfixes_database.sql had errors.
-)
-
-REM Playerbot custom tables
-if exist "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" (
-    echo   Importing playerbot tables...
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" 2>nul
-    if errorlevel 1 echo   [WARN] characters_playerbot.sql had errors.
-)
-
-REM Apply updates (sorted by filename for correct ordering)
-echo   Applying database updates...
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\auth\*.sql" 2^>nul ^| sort') do (
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "%%f" 2>nul
-)
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\characters\*.sql" 2^>nul ^| sort') do (
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "%%f" 2>nul
-)
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\world\*.sql" 2^>nul ^| sort') do (
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! world < "%%f" 2>nul
-)
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\hotfixes\*.sql" 2^>nul ^| sort') do (
-    "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "%%f" 2>nul
-)
+call :IMPORT_ALL_SQL
+if errorlevel 1 goto :FAIL
 
 echo [OK] SQL import complete.
 
@@ -246,42 +209,8 @@ echo.
 echo [7/7] Configuring server files...
 echo.
 
-REM Copy .dist files to actual config files if they don't exist
-if not exist "!ETC_DIR!\worldserver.conf" (
-    if exist "!ETC_DIR!\worldserver.conf.dist" (
-        copy "!ETC_DIR!\worldserver.conf.dist" "!ETC_DIR!\worldserver.conf" >nul
-        echo   Created etc\worldserver.conf from .dist template
-    )
-)
-if not exist "!ETC_DIR!\bnetserver.conf" (
-    if exist "!ETC_DIR!\bnetserver.conf.dist" (
-        copy "!ETC_DIR!\bnetserver.conf.dist" "!ETC_DIR!\bnetserver.conf" >nul
-        echo   Created etc\bnetserver.conf from .dist template
-    )
-)
-
-REM Update worldserver.conf with correct database credentials
-if exist "!ETC_DIR!\worldserver.conf" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '!ETC_DIR!\worldserver.conf';"^
-        "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
-        "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
-        "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
-        "[IO.File]::WriteAllText($f, $c);"^
-        "Write-Host '  Updated etc\worldserver.conf'"
-)
-
-REM Update bnetserver.conf with correct database credentials
-if exist "!ETC_DIR!\bnetserver.conf" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$f = '!ETC_DIR!\bnetserver.conf';"^
-        "$c = [IO.File]::ReadAllText($f);"^
-        "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
-        "[IO.File]::WriteAllText($f, $c);"^
-        "Write-Host '  Updated etc\bnetserver.conf'"
-)
-
+call :STEP7_CONFIG
+:STEP7_DONE
 echo [OK] Configuration files updated.
 
 REM Done
@@ -299,10 +228,12 @@ echo.
 echo   Server config files have been updated:
 echo     etc\worldserver.conf
 echo     etc\bnetserver.conf
+echo     bin\worldserver.conf
+echo     bin\bnetserver.conf
 echo.
-echo   IMPORTANT: The "world" database is empty. You need to import
-echo   a TDB (Trinity Database) world dump for your server to work.
-echo   Get it from your TrinityCore provider or community.
+echo   Game data downloaded, checksum-verified and imported:
+echo     world     ^<- %WORLD_DUMP%
+echo     hotfixes  ^<- %HOTFIXES_DUMP%
 echo.
 echo   To stop the database:  taskkill /f /im mysqld.exe
 echo   To start it again:     Run Start-Database.bat
@@ -311,11 +242,202 @@ echo Press any key to exit...
 pause >nul
 goto :EOF
 
+REM ------------------------------------------------------------------
+REM Create the four databases and the trinity user (idempotent).
+REM ------------------------------------------------------------------
+:ENSURE_DATABASES
+"!MYSQL!" -u root -p!DB_ROOT_PASS! < "!SQL_DIR!\create\create_mysql.sql"
+if errorlevel 1 echo   [WARN] create_mysql.sql had errors (may be OK if databases already exist).
+
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'localhost' IDENTIFIED BY '!DB_PASS!';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "CREATE USER IF NOT EXISTS '!DB_USER!'@'127.0.0.1' IDENTIFIED BY '!DB_PASS!';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `auth`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `characters`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `world`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "GRANT ALL PRIVILEGES ON `hotfixes`.* TO '!DB_USER!'@'localhost', '!DB_USER!'@'127.0.0.1';"
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "FLUSH PRIVILEGES;"
+goto :EOF
+
+REM ------------------------------------------------------------------
+REM Import the base schemas, the world + hotfixes game data, and the
+REM incremental updates. Safe to re-run on an existing install.
+REM ------------------------------------------------------------------
+:IMPORT_ALL_SQL
+echo   Importing auth database...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "!SQL_DIR!\base\auth_database.sql" 2>nul
+if errorlevel 1 echo   [WARN] auth_database.sql had errors.
+
+echo   Importing characters database...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\base\characters_database.sql" 2>nul
+if errorlevel 1 echo   [WARN] characters_database.sql had errors.
+
+REM The hotfixes database is created and populated by the hotfixes_full_*.sql
+REM download (it ships both the schema and the data), so there is no separate
+REM hotfixes base import here.
+
+if exist "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" (
+    echo   Importing playerbot tables...
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "!SQL_DIR!\custom\playerbot\characters_playerbot.sql" 2>nul
+    if errorlevel 1 echo   [WARN] characters_playerbot.sql had errors.
+)
+
+call :IMPORT_GAMEDATA
+if errorlevel 1 goto :FAIL
+call :APPLY_UPDATES
+goto :EOF
+
+REM ------------------------------------------------------------------
+REM Download, verify and import the world + hotfixes game data from the
+REM WyrmrestCore DB release. Each file is checked against its published
+REM SHA-256 checksum before it is imported. A database is only imported
+REM when it is still empty, so re-running is safe.
+REM ------------------------------------------------------------------
+:IMPORT_GAMEDATA
+mkdir "!DL_DIR!" 2>nul
+
+REM --- world ---
+set "WORLD_ROWS=0"
+for /f %%C in ('"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM world.version" 2^>nul') do set "WORLD_ROWS=%%C"
+if not "!WORLD_ROWS!"=="0" (
+    echo   World data already present (!WORLD_ROWS! rows in world.version) - skipping world import.
+    goto :IMPORT_HOTFIXES
+)
+
+echo   Downloading %WORLD_DUMP% (~200 MB, may take several minutes)...
+if exist "!DL_DIR!\%WORLD_DUMP%" (
+    echo   %WORLD_DUMP% already present, skipping download.
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$ProgressPreference = 'SilentlyContinue';" ^
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
+        "try { Invoke-WebRequest -Uri '%DB_DATA_RELEASE%/%WORLD_DUMP%' -OutFile '!DL_DIR!\%WORLD_DUMP%' -UseBasicParsing; Write-Host '  Download complete.' }" ^
+        "catch { Write-Host (\"ERROR: world dump download failed: \" + $_.Exception.Message); exit 1 }"
+    if errorlevel 1 (
+        echo [ERROR] Failed to download %WORLD_DUMP%.
+        echo         URL: %DB_DATA_RELEASE%/%WORLD_DUMP%
+        goto :FAIL
+    )
+)
+
+echo   Verifying %WORLD_DUMP% checksum (SHA-256)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$h = (Get-FileHash -Algorithm SHA256 -Path '!DL_DIR!\%WORLD_DUMP%').Hash.ToLower();" ^
+    "if ($h -ne '%WORLD_DUMP_SHA256%') { Write-Host (\"ERROR: SHA-256 mismatch for %WORLD_DUMP%.`n  Expected: %WORLD_DUMP_SHA256%`n  Actual:   \" + $h); Remove-Item -Force '!DL_DIR!\%WORLD_DUMP%' -ErrorAction SilentlyContinue; exit 1 } else { Write-Host '  Checksum OK.' }"
+if errorlevel 1 (
+    echo [ERROR] Checksum verification failed for %WORLD_DUMP%.
+    echo         The corrupted file was deleted - re-run this script to re-download it.
+    goto :FAIL
+)
+
+echo   Preparing a clean 'world' database...
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "DROP DATABASE IF EXISTS world; CREATE DATABASE world DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+if errorlevel 1 (
+    echo [ERROR] Could not recreate the 'world' database.
+    goto :FAIL
+)
+
+echo   Importing %WORLD_DUMP% into the 'world' database (this can take several minutes)...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! world < "!DL_DIR!\%WORLD_DUMP%"
+if errorlevel 1 (
+    echo [ERROR] Failed to import %WORLD_DUMP% into the 'world' database.
+    goto :FAIL
+)
+
+echo   Verifying world database contents...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM world.version" 2>nul
+if errorlevel 1 (
+    echo [ERROR] The 'world' database is missing its 'version' table after import.
+    echo         The downloaded world dump may be incompatible with this server build.
+    goto :FAIL
+)
+echo   [OK] world data imported and verified.
+
+:IMPORT_HOTFIXES
+set "HOTFIX_ROWS=0"
+for /f %%C in ('"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM hotfixes.achievement" 2^>nul') do set "HOTFIX_ROWS=%%C"
+if not "!HOTFIX_ROWS!"=="0" (
+    echo   Hotfixes data already present (!HOTFIX_ROWS! rows in achievement) - skipping hotfixes import.
+    goto :EOF
+)
+
+echo   Downloading %HOTFIXES_DUMP% (~100 MB, may take a few minutes)...
+if exist "!DL_DIR!\%HOTFIXES_DUMP%" (
+    echo   %HOTFIXES_DUMP% already present, skipping download.
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$ProgressPreference = 'SilentlyContinue';" ^
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;" ^
+        "try { Invoke-WebRequest -Uri '%DB_DATA_RELEASE%/%HOTFIXES_DUMP%' -OutFile '!DL_DIR!\%HOTFIXES_DUMP%' -UseBasicParsing; Write-Host '  Download complete.' }" ^
+        "catch { Write-Host (\"ERROR: hotfixes dump download failed: \" + $_.Exception.Message); exit 1 }"
+    if errorlevel 1 (
+        echo [ERROR] Failed to download %HOTFIXES_DUMP%.
+        echo         URL: %DB_DATA_RELEASE%/%HOTFIXES_DUMP%
+        goto :FAIL
+    )
+)
+
+echo   Verifying %HOTFIXES_DUMP% checksum (SHA-256)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$h = (Get-FileHash -Algorithm SHA256 -Path '!DL_DIR!\%HOTFIXES_DUMP%').Hash.ToLower();" ^
+    "if ($h -ne '%HOTFIXES_DUMP_SHA256%') { Write-Host (\"ERROR: SHA-256 mismatch for %HOTFIXES_DUMP%.`n  Expected: %HOTFIXES_DUMP_SHA256%`n  Actual:   \" + $h); Remove-Item -Force '!DL_DIR!\%HOTFIXES_DUMP%' -ErrorAction SilentlyContinue; exit 1 } else { Write-Host '  Checksum OK.' }"
+if errorlevel 1 (
+    echo [ERROR] Checksum verification failed for %HOTFIXES_DUMP%.
+    echo         The corrupted file was deleted - re-run this script to re-download it.
+    goto :FAIL
+)
+
+echo   Preparing a clean 'hotfixes' database...
+"!MYSQL!" -u root -p!DB_ROOT_PASS! -e "DROP DATABASE IF EXISTS hotfixes; CREATE DATABASE hotfixes DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+if errorlevel 1 (
+    echo [ERROR] Could not recreate the 'hotfixes' database.
+    goto :FAIL
+)
+
+echo   Importing %HOTFIXES_DUMP% into the 'hotfixes' database (this can take a few minutes)...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "!DL_DIR!\%HOTFIXES_DUMP%"
+if errorlevel 1 (
+    echo [ERROR] Failed to import %HOTFIXES_DUMP% into the 'hotfixes' database.
+    goto :FAIL
+)
+
+echo   Verifying hotfixes database contents...
+"!MYSQL!" -u !DB_USER! -p!DB_PASS! --batch --skip-column-names -e "SELECT COUNT(*) FROM hotfixes.achievement" 2>nul
+if errorlevel 1 (
+    echo [ERROR] The 'hotfixes' database is missing its 'achievement' table after import.
+    echo         The downloaded hotfixes dump may be incompatible with this server build.
+    goto :FAIL
+)
+echo   [OK] hotfixes data imported and verified.
+goto :EOF
+
+REM ------------------------------------------------------------------
+REM Apply the project's incremental SQL updates (sorted by filename).
+REM ------------------------------------------------------------------
+:APPLY_UPDATES
+echo   Applying database updates...
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\auth\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "%%f" 2>nul
+)
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\characters\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "%%f" 2>nul
+)
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\world\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! world < "%%f" 2>nul
+)
+for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\hotfixes\*.sql" 2^>nul ^| sort') do (
+    "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "%%f" 2>nul
+)
+goto :EOF
+
 :CHECK_RUNNING
 REM Check if MariaDB is already running
 "!MYSQL!" -u !DB_USER! -p!DB_PASS! -e "SELECT 1" >nul 2>&1
 if not errorlevel 1 (
     echo [OK] MariaDB is already running.
+    echo Ensuring databases/user, importing any missing game data and applying updates...
+    call :ENSURE_DATABASES
+    call :IMPORT_ALL_SQL
+    if errorlevel 1 goto :FAIL
     goto :STEP7_ONLY
 )
 
@@ -337,14 +459,33 @@ if errorlevel 1 (
     goto :FAIL
 )
 echo [OK] MariaDB is running.
+echo Ensuring databases/user, importing any missing game data and applying updates...
+call :ENSURE_DATABASES
+call :IMPORT_ALL_SQL
+if errorlevel 1 goto :FAIL
 goto :STEP7_ONLY
 
 :STEP7_ONLY
 echo.
 echo Updating configuration files...
-goto :STEP7_CONFIG
+call :STEP7_CONFIG
+goto :STEP7_DONE
 
 :STEP7_CONFIG
+REM Copy .dist files to actual config files if they don't exist
+if not exist "!ETC_DIR!\worldserver.conf" (
+    if exist "!ETC_DIR!\worldserver.conf.dist" (
+        copy "!ETC_DIR!\worldserver.conf.dist" "!ETC_DIR!\worldserver.conf" >nul
+        echo   Created etc\worldserver.conf from .dist template
+    )
+)
+if not exist "!ETC_DIR!\bnetserver.conf" (
+    if exist "!ETC_DIR!\bnetserver.conf.dist" (
+        copy "!ETC_DIR!\bnetserver.conf.dist" "!ETC_DIR!\bnetserver.conf" >nul
+        echo   Created etc\bnetserver.conf from .dist template
+    )
+)
+
 if exist "!ETC_DIR!\worldserver.conf" (
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
         "$f = '!ETC_DIR!\worldserver.conf';"^
@@ -352,6 +493,9 @@ if exist "!ETC_DIR!\worldserver.conf" (
         "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
         "$c = $c -replace 'WorldDatabaseInfo\s*=\s*\"[^\"]*\"', 'WorldDatabaseInfo     = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;world\"';"^
         "$c = $c -replace 'CharacterDatabaseInfo\s*=\s*\"[^\"]*\"', 'CharacterDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;characters\"';"^
+        "$c = $c -replace 'HotfixDatabaseInfo\s*=\s*\"[^\"]*\"', 'HotfixDatabaseInfo    = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;hotfixes\"';"^
+        "$c = $c -replace 'Updates\.EnableDatabases\s*=\s*[0-9]+', 'Updates.EnableDatabases = 0';"^
+        "$c = $c -replace 'Updates\.AutoSetup\s*=\s*[0-9]+', 'Updates.AutoSetup = 0';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\worldserver.conf'"
 )
@@ -360,13 +504,23 @@ if exist "!ETC_DIR!\bnetserver.conf" (
         "$f = '!ETC_DIR!\bnetserver.conf';"^
         "$c = [IO.File]::ReadAllText($f);"^
         "$c = $c -replace 'LoginDatabaseInfo\s*=\s*\"[^\"]*\"', 'LoginDatabaseInfo = \"127.0.0.1;!PORT!;!DB_USER!;!DB_PASS!;auth\"';"^
+        "$c = $c -replace 'Updates\.EnableDatabases\s*=\s*[0-9]+', 'Updates.EnableDatabases = 0';"^
+        "$c = $c -replace 'Updates\.AutoSetup\s*=\s*[0-9]+', 'Updates.AutoSetup = 0';"^
         "[IO.File]::WriteAllText($f, $c);"^
         "Write-Host '  Updated etc\bnetserver.conf'"
 )
-echo [OK] Done.
-echo.
-echo Press any key to exit...
-pause >nul
+if exist "!ETC_DIR!\worldserver.conf" (
+    if exist "%ROOT%bin" (
+        copy "!ETC_DIR!\worldserver.conf" "%ROOT%bin\worldserver.conf" >nul
+        echo   Copied worldserver.conf to bin\
+    )
+)
+if exist "!ETC_DIR!\bnetserver.conf" (
+    if exist "%ROOT%bin" (
+        copy "!ETC_DIR!\bnetserver.conf" "%ROOT%bin\bnetserver.conf" >nul
+        echo   Copied bnetserver.conf to bin\
+    )
+)
 goto :EOF
 
 :FAIL
@@ -380,6 +534,7 @@ echo   - Check your internet connection (download may have failed)
 echo   - Make sure port !PORT! is not in use by another MySQL instance
 echo   - Run this script as Administrator if you get permission errors
 echo   - Delete the "database" folder and try again
+echo   - If a game-data download failed, delete the "db-downloads" folder and re-run
 echo.
 echo Press any key to exit...
 pause >nul

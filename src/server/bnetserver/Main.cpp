@@ -86,6 +86,35 @@ void KeepDatabaseAliveHandler(std::weak_ptr<Trinity::Asio::DeadlineTimer> dbPing
 void BanExpiryHandler(std::weak_ptr<Trinity::Asio::DeadlineTimer> banExpiryCheckTimerRef, int32 banExpiryCheckInterval, boost::system::error_code const& error);
 variables_map GetConsoleArguments(int argc, char** argv, fs::path& configFile, fs::path& configDir, std::string& winServiceAction);
 
+// Resolve the configuration file so the server can be started from any working
+// directory. When the requested file does not exist, fall back to the .conf.dist
+// template in the same location, then to the executable's own directory and its
+// sibling "etc" directory (the portable/repack layout).
+static fs::path ResolveConfigPath(fs::path const& configFile)
+{
+    if (fs::exists(configFile))
+        return configFile;
+
+    fs::path const exeDir = boost::dll::program_location().parent_path();
+    fs::path const fileName = configFile.filename();
+    std::string const distName = fileName.string() + ".dist";
+
+    std::vector<fs::path> const candidates =
+    {
+        fs::path(configFile.string() + ".dist"),
+        exeDir / fileName,
+        exeDir / distName,
+        exeDir / ".." / "etc" / fileName,
+        exeDir / ".." / "etc" / distName,
+    };
+
+    for (fs::path const& candidate : candidates)
+        if (fs::exists(candidate))
+            return candidate;
+
+    return configFile;
+}
+
 int main(int argc, char** argv)
 {
     signal(SIGABRT, &Trinity::AbortHandler);
@@ -101,6 +130,9 @@ int main(int argc, char** argv)
     // exit if help or version is enabled
     if (vm.count("help") || vm.count("version"))
         return 0;
+
+    if (!vm.count("config"))
+        configFile = ResolveConfigPath(configFile);
 
     GOOGLE_PROTOBUF_VERIFY_VERSION;
 
