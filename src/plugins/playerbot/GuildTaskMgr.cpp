@@ -748,9 +748,11 @@ bool GuildTaskMgr::Reward(uint32 owner, uint32 guildId)
     uint32 itemId = sRandomItemMgr.GetRandomItem(rewardType);
     if (itemId)
     {
-        Item* item = Item::CreateItem(itemId, 1, ItemContext::NONE, leader);
-        item->SaveToDB(trans);
-        draft.AddItem(item);
+        if (Item* item = Item::CreateItem(itemId, 1, ItemContext::NONE, leader))
+        {
+            item->SaveToDB(trans);
+            draft.AddItem(item);
+        }
     }
 
     draft.AddMoney(GetTaskValue(owner, guildId, "payment")).SendMailTo(trans, MailReceiver(player), MailSender(leader));

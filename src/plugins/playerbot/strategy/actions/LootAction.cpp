@@ -147,20 +147,7 @@ uint32 OpenLootAction::GetOpeningSpell(LootObject& lootObject, GameObject* go)
             return spellId;
     }
 
-    for (uint32 spellId = 0; spellId < sSpellNameStore.GetNumRows(); spellId++)
-    {
-        if (spellId == MINING || spellId == HERB_GATHERING)
-            continue;
-
-        const SpellInfo* pSpellInfo = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
-        if (!pSpellInfo)
-            continue;
-
-        if (CanOpenLock(lootObject, pSpellInfo, go))
-            return spellId;
-    }
-
-    return 0; //Spell 3365 = Opening?
+    return 0;
 }
 
 bool OpenLootAction::CanOpenLock(LootObject& lootObject, const SpellInfo* pSpellInfo, GameObject* go)

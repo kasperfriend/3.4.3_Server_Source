@@ -44,11 +44,11 @@ Unit* PartyMemberToHeal::Calculate()
             calc.probe(health, player);
 
         Pet* pet = player->GetPet();
-        if (pet && CanHealPet(pet))
+        if (pet && CanHealPet(pet) && pet->IsAlive())
         {
             health = ((Unit*)pet)->GetHealthPct();
-            if (isRaid || health < sPlayerbotAIConfig.mediumHealth || !IsTargetOfSpellCast(player, predicate))
-                calc.probe(health, player);
+            if (isRaid || health < sPlayerbotAIConfig.mediumHealth || !IsTargetOfSpellCast(pet, predicate))
+                calc.probe(health, pet);
         }
     }
     return (Unit*)calc.param;

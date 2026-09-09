@@ -862,7 +862,7 @@ void AuctionBotSeller::AddNewAuctions(SellerConfiguration& config)
         if (!item)
         {
             TC_LOG_ERROR("ahbot", "AHBot: Item::CreateItem() returned NULL for item {} (stack: {})", itemId, stackCount);
-            return;
+            continue;
         }
 
         // Update the just created item so that if it needs random properties it has them.

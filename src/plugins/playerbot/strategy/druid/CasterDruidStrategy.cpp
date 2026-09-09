@@ -147,12 +147,6 @@ void CasterDruidStrategy::InitTriggers(std::list<TriggerNode*> &triggers)
         "eclipse (lunar)",
         NextAction::array(0, new NextAction("starfire", ACTION_NORMAL + 6), NULL)));
 
-    triggers.push_back(new TriggerNode(
-        "moonfire",
-        NextAction::array(0, new NextAction("moonfire", ACTION_NORMAL + 4), NULL)));
-
-
-
 	triggers.push_back(new TriggerNode(
 		"nature's grasp",
 		NextAction::array(0, new NextAction("nature's grasp", ACTION_EMERGENCY), NULL)));

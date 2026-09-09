@@ -58,5 +58,8 @@ uint8 ThreatValue::Calculate(Unit* target)
     if (maxThreat <= 0)
         return 0;
 
-    return botThreat * 100 / maxThreat;
+    float percent = (botThreat * 100.0f) / maxThreat;
+    if (!std::isfinite(percent) || percent <= 0.0f)
+        return 0;
+    return percent >= 255.0f ? 255 : (uint8)percent;
 }

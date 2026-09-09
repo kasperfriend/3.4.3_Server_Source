@@ -83,7 +83,7 @@ namespace ai
             static Trigger* battle_shout(PlayerbotAI* ai) { return new BattleShoutTrigger(ai); }
             static Trigger* rend(PlayerbotAI* ai) { return new RendDebuffTrigger(ai); }
             static Trigger* rend_on_attacker(PlayerbotAI* ai) { return new RendDebuffOnAttackerTrigger(ai); }
-            static Trigger* bloodrage(PlayerbotAI* ai) { return new BloodrageDebuffTrigger(ai); }
+            static Trigger* bloodrage(PlayerbotAI* ai) { return new BloodrageBuffTrigger(ai); }
             static Trigger* shield_bash(PlayerbotAI* ai) { return new ShieldBashInterruptSpellTrigger(ai); }
             static Trigger* disarm(PlayerbotAI* ai) { return new DisarmDebuffTrigger(ai); }
             static Trigger* concussion_blow(PlayerbotAI* ai) { return new ConcussionBlowTrigger(ai); }

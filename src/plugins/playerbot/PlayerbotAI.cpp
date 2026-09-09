@@ -788,15 +788,8 @@ bool PlayerbotAI::HasAura(uint32 spellId, const Unit* unit)
     if (!spellId || !unit)
         return false;
 
-    for (uint32 effect = EFFECT_0; effect <= EFFECT_2; effect++)
-    {
-        Aura* aura = ((Unit*)unit)->GetAura(spellId);
-
-        if (IsRealAura(bot, aura, (Unit*)unit))
-            return true;
-    }
-
-    return false;
+    Aura* aura = const_cast<Unit*>(unit)->GetAura(spellId);
+    return IsRealAura(bot, aura, const_cast<Unit*>(unit));
 }
 
 bool PlayerbotAI::HasAnyAuraOf(Unit* player, ...)
@@ -1091,25 +1084,33 @@ bool PlayerbotAI::IsInterruptableSpellCasting(Unit* target, string spell)
 
 bool PlayerbotAI::HasAuraToDispel(Unit* target, uint32 dispelType)
 {
-    for (uint32 type = SPELL_AURA_NONE; type < TOTAL_AURAS; ++type)
+    if (!target)
+        return false;
+
+    Unit::AppliedAuraMap const& auras = target->GetAppliedAuras();
+    for (auto const& pair : auras)
     {
-        Unit::AuraEffectList const& auras = target->GetAuraEffectsByType((AuraType)type);
-        for (Unit::AuraEffectList::const_iterator itr = auras.begin(); itr != auras.end(); ++itr)
-        {
-            const AuraEffect *const aura = *itr;
-			const SpellInfo* entry = aura->GetSpellInfo();
-            uint32 spellId = entry->Id;
+        AuraApplication const* app = pair.second;
+        if (!app)
+            continue;
 
-            bool isPositiveSpell = entry->IsPositive();
-            if (isPositiveSpell && bot->IsFriendlyTo(target))
-                continue;
+        Aura const* aura = app->GetBase();
+        if (!aura)
+            continue;
 
-            if (!isPositiveSpell && bot->IsHostileTo(target))
-                continue;
+        SpellInfo const* entry = aura->GetSpellInfo();
+        if (!entry)
+            continue;
 
-            if (canDispel(entry, dispelType))
-                return true;
-        }
+        bool isPositiveSpell = app->IsPositive();
+        if (isPositiveSpell && bot->IsFriendlyTo(target))
+            continue;
+
+        if (!isPositiveSpell && bot->IsHostileTo(target))
+            continue;
+
+        if (canDispel(entry, dispelType))
+            return true;
     }
     return false;
 }

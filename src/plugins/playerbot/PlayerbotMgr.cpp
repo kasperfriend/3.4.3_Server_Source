@@ -548,6 +548,7 @@ string PlayerbotHolder::ListBots(Player* master)
     classNames[CLASS_SHAMAN] = "Shaman";
     classNames[CLASS_WARLOCK] = "Warlock";
     classNames[CLASS_WARRIOR] = "Warrior";
+    classNames[CLASS_DEATH_KNIGHT] = "Death Knight";
     ostringstream out;
     bool first = true;
     out << "Bot roster: ";

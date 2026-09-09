@@ -882,8 +882,29 @@ void PlayerbotFactory::EnchantItem(Item* item)
     ItemTemplate const* proto = item->GetTemplate();
     int32 itemLevel = proto->GetItemLevel();
 
+    static std::vector<uint32> const enchantSpellIds = []() {
+        std::vector<uint32> spells;
+        for (uint32 id = 0; id < sSpellStore.GetNumRows(); ++id)
+        {
+            SpellInfo const *entry = sSpellMgr->GetSpellInfo(id, DIFFICULTY_NONE);
+            if (!entry)
+                continue;
+
+            for (int j = 0; j < 3; ++j)
+            {
+                if (entry->GetEffect(SpellEffIndex(j)).Effect == SPELL_EFFECT_ENCHANT_ITEM &&
+                    entry->GetEffect(SpellEffIndex(j)).MiscValue)
+                {
+                    spells.push_back(id);
+                    break;
+                }
+            }
+        }
+        return spells;
+    }();
+
     vector<uint32> ids;
-    for (int id = 0; id < sSpellStore.GetNumRows(); ++id)
+    for (uint32 id : enchantSpellIds)
     {
         SpellInfo const *entry = sSpellMgr->GetSpellInfo(id, DIFFICULTY_NONE);
         if (!entry)
@@ -1110,12 +1131,19 @@ void PlayerbotFactory::InitAvailableSpells()
 {
     bot->LearnDefaultSkills();
 
-    CreatureTemplateContainer const& creatureTemplateContainer = sObjectMgr->GetCreatureTemplates();
-    for (CreatureTemplateContainer::const_iterator i = creatureTemplateContainer.begin(); i != creatureTemplateContainer.end(); ++i)
-    {
-        CreatureTemplate const& co = i->second;
+    static std::vector<uint32> const trainerCreatureIds = []() {
+        std::vector<uint32> ids;
+        for (auto const& [creatureId, _] : sObjectMgr->GetCreatureTemplates())
+        {
+            if (sObjectMgr->GetTrainer(creatureId))
+                ids.push_back(creatureId);
+        }
+        return ids;
+    }();
 
-        Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(co.Entry);
+    for (uint32 creatureId : trainerCreatureIds)
+    {
+        Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(creatureId);
         if (!trainer)
             continue;
 

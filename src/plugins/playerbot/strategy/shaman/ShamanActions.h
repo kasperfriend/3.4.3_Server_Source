@@ -32,6 +32,12 @@ namespace ai
         CastChainHealAction(PlayerbotAI* ai) : CastAoeHealSpellAction(ai, "chain heal") {}
     };
 
+    class CastChainHealOnPartyAction : public HealPartyMemberAction {
+    public:
+        CastChainHealOnPartyAction(PlayerbotAI* ai) : HealPartyMemberAction(ai, "chain heal") {}
+        virtual string getName() { return "chain heal on party"; }
+    };
+
     class CastRiptideAction : public CastHealingSpellAction {
     public:
         CastRiptideAction(PlayerbotAI* ai) : CastHealingSpellAction(ai, "riptide") {}

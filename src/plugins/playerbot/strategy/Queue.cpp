@@ -6,6 +6,20 @@
 using namespace ai;
 
 
+Queue::~Queue(void)
+{
+    for (std::list<ActionBasket*>::iterator iter = actions.begin(); iter != actions.end(); ++iter)
+    {
+        ActionBasket* basket = *iter;
+        if (basket)
+        {
+            delete basket->getAction();
+            delete basket;
+        }
+    }
+    actions.clear();
+}
+
 void Queue::Push(ActionBasket *action)
 {
 	if (action)
@@ -17,6 +31,7 @@ void Queue::Push(ActionBasket *action)
             {
 				if (basket->getRelevance() < action->getRelevance())
 					basket->setRelevance(action->getRelevance());
+                delete action->getAction();
                 delete action;
                 return;
             }
@@ -29,7 +44,7 @@ void Queue::Push(ActionBasket **actions)
 {
 	if (actions)
 	{
-		for (int i=0; i<sizeof(actions)/sizeof(ActionBasket*); i++)
+		for (int i=0; actions[i]; i++)
 		{
 			Push(actions[i]);
 		}

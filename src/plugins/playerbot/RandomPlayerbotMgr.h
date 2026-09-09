@@ -57,6 +57,7 @@ class RandomPlayerbotMgr : public PlayerbotHolder
         uint32 GetEventValue(uint32 bot, string event);
         uint32 SetEventValue(uint32 bot, string event, uint32 value, uint32 validIn);
         list<uint32> GetBots();
+        void GetAllFreeBots(vector<uint32>& freeAllianceBots, vector<uint32>& freeHordeBots);
         vector<uint32> GetFreeBots(bool alliance);
         uint32 AddRandomBot(vector<uint32>& freeBots);
         bool ProcessBot(uint32 bot);

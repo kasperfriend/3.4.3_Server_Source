@@ -7,8 +7,7 @@ class Queue
 {
 public:
     Queue(void) {}
-public:
-    ~Queue(void) {}
+    ~Queue(void);
 public:
 	void Push(ActionBasket *action);
 	void Push(ActionBasket **actions);

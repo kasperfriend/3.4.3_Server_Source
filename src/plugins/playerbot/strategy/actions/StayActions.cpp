@@ -30,5 +30,5 @@ bool StayAction::Execute(Event event)
 
 bool StayAction::isUseful()
 {
-    return !AI_VALUE2(bool, "moving", "self target");
+    return AI_VALUE2(bool, "moving", "self target");
 }
