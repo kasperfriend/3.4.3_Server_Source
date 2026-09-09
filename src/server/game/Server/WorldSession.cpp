@@ -854,6 +854,13 @@ void WorldSession::Handle_EarlyProccess(WorldPackets::Null& null)
         , GetOpcodeNameForLogging(null.GetOpcode()), GetPlayerInfo());
 }
 
+void WorldSession::Handle_IgnoredOpcode(WorldPackets::Null& null)
+{
+    // Client message the server deliberately does not act on (see per-opcode comments in
+    // Opcodes.cpp). Debug level: expected traffic, not a missing feature worth an ERROR.
+    TC_LOG_DEBUG("network.opcode", "Received intentionally ignored opcode {} from {}", GetOpcodeNameForLogging(null.GetOpcode()), GetPlayerInfo());
+}
+
 void WorldSession::SendConnectToInstance(WorldPackets::Auth::ConnectToSerial serial)
 {
     boost::system::error_code ignored_error;

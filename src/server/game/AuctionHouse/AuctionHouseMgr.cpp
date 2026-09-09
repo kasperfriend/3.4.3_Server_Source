@@ -546,6 +546,8 @@ void AuctionHouseMgr::LoadAuctions()
     oldMSTime = getMSTime();
 
     count = 0;
+    uint32 orphanedAuctionsNoItems = 0;
+    uint32 orphanedAuctionsBadHouse = 0;
 
     if (PreparedQueryResult result = CharacterDatabase.Query(CharacterDatabase.GetPreparedStatement(CHAR_SEL_AUCTIONS)))
     {
@@ -560,7 +562,9 @@ void AuctionHouseMgr::LoadAuctions()
             AuctionHouseObject* auctionHouse = GetAuctionsById(auctionHouseId);
             if (!auctionHouse)
             {
-                TC_LOG_ERROR("misc", "Auction {} has wrong auctionHouseId {}", auction.Id, auctionHouseId);
+                // Purged below; counted for the summary log instead of one ERROR line per row
+                TC_LOG_DEBUG("misc", "Auction {} has wrong auctionHouseId {}, purging", auction.Id, auctionHouseId);
+                ++orphanedAuctionsBadHouse;
                 CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_AUCTION);
                 stmt->setUInt32(0, auction.Id);
                 trans->Append(stmt);
@@ -570,7 +574,9 @@ void AuctionHouseMgr::LoadAuctions()
             auto itemsItr = itemsByAuction.find(auction.Id);
             if (itemsItr == itemsByAuction.end())
             {
-                TC_LOG_ERROR("misc", "Auction {} has no items", auction.Id);
+                // Purged below; counted for the summary log instead of one ERROR line per row
+                TC_LOG_DEBUG("misc", "Auction {} has no items, purging", auction.Id);
+                ++orphanedAuctionsNoItems;
                 CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_AUCTION);
                 stmt->setUInt32(0, auction.Id);
                 trans->Append(stmt);
@@ -602,6 +608,9 @@ void AuctionHouseMgr::LoadAuctions()
 
         CharacterDatabase.CommitTransaction(trans);
     }
+
+    if (orphanedAuctionsNoItems || orphanedAuctionsBadHouse)
+        TC_LOG_ERROR("misc", "Purged {} orphaned auctions ({} with no items, {} with invalid auction house) - investigate what created them", orphanedAuctionsNoItems + orphanedAuctionsBadHouse, orphanedAuctionsNoItems, orphanedAuctionsBadHouse);
 
     TC_LOG_INFO("server.loading", ">> Loaded {} auctions in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
 }
