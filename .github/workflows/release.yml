@@ -450,6 +450,56 @@ jobs:
           pause
           "@ | Set-Content "$DEST\start-bnetserver.bat" -Encoding ASCII
 
+          @"
+          @echo off
+          title TrinityCore 3.4.3 - Client data extraction
+          echo ============================================================
+          echo   Extracting dbc / maps / vmaps / mmaps from a WoW 3.4.3 client
+          echo ============================================================
+          echo.
+          echo All four tools write into the CURRENT directory, which is why this
+          echo script switches to bin\ first - that is where worldserver.exe looks
+          echo for its data (DataDir = "." in worldserver.conf).  Extraction of the
+          echo movement maps takes a while; run it once.
+          echo.
+          if "%~1"=="" (
+            echo Usage:  Extract-ClientData.bat "C:\World of Warcraft"
+            echo         ^(the directory holding the Data folder of the client^)
+            echo.
+            pause
+            exit /b 1
+          )
+          cd /d "%~dp0bin"
+          set "CLIENT=%~1"
+
+          echo [1/4] mapextractor.exe -i "%CLIENT%"
+          rem -i is the client, -o would pick the output directory; both default to "."
+          mapextractor.exe -i "%CLIENT%"
+          if errorlevel 1 echo [WARN] mapextractor failed - check the client path.
+
+          echo [2/4] vmap4extractor.exe -d "%CLIENT%"
+          rem -d is the client for this tool; it has no output switch and always
+          rem writes .\Buildings into the current directory
+          vmap4extractor.exe -d "%CLIENT%"
+          if errorlevel 1 echo [WARN] vmap4extractor failed - check the client path.
+
+          echo [3/4] vmap4assembler.exe Buildings vmaps
+          vmap4assembler.exe Buildings vmaps
+          if errorlevel 1 echo [WARN] vmap4assembler failed - it needs Buildings from step 2.
+
+          echo [4/4] mmaps_generator.exe
+          rem no client needed: it reads .\vmaps and creates .\mmaps in the current
+          rem directory, so it has to run in bin\ like the server does
+          mmaps_generator.exe
+          if errorlevel 1 echo [WARN] mmaps_generator failed - see docs/MapData.md.
+
+          echo.
+          echo Done.  bin\ should now hold dbc, maps, Cameras, vmaps and mmaps.
+          echo Keep them there, or set DataDir in bin\worldserver.conf to the
+          echo directory holding them.
+          pause
+          "@ | Set-Content "$DEST\Extract-ClientData.bat" -Encoding ASCII
+
           # --- README for the zip ---
           @"
           TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
@@ -459,7 +509,7 @@ jobs:
             1. Double-click Setup-Database.bat
                (downloads portable MariaDB, creates the databases, and downloads
                + checksum-verifies + imports the world & hotfixes game data)
-            2. Extract client maps (see below)
+            2. Extract the client data (see below, takes a while)
             3. Double-click start-worldserver.bat
                (start-bnetserver.bat starts the Battle.net login server)
 
@@ -486,12 +536,13 @@ jobs:
             etc\          - configuration files (auto-configured by Setup-Database.bat)
             docs\         - Playerbots.md documentation
 
-          Client map extraction (one-time):
-            bin\mapextractor.exe -d "C:\path\to\WoW"
-            bin\vmap4extractor.exe -d "C:\path\to\WoW"
-            bin\vmap4assembler.exe Buildings vmaps
-            bin\mmaps_generator.exe -d "C:\path\to\WoW" --data vmaps
-            (then copy the dbc, maps, vmaps, mmaps folders next to the .exe files)
+          Client data extraction (one-time):
+            Extract-ClientData.bat "C:\path\to\WoW"
+            (it runs the four tools from inside bin\, which is where their output
+             has to land; mapextractor takes -i for the client, vmap4extractor -d,
+             vmap4assembler takes Buildings and vmaps as plain arguments and
+             mmaps_generator takes no client at all - it reads .\vmaps and writes
+             .\mmaps, both relative to the current directory)
 
           For AI Playerbot documentation, see docs\Playerbots.md
           "@ | Set-Content "$DEST\WINDOWS-README.txt" -Encoding ASCII
@@ -524,6 +575,7 @@ jobs:
           Write-Host "  Start-Database.bat / Start-Database.ps1 (database launcher)"
           Write-Host "  Stop-Database.bat / Stop-Database.ps1 (database stopper)"
           Write-Host "  start-worldserver.bat (game server launcher)"
+          Write-Host "  Extract-ClientData.bat (client data extraction)"
           Write-Host "  start-bnetserver.bat (login server launcher)"
 
       - name: Create release archive

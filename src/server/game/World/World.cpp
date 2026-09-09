@@ -47,6 +47,7 @@
 #include "CreatureGroups.h"
 #include "CreatureTextMgr.h"
 #include "DB2Stores.h"
+#include "DataPaths.h"
 #include "DatabaseEnv.h"
 #include "DetourMemoryFunctions.h"
 #include "DisableMgr.h"
@@ -1519,18 +1520,35 @@ void World::LoadConfigSettings(bool reload)
     m_bool_configs[CONFIG_ENABLE_AE_LOOT] = sConfigMgr->GetBoolDefault("EnableAELoot", false);
 
     ///- Read the "Data" directory from the config file
-    std::string dataPath = sConfigMgr->GetStringDefault("DataDir", "./");
-    if (dataPath.empty() || (dataPath.at(dataPath.length()-1) != '/' && dataPath.at(dataPath.length()-1) != '\\'))
-        dataPath.push_back('/');
+    std::string configuredDataPath = sConfigMgr->GetStringDefault("DataDir", "./");
 
 #if TRINITY_PLATFORM == TRINITY_PLATFORM_UNIX || TRINITY_PLATFORM == TRINITY_PLATFORM_APPLE
-    if (dataPath[0] == '~')
+    if (!configuredDataPath.empty() && configuredDataPath[0] == '~')
     {
         char const* home = getenv("HOME");
         if (home)
-            dataPath.replace(0, 1, home);
+            configuredDataPath.replace(0, 1, home);
     }
 #endif
+
+    // The dbc, map, vmap and mmap loaders all join their file names onto this prefix,
+    // so a relative DataDir silently depended on the directory worldserver happened to
+    // be started from: started from anywhere else it reported thousands of unreadable
+    // .map / .vmtree files instead of finding the data next to the executable, which is
+    // where the extraction tools put it and where the packaged layout keeps it. Resolve
+    // it against the usual data directories and require a candidate to actually hold a
+    // data tree, so an existing but empty directory is not mistaken for one.
+    Trinity::ResolvedDataPath const dataDir = Trinity::ResolveDataDirectory("DataDir", configuredDataPath, { "maps", "dbc" });
+    if (!dataDir.Found)
+    {
+        std::string searched = Trinity::DescribeDataPathCandidates(dataDir.Candidates);
+        TC_LOG_WARN("server.loading", "DataDir \"{}\" does not exist as a data directory (no maps or dbc below it). Searched:{} Continuing with \"{}\", so the map loading below will fail until the client data is extracted or DataDir is corrected in {}.",
+            configuredDataPath, searched, dataDir.Path.generic_string(), sConfigMgr->GetFilename());
+    }
+
+    std::string dataPath = dataDir.Path.generic_string();
+    if (dataPath.empty() || (dataPath.at(dataPath.length()-1) != '/' && dataPath.at(dataPath.length()-1) != '\\'))
+        dataPath.push_back('/');
 
     if (reload)
     {

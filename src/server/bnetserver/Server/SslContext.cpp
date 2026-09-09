@@ -17,12 +17,10 @@
 
 #include "SslContext.h"
 #include "Config.h"
+#include "DataPaths.h"
 #include "Log.h"
 #include "Memory.h"
-#include <algorithm>
 #include <string>
-#include <vector>
-#include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
 #include <openssl/bio.h>
@@ -38,24 +36,15 @@ namespace fs = boost::filesystem;
 
 namespace
 {
-struct ResolvedDataFile
-{
-    std::string ConfigName;       ///< name of the configuration field the path came from
-    std::string ConfiguredValue;  ///< value as written in bnetserver.conf
-    fs::path Path;                ///< file that is actually going to be opened
-    bool Found;                   ///< false when none of the candidates exists
-    std::vector<fs::path> Candidates; ///< every location that was looked at
-};
-
 auto CreatePasswordUiMethodFromPemCallback(::pem_password_cb* callback)
 {
     return Trinity::make_unique_ptr_with_deleter(UI_UTIL_wrap_read_pem_callback(callback, 0), ::UI_destroy_method);
 }
 
-auto OpenOpenSSLStore(boost::filesystem::path const& storePath, UI_METHOD const* passwordCallback, void* passwordCallbackData)
+auto OpenOpenSSLStore(fs::path const& storePath, UI_METHOD const* passwordCallback, void* passwordCallbackData)
 {
     std::string uri;
-    uri.reserve(6 + storePath.size());
+    uri.reserve(6 + storePath.string().size());
 
     uri += "file:";
     std::string genericPath = storePath.generic_string();
@@ -83,107 +72,9 @@ std::string DisplayPath(fs::path const& path)
     return path.generic_string();
 }
 
-/// Directories a relative path from the configuration file is resolved against.
-/// This mirrors the bnetserver.conf lookup in Main.cpp: the deployment layout
-/// (executables in bin\, configuration templates in ..\etc\) and the post build
-/// step that drops the .pem files next to the executable must both work no
-/// matter which directory the server was started from. Opening the certificate
-/// strictly relative to the working directory made bnetserver abort with
-/// "OSSL_STORE_open failed: The system cannot find the file specified" whenever
-/// it was launched from anywhere else.
-std::vector<fs::path> GetDataFileSearchDirectories()
+void LogMissingDataFile(Trinity::ResolvedDataPath const& file)
 {
-    std::vector<fs::path> dirs;
-
-    boost::system::error_code ec;
-    auto AddDir = [&dirs, &ec](fs::path dir)
-    {
-        if (dir.empty())
-            return;
-
-        dir = fs::absolute(dir, ec);
-        if (ec)
-            return;
-
-        dir = dir.lexically_normal();
-        if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end())
-            dirs.push_back(std::move(dir));
-    };
-
-    AddDir(fs::current_path(ec));                              ///< the working directory (historic behaviour)
-    AddDir(boost::dll::program_location().parent_path());      ///< next to bnetserver.exe
-    AddDir(fs::path(sConfigMgr->GetFilename()).parent_path()); ///< next to the loaded bnetserver.conf
-
-    std::vector<fs::path> const baseDirs = dirs;
-    for (fs::path const& base : baseDirs)
-        AddDir(base / ".." / "etc");                            ///< ..\etc of each of the above
-
-    return dirs;
-}
-
-/// Resolves a configured file to an existing file. Absolute paths are honoured
-/// verbatim; relative ones are searched in the data directories above, so the
-/// packaged and the in-build-tree layouts both work.
-ResolvedDataFile ResolveDataFile(std::string const& configName, std::string const& configuredValue)
-{
-    ResolvedDataFile result{ configName, configuredValue, fs::path(configuredValue), false, {} };
-
-    fs::path const requested{ configuredValue };
-    if (requested.empty())
-        return result;
-
-    // An absolute path (or one carrying a drive on Windows) is exactly what the
-    // operator asked for, so never look anywhere else.
-    if (requested.is_absolute() || requested.has_root_path())
-    {
-        result.Candidates.push_back(requested);
-
-        boost::system::error_code ec;
-        if (fs::is_regular_file(requested, ec) && !ec)
-        {
-            result.Path = requested;
-            result.Found = true;
-        }
-        return result;
-    }
-
-    for (fs::path const& dir : GetDataFileSearchDirectories())
-    {
-        fs::path candidate = (dir / requested).lexically_normal();
-        if (std::find(result.Candidates.begin(), result.Candidates.end(), candidate) == result.Candidates.end())
-            result.Candidates.push_back(std::move(candidate));
-    }
-
-    boost::system::error_code ec;
-    for (fs::path const& candidate : result.Candidates)
-    {
-        if (fs::is_regular_file(candidate, ec) && !ec)
-        {
-            result.Path = candidate;
-            result.Found = true;
-            return result;
-        }
-    }
-
-    // Nothing there: report the first candidate, which is what the operator
-    // configured resolved against the working directory.
-    if (!result.Candidates.empty())
-        result.Path = result.Candidates.front();
-
-    return result;
-}
-
-void LogMissingDataFile(ResolvedDataFile const& file)
-{
-    std::string searched;
-    for (fs::path const& candidate : file.Candidates)
-    {
-        searched += "\n";
-        searched += "        * ";
-        searched += candidate.generic_string();
-    }
-
-    TC_LOG_ERROR("server.ssl", "{} = \"{}\" was not found. Tried:{}", file.ConfigName, file.ConfiguredValue, searched.empty() ? std::string(" no candidate paths") : searched);
+    TC_LOG_ERROR("server.ssl", "{} = \"{}\" was not found. Tried:{}", file.ConfigName, file.ConfiguredValue, Trinity::DescribeDataPathCandidates(file.Candidates));
     TC_LOG_ERROR("server.ssl", "Copy bnetserver.cert.pem and bnetserver.key.pem next to bnetserver.exe (they live in src/server/bnetserver in the source tree and are placed there by the build), or set {} to an absolute path. Keep both files in the same directory unless the certificate and the key are in separate files.", file.ConfigName);
     TC_LOG_ERROR("server.ssl", "For a private or bot server with no certificate of its own, \"GenerateSelfSignedCertificate = 1\" in {} lets bnetserver create a self-signed key pair at these paths instead.", sConfigMgr->GetFilename());
 }
@@ -195,8 +86,8 @@ std::string GetOpenSSLErrorString()
     return buffer;
 }
 
-/// Writes the PEM blocks OpenSSL hands it into a new file, and closes it again
-/// even when a write fails, so a half written file is never retried as valid.
+/// Writes the PEM blocks OpenSSL hands it into a new file, and closes it again even
+/// when a write fails, so a half written file is never retried as valid.
 class PemFileWriter
 {
 public:
@@ -225,15 +116,15 @@ private:
 };
 
 // 2048 bit RSA signed with SHA-256, i.e. what `openssl req -x509 -newkey rsa:2048
-// -sha256` produces: the TLS stacks of the retail client and of every proxy in
-// front of the server accept it without extra configuration.
+// -sha256` produces: the TLS stack of the client accepts it without extra
+// configuration, and the key is small enough that generating it at startup is free.
 constexpr int SELF_SIGNED_KEY_BITS = 2048;
 constexpr long SELF_SIGNED_VALIDITY_SECONDS = 60L * 60L * 24L * 365L * 10L; // ten years, like the shipped certificate
 
-/// Creates a self-signed certificate and its private key, for a private server
-/// that has no TLS material of its own. Both files are created (or, when
-/// PrivateKeyFile and CertificatesFile are the same file, both blocks are written
-/// into that one file, which the loader below reads just as happily).
+/// Creates a self-signed certificate and its private key for a server that has no TLS
+/// material of its own. When certificatePath and privateKeyPath are the same file,
+/// both PEM blocks go into that one file, which the store reader below picks up just
+/// as happily as two separate files.
 bool GenerateSelfSignedCertificate(fs::path const& certificatePath, fs::path const& privateKeyPath, std::string& error)
 {
     auto keyCtx = Trinity::make_unique_ptr_with_deleter(::EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), ::EVP_PKEY_CTX_free);
@@ -273,8 +164,8 @@ bool GenerateSelfSignedCertificate(fs::path const& certificatePath, fs::path con
         ::X509_NAME_add_entry_by_txt(subjectName, field, MBSTRING_ASC, reinterpret_cast<unsigned char const*>(value), -1, -1, 0);
     };
 
-    // The CN of the certificate that ships with TrinityCore, so that a generated
-    // one behaves exactly like the distributed one towards the client.
+    // The subject of the certificate that ships with TrinityCore, so that a
+    // generated one behaves exactly like the distributed one towards the client.
     AddNameEntry("C", "US");
     AddNameEntry("O", "TrinityCore");
     AddNameEntry("OU", "Developers");
@@ -318,19 +209,22 @@ bool GenerateSelfSignedCertificate(fs::path const& certificatePath, fs::path con
 }
 
 /// Called when the configured certificate does not exist and
-/// GenerateSelfSignedCertificate is on: creates the certificate in the location
-/// the configuration points at, and re-resolves the file so the caller loads it.
-void GenerateMissingSelfSignedCertificate(ResolvedDataFile& certificateFile)
+/// GenerateSelfSignedCertificate is on: creates the certificate where the
+/// configuration points at, and re-resolves the file so the caller loads it.
+void GenerateMissingSelfSignedCertificate(Trinity::ResolvedDataPath& certificateFile)
 {
-    ResolvedDataFile privateKeyFile = ResolveDataFile("PrivateKeyFile", sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem"));
+    Trinity::ResolvedDataPath privateKeyFile = Trinity::ResolveDataFile("PrivateKeyFile", sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem"));
     if (privateKeyFile.Found)
     {
         TC_LOG_ERROR("server.ssl", "GenerateSelfSignedCertificate is enabled, but a private key ({}) exists without a matching certificate. Not overwriting it - remove \"{}\" or fix {}.", privateKeyFile.ConfiguredValue, DisplayPath(privateKeyFile.Path), certificateFile.ConfigName);
         return;
     }
 
-    boost::system::error_code ec;
-    fs::create_directories(certificateFile.Path.parent_path(), ec);
+    if (!Trinity::EnsureParentDirectoryExists(certificateFile.Path))
+    {
+        TC_LOG_ERROR("server.ssl", "GenerateSelfSignedCertificate is enabled, but the directory of \"{}\" neither exists nor could be created.", DisplayPath(certificateFile.Path));
+        return;
+    }
 
     std::string error;
     if (!GenerateSelfSignedCertificate(certificateFile.Path, privateKeyFile.Path, error))
@@ -346,7 +240,7 @@ void GenerateMissingSelfSignedCertificate(ResolvedDataFile& certificateFile)
         TC_LOG_WARN("server.ssl", "Generated a self-signed key and certificate (RSA {}, valid for {} days) and wrote them to \"{}\" and \"{}\". Use a certificate of your own before exposing bnetserver.",
             SELF_SIGNED_KEY_BITS, SELF_SIGNED_VALIDITY_SECONDS / (60 * 24), DisplayPath(certificateFile.Path), DisplayPath(privateKeyFile.Path));
 
-    certificateFile = ResolveDataFile(certificateFile.ConfigName, certificateFile.ConfiguredValue);
+    certificateFile = Trinity::ResolveDataFile(certificateFile.ConfigName, certificateFile.ConfiguredValue);
 }
 }
 
@@ -360,10 +254,10 @@ bool Battlenet::SslContext::Initialize()
         return false; \
     } } while (0)
 
-    ResolvedDataFile certificateFile = ResolveDataFile("CertificatesFile", sConfigMgr->GetStringDefault("CertificatesFile", "./bnetserver.cert.pem"));
+    Trinity::ResolvedDataPath certificateFile = Trinity::ResolveDataFile("CertificatesFile", sConfigMgr->GetStringDefault("CertificatesFile", "./bnetserver.cert.pem"));
 
     // Read quietly: the option is documented in bnetserver.conf.dist and pointed at
-    // from the error below, a warning on every single start for the users that never
+    // from the error below, a warning on every single start for the servers that never
     // want a generated certificate would just be noise.
     if (!certificateFile.Found && sConfigMgr->GetBoolDefault("GenerateSelfSignedCertificate", false, true))
         GenerateMissingSelfSignedCertificate(certificateFile);
@@ -421,7 +315,7 @@ bool Battlenet::SslContext::Initialize()
 
     if (!key)
     {
-        ResolvedDataFile privateKeyFile = ResolveDataFile("PrivateKeyFile", sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem"));
+        Trinity::ResolvedDataPath privateKeyFile = Trinity::ResolveDataFile("PrivateKeyFile", sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem"));
         instance().use_private_key_file(DisplayPath(privateKeyFile.Path), boost::asio::ssl::context::pem, err);
         if (err)
         {

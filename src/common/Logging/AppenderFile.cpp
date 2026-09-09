@@ -20,6 +20,8 @@
 #include "LogMessage.h"
 #include "StringConvert.h"
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 
 AppenderFile::AppenderFile(uint8 id, std::string const& name, LogLevel level, AppenderFlags flags, std::vector<std::string_view> const& args) :
     Appender(id, name, level, flags),
@@ -56,6 +58,7 @@ AppenderFile::AppenderFile(uint8 id, std::string const& name, LogLevel level, Ap
 
     _dynamicName = std::string::npos != _fileName.find("%s");
     _backup = (flags & APPENDER_FLAGS_MAKE_FILE_BACKUP) != 0;
+    _openFailureReported = false;
 
     if (!_dynamicName)
         logfile = OpenFile(_fileName, mode, (mode == "w") && _backup);
@@ -112,6 +115,21 @@ FILE* AppenderFile::OpenFile(std::string const& filename, std::string const& mod
     {
         _fileSize = ftell(ret);
         return ret;
+    }
+
+    // Report it, and report it once: without this a log file that could not be
+    // created (missing LogsDir, read-only directory, path pointing at a directory) was
+    // completely silent, and dynamic appenders such as the per-realm ones would
+    // otherwise repeat the same message for every single log line.
+    //
+    // stderr and not TC_LOG_ERROR on purpose: the appenders are created before the
+    // loggers are read, so this very message can be raised while sLog has no logger at
+    // all yet, and Log::write() dereferences the result without checking it.
+    if (!_openFailureReported)
+    {
+        _openFailureReported = true;
+        fprintf(stderr, "Appender \"%s\": could not open the log file \"%s\" (%s) - check that the directory exists and is writable. LogsDir is \"%s\".\n",
+            getName().c_str(), fullName.c_str(), std::strerror(errno), sLog->GetLogsDir().c_str());
     }
 
     return nullptr;

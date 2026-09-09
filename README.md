@@ -176,3 +176,26 @@ copy build\bin\RelWithDebInfo\*.dll  E:\Wotlk\Bots\bin\
 
 The release zip ships them in `bin\`; only files that were moved out of `bin\` by
 hand can produce this error.
+
+**Client data: `dbc`, `maps`, `vmaps`, `mmaps`**
+
+The extraction tools in `bin\` all write to the **current working directory** and
+each takes the client directory under a different flag:
+
+```bat
+cd /d E:\Wotlk\Bots\bin
+mapextractor.exe    -i "C:\World of Warcraft"     :: dbc, maps, Cameras, gt
+vmap4extractor.exe  -d "C:\World of Warcraft"     :: writes .\Buildings
+vmap4assembler.exe  Buildings vmaps                :: two plain arguments
+mmaps_generator.exe                                :: reads .\vmaps, writes .\mmaps
+```
+
+`mapextractor` has no `-d` and `mmaps_generator` takes no client directory at all,
+so running them from anywhere else either fails on the command line or leaves the
+data in the wrong place.  `Extract-ClientData.bat` in the release zip does the
+`cd` and the four steps for you.  `DataDir = "."` then finds everything, from
+whichever directory worldserver is started: a relative `DataDir`, `LogsDir`,
+`IPLocationFile` and the TLS certificate files are resolved against the working
+directory, the directory of the executable and the directory of the config file,
+and a missing log directory is created.  When nothing matches, the server names the
+paths it searched instead of reporting a few thousand unreadable files.

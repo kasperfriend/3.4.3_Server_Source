@@ -19,10 +19,13 @@
 #include "Config.h"
 #include "GameTime.h"
 #include "IpAddress.h"
+#include "Log.h"
 #include "Realm.h"
 #include "Timer.h"
 #include "World.h"
 #include "WorldPacket.h"
+#include <cerrno>
+#include <cstring>
 
 #pragma pack(push, 1)
 
@@ -81,33 +84,35 @@ PacketLog* PacketLog::instance()
 
 void PacketLog::Initialize()
 {
-    std::string logsDir = sConfigMgr->GetStringDefault("LogsDir", "");
-
-    if (!logsDir.empty())
-        if ((logsDir.at(logsDir.length() - 1) != '/') && (logsDir.at(logsDir.length() - 1) != '\\'))
-            logsDir.push_back('/');
-
     std::string logname = sConfigMgr->GetStringDefault("PacketLogFile", "");
-    if (!logname.empty())
+    if (logname.empty())
+        return;
+
+    // Write into the directory Log already resolved and created for the log files.
+    // Deriving the path from LogsDir a second time here looked somewhere else than
+    // server.log whenever the configured value was relative and the server had not been
+    // started from its own directory, and a file that could not be opened used to stay
+    // completely unreported.
+    std::string const fileName = sLog->GetLogsDir() + logname;
+    _file = fopen(fileName.c_str(), "wb");
+    if (!_file)
     {
-        _file = fopen((logsDir + logname).c_str(), "wb");
-
-        if (CanLogPacket())
-        {
-            LogHeader header;
-            header.Signature[0] = 'P'; header.Signature[1] = 'K'; header.Signature[2] = 'T';
-            header.FormatVersion = 0x0301;
-            header.SnifferId = 'T';
-            header.Build = realm.Build;
-            header.Locale[0] = 'e'; header.Locale[1] = 'n'; header.Locale[2] = 'U'; header.Locale[3] = 'S';
-            std::memset(header.SessionKey, 0, sizeof(header.SessionKey));
-            header.SniffStartUnixtime = GameTime::GetGameTime();
-            header.SniffStartTicks = getMSTime();
-            header.OptionalDataSize = 0;
-
-            fwrite(&header, sizeof(header), 1, _file);
-        }
+        TC_LOG_ERROR("server", "PacketLogFile \"{}\" could not be opened ({}), packet logging stays disabled.", fileName, std::strerror(errno));
+        return;
     }
+
+    LogHeader header;
+    header.Signature[0] = 'P'; header.Signature[1] = 'K'; header.Signature[2] = 'T';
+    header.FormatVersion = 0x0301;
+    header.SnifferId = 'T';
+    header.Build = realm.Build;
+    header.Locale[0] = 'e'; header.Locale[1] = 'n'; header.Locale[2] = 'U'; header.Locale[3] = 'S';
+    std::memset(header.SessionKey, 0, sizeof(header.SessionKey));
+    header.SniffStartUnixtime = GameTime::GetGameTime();
+    header.SniffStartTicks = getMSTime();
+    header.OptionalDataSize = 0;
+
+    fwrite(&header, sizeof(header), 1, _file);
 }
 
 void PacketLog::LogPacket(WorldPacket const& packet, Direction direction, boost::asio::ip::address const& addr, uint16 port, ConnectionType connectionType)
