@@ -242,7 +242,11 @@ namespace Playerbot
     {
         if (!sPlayerbotAIConfig.Initialize())
         {
-            TC_LOG_INFO("playerbot", "Playerbots are disabled");
+            // Warn, not info: a silent bot system with no ai_playerbot_* tables
+            // and no random bots is almost never what the operator wants, and
+            // an INFO line is invisible when loggers filter it out. The config
+            // loader above already logged which key/file disabled the system.
+            TC_LOG_WARN("playerbot", "Playerbots are disabled (AiPlayerbot.Enabled is off or the bot configuration is invalid) - no bot tables will be created and no bots will appear");
             return;
         }
 
