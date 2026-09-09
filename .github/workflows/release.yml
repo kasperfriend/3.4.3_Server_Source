@@ -339,7 +339,7 @@ jobs:
             Write-Host "  Copied Stop-Database.bat"
           }
 
-          # --- Launcher batch file ---
+          # --- Launcher batch files ---
           @"
           @echo off
           title TrinityCore 3.4.3 World Server
@@ -348,30 +348,53 @@ jobs:
           echo ============================================================
           echo.
           echo If this is your first time, run Setup-Database.bat first!
-          echo It will download and configure a portable MariaDB database.
+          echo It will download and configure a portable MariaDB database
+          echo and import the world + hotfixes game data.
           echo.
           echo Starting worldserver...
           echo.
-          cd /d "%~dp0"
-          bin\worldserver.exe
+          cd /d "%~dp0bin"
+          worldserver.exe
           pause
           "@ | Set-Content "$DEST\start-worldserver.bat" -Encoding ASCII
+
+          @"
+          @echo off
+          title TrinityCore 3.4.3 Battle.net Server
+          echo ============================================================
+          echo   TrinityCore 3.4.3 - Battle.net / Login Server
+          echo ============================================================
+          echo.
+          echo If this is your first time, run Setup-Database.bat first!
+          echo.
+          echo Starting bnetserver...
+          echo.
+          cd /d "%~dp0bin"
+          bnetserver.exe
+          pause
+          "@ | Set-Content "$DEST\start-bnetserver.bat" -Encoding ASCII
 
           # --- README for the zip ---
           @"
           TrinityCore 3.4.3 Server + AI Playerbots (Windows x64)
           =======================================================
 
-          QUICK START (3 steps):
+          QUICK START:
             1. Double-click Setup-Database.bat
-               (downloads portable MariaDB, creates databases, imports SQL)
+               (downloads portable MariaDB, creates the databases, and downloads
+               + checksum-verifies + imports the world & hotfixes game data)
             2. Extract client maps (see below)
             3. Double-click start-worldserver.bat
+               (start-bnetserver.bat starts the Battle.net login server)
 
           Database scripts:
-            Setup-Database.bat  - First-time setup (downloads MariaDB, imports SQL)
-            Start-Database.bat  - Start the database (run before worldserver)
-            Stop-Database.bat   - Stop the database
+            Setup-Database.bat   - First-time setup (MariaDB + all game data)
+            Start-Database.bat   - Start the database (run before worldserver)
+            Stop-Database.bat    - Stop the database
+
+          Server launchers:
+            start-worldserver.bat - Start the game server
+            start-bnetserver.bat  - Start the Battle.net / login server
 
           Contents:
             bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
@@ -412,7 +435,8 @@ jobs:
           Write-Host "  Setup-Database.bat (database installer)"
           Write-Host "  Start-Database.bat (database launcher)"
           Write-Host "  Stop-Database.bat (database stopper)"
-          Write-Host "  start-worldserver.bat (server launcher)"
+          Write-Host "  start-worldserver.bat (game server launcher)"
+          Write-Host "  start-bnetserver.bat (login server launcher)"
 
       - name: Create release archive
         id: package
@@ -535,9 +559,9 @@ jobs:
           ### Quick start
 
           1. Extract the \`.zip\`
-          2. Double-click **\`Setup-Database.bat\`** — downloads portable MariaDB, creates databases, imports all SQL, and configures the server automatically
+          2. Double-click **\`Setup-Database.bat\`** — downloads portable MariaDB, creates the databases, downloads + checksum-verifies + imports the world and hotfixes game data (WyrmrestCore DB release), and configures the servers automatically
           3. Extract client maps with the tools in \`bin\` (mapextractor, vmap4extractor, vmap4assembler, mmaps_generator)
-          4. Double-click **\`start-worldserver.bat\`**
+          4. Double-click **\`start-worldserver.bat\`** (and \`start-bnetserver.bat\` for the login server)
 
           No MySQL/MariaDB installation needed — the setup script downloads a fully portable database.
           All required DLLs (OpenSSL, Boost, MySQL client, MSVC runtime) are included in the zip.
