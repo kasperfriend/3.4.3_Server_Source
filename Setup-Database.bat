@@ -427,18 +427,40 @@ REM Apply the project's incremental SQL updates (sorted by filename).
 REM ------------------------------------------------------------------
 :APPLY_UPDATES
 echo   Applying database updates...
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\auth\*.sql" 2^>nul ^| sort') do (
+mkdir "%TEMP%" 2>nul
+
+REM auth updates
+set "TC_UPDATE_LIST=%TEMP%\tc_auth_updates.tmp"
+dir /b /s /a-d "!SQL_DIR!\updates\auth\*.sql" 2>nul | sort > "!TC_UPDATE_LIST!"
+for /f "usebackq delims=" %%f in ("!TC_UPDATE_LIST!") do (
     "!MYSQL!" -u !DB_USER! -p!DB_PASS! auth < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\characters\*.sql" 2^>nul ^| sort') do (
+del "!TC_UPDATE_LIST!" >nul 2>&1
+
+REM characters updates
+set "TC_UPDATE_LIST=%TEMP%\tc_char_updates.tmp"
+dir /b /s /a-d "!SQL_DIR!\updates\characters\*.sql" 2>nul | sort > "!TC_UPDATE_LIST!"
+for /f "usebackq delims=" %%f in ("!TC_UPDATE_LIST!") do (
     "!MYSQL!" -u !DB_USER! -p!DB_PASS! characters < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\world\*.sql" 2^>nul ^| sort') do (
+del "!TC_UPDATE_LIST!" >nul 2>&1
+
+REM world updates
+set "TC_UPDATE_LIST=%TEMP%\tc_world_updates.tmp"
+dir /b /s /a-d "!SQL_DIR!\updates\world\*.sql" 2>nul | sort > "!TC_UPDATE_LIST!"
+for /f "usebackq delims=" %%f in ("!TC_UPDATE_LIST!") do (
     "!MYSQL!" -u !DB_USER! -p!DB_PASS! world < "%%f" 2>nul
 )
-for /f "delims=" %%f in ('dir /b /s /a-d "!SQL_DIR!\updates\hotfixes\*.sql" 2^>nul ^| sort') do (
+del "!TC_UPDATE_LIST!" >nul 2>&1
+
+REM hotfixes updates
+set "TC_UPDATE_LIST=%TEMP%\tc_hotfix_updates.tmp"
+dir /b /s /a-d "!SQL_DIR!\updates\hotfixes\*.sql" 2>nul | sort > "!TC_UPDATE_LIST!"
+for /f "usebackq delims=" %%f in ("!TC_UPDATE_LIST!") do (
     "!MYSQL!" -u !DB_USER! -p!DB_PASS! hotfixes < "%%f" 2>nul
 )
+del "!TC_UPDATE_LIST!" >nul 2>&1
+
 goto :EOF
 
 :CHECK_RUNNING
