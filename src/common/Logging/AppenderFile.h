@@ -35,6 +35,7 @@ class TC_COMMON_API AppenderFile : public Appender
         void CloseFile();
         void _write(LogMessage const* message) override;
         FILE* logfile;
+        bool _openFailureReported;
         std::string _fileName;
         std::string _logDir;
         bool _dynamicName;

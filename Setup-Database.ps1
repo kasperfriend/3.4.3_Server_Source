@@ -57,6 +57,13 @@ $WorldDump          = 'world_full_2026_08_10.sql'
 $HotfixesDump       = 'hotfixes_full_2026_08_10.sql'
 $WorldDumpSha256    = '91401028dce1dc302e12709a268e4d46cb74f527f95396e2dea1ea5da17081de'
 $HotfixesDumpSha256 = '20170a1a52a93af556f4a875885cf2e462777f3a5a3b58e8b128bc171ea866dc'
+# The realm this setup script seeds, and the client build the binaries expect.
+# 54261 is 3.4.3.54261, the build sql/updates/auth/3.4.3/2026_08_10_00_auth.sql
+# registers in auth.build_info; keep the two in sync if the client build changes.
+$RealmName          = 'Trinity'
+$ClientBuild        = 54261
+$BuildAuthSeed      = '25FD812475DCF26F9F1383AED37FC99E'
+
 $MariaDbVersion     = '10.11.19'
 $MariaDbZipSha256   = '398ea30e5036010bbebe01d2b1804280424dcc2626e36d8e95155c04d25a0490'
 $MariaDbUrl         = "https://archive.mariadb.org/mariadb-$MariaDbVersion/winx64-packages/mariadb-$MariaDbVersion-winx64.zip"
@@ -94,7 +101,8 @@ function Write-Banner {
     Write-Host '  5. Import SQL schemas (auth, characters, playerbot)'
     Write-Host '  6. Download + verify + import the world and hotfixes game data'
     Write-Host '     (WyrmrestCore DB release), then apply database updates'
-    Write-Host '  7. Configure worldserver.conf and bnetserver.conf'
+    Write-Host '  7. Write etc\worldserver.conf and etc\bnetserver.conf, and seed the'
+    Write-Host '     realm row (auth.realmlist) the login flow needs'
     Write-Host ''
 }
 
@@ -753,6 +761,69 @@ function Set-ConfDatabaseLines {
     [System.IO.File]::WriteAllText($Path, $c)
 }
 
+function Get-ConfValue {
+    # Read one "Key = value" from a .conf / .conf.dist, without a config parser:
+    # quoted or not, comments ignored by the anchored regex.
+    param([string]$Path, [string]$Key, [string]$Default)
+    if (-not (Test-Path -LiteralPath $Path)) { return $Default }
+    $m = [regex]::Match([System.IO.File]::ReadAllText($Path), "(?m)^\s*${Key}\s*=\s*(.*?)\s*$")
+    if (-not $m.Success) { return $Default }
+    return ($m.Groups[1].Value -replace '^"', '' -replace '"$', '')
+}
+
+function Get-ConfNumber {
+    param([string]$Path, [string]$Key, [int]$Default)
+    $v = Get-ConfValue -Path $Path -Key $Key -Default "$Default"
+    if ($v -match '^\d+$') { return [int]$v }
+    return $Default
+}
+
+function Seed-AuthRealmData {
+    # sql/base/auth_database.sql is a schema-only dump, so a fresh install has an
+    # empty auth.realmlist. Neither server says that in words: worldserver finds no
+    # realm row for RealmID, and bnetserver answers the client with an empty realm
+    # list, so login stops after the password. Seed the realm the configuration
+    # file describes. realmlist.id is the primary key, so this is safe to re-run
+    # and never touches a realm an operator has edited.
+    $wsConf = Join-Path $script:EtcDir 'worldserver.conf'
+    if (-not (Test-Path -LiteralPath $wsConf)) {
+        $wsConf = Join-Path $script:EtcDir 'worldserver.conf.dist'
+    }
+    $realmId   = Get-ConfNumber -Path $wsConf -Key 'RealmID'         -Default 1
+    $realmPort = Get-ConfNumber -Path $wsConf -Key 'RealmServerPort' -Default 8085
+    $zone      = Get-ConfNumber -Path $wsConf -Key 'RealmZone'       -Default 1
+
+    $rows = Get-QueryCount -Sql "SELECT COUNT(*) FROM auth.realmlist WHERE id = $realmId"
+    if ($rows -eq 0) {
+        # flag 0: worldserver sets REALM_FLAG_OFFLINE itself at startup and clears
+        # it once it is accepting connections. icon and population are overwritten
+        # by worldserver too.
+        $sql = "INSERT IGNORE INTO ``realmlist`` (``id``, ``name``, ``address``, ``localAddress``, ``port``, ``icon``, ``flag``, ``timezone``, ``allowedSecurityLevel``, ``population``, ``gamebuild``, ``Region``, ``Battlegroup``) " +
+               "VALUES ($realmId, '$script:RealmName', '127.0.0.1', '127.0.0.1', $realmPort, 0, 0, $zone, 0, 0, $($script:ClientBuild), 1, 1);"
+        $r = Invoke-Mysql -User 'root' -Password $script:DbRootPass -Sql $sql
+        if ($r.ExitCode -ne 0) {
+            Write-Host "  [WARN] Could not seed auth.realmlist for realm $realmId - add the row by hand:"
+            Write-Host "         id=$realmId name=$script:RealmName address=127.0.0.1 port=$realmPort gamebuild=$script:ClientBuild"
+        } else {
+            Write-Host "  Seeded auth.realmlist: realm '$script:RealmName' (id $realmId) on 127.0.0.1:$realmPort, build $script:ClientBuild"
+        }
+    } else {
+        Write-Host "  auth.realmlist already has realm $realmId - left alone."
+    }
+
+    # The same for auth.build_info: without a row for the client build, every login
+    # is refused with ERROR_BAD_VERSION ("Missing auth seed for realm build"). The
+    # update file normally provides it; this is the safety net for databases that
+    # were created without sql/updates.
+    $builds = Get-QueryCount -Sql "SELECT COUNT(*) FROM auth.build_info WHERE build = $($script:ClientBuild)"
+    if ($builds -eq 0) {
+        $sql = "INSERT IGNORE INTO ``build_info`` (``build``, ``majorVersion``, ``minorVersion``, ``bugfixVersion``, ``hotfixVersion``, ``winAuthSeed``, ``win64AuthSeed``, ``mac64AuthSeed``, ``winChecksumSeed``, ``macChecksumSeed``) " +
+               "VALUES ($($script:ClientBuild), 3, 4, 3, NULL, NULL, '$($script:BuildAuthSeed)', NULL, NULL, NULL);"
+        [void](Invoke-Mysql -User 'root' -Password $script:DbRootPass -Sql $sql)
+        Write-Host "  Seeded auth.build_info for client build $script:ClientBuild (3.4.3)."
+    }
+}
+
 function Update-ServerConfig {
     if (-not (Test-Path -LiteralPath $script:EtcDir)) {
         New-Item -ItemType Directory -Path $script:EtcDir -Force | Out-Null
@@ -781,17 +852,10 @@ function Update-ServerConfig {
         Write-Host '  Updated etc\bnetserver.conf'
     }
 
-    $binDir = Join-Path $script:Root 'bin'
-    if (Test-Path -LiteralPath $binDir) {
-        if (Test-Path -LiteralPath $ws) {
-            Copy-Item -LiteralPath $ws -Destination (Join-Path $binDir 'worldserver.conf') -Force
-            Write-Host '  Copied worldserver.conf to bin\'
-        }
-        if (Test-Path -LiteralPath $bs) {
-            Copy-Item -LiteralPath $bs -Destination (Join-Path $binDir 'bnetserver.conf') -Force
-            Write-Host '  Copied bnetserver.conf to bin\'
-        }
-    }
+    # Deliberately no copy of these files into bin\: both servers look for their
+    # .conf next to the executable first and only then in ..\etc, so a second copy
+    # in bin\ silently wins and the file the operator is told to edit - etc\, the one
+    # this script updates - is never read. One file, in etc\, is the one that counts.
 }
 
 function Invoke-ContentSetup {
@@ -814,6 +878,7 @@ function Invoke-ContentSetup {
     Write-Host ''
     Update-ServerConfig
     Write-Host '[OK] Configuration files updated.'
+    Seed-AuthRealmData
 }
 
 function Write-Success {
@@ -828,15 +893,32 @@ function Write-Success {
     Write-Host '  Databases:   auth, characters, world, hotfixes'
     Write-Host "  Data dir:    $script:DbDir\data"
     Write-Host ''
-    Write-Host '  Server config files have been updated:'
+    Write-Host '  Server config files (the only ones the servers read):'
     Write-Host '    etc\worldserver.conf'
     Write-Host '    etc\bnetserver.conf'
-    Write-Host '    bin\worldserver.conf'
-    Write-Host '    bin\bnetserver.conf'
     Write-Host ''
     Write-Host '  Game data downloaded, checksum-verified and imported:'
     Write-Host "    world     <- $script:WorldDump"
     Write-Host "    hotfixes  <- $script:HotfixesDump"
+    Write-Host "    realm     <- $script:RealmName (auth.realmlist id 1, build $script:ClientBuild)"
+    Write-Host ''
+    Write-Host '  Next:'
+    Write-Host '    1. Client data. Extract it once with'
+    Write-Host '         Extract-ClientData.bat "C:\World of Warcraft"'
+    Write-Host '       worldserver needs bin\dbc and bin\vmaps and exits with the'
+    Write-Host '       directory it looked in when they are missing.'
+    Write-Host '    2. Start the servers: start-bnetserver.bat, then start-worldserver.bat'
+    Write-Host '       (each one starts this MariaDB too if it is not running already).'
+    Write-Host '    3. In the worldserver window, create your login account:'
+    Write-Host '         bnetaccount create you@example.com yourpassword'
+    Write-Host '       The name must contain an @: Battle.net login uses e-mail addresses.'
+    Write-Host '       It prints the game account name it created with the Battle.net'
+    Write-Host '       one; give that account GM rights in the same window:'
+    Write-Host '         account set seclevel <game account name> 2'
+    Write-Host '    4. Point a WoW client of build $script:ClientBuild at 127.0.0.1.'
+    Write-Host '       If the realm connects to nothing, the client could not resolve the'
+    Write-Host '       realm name it was handed; add "127.0.0.1  1-1-1" to'
+    Write-Host '       C:\Windows\System32\drivers\etc\hosts (Region-Battlegroup-RealmID).'
     Write-Host ''
     Write-Host '  To stop the database:  run Stop-Database.bat'
     Write-Host '  To start it again:     run Start-Database.bat'

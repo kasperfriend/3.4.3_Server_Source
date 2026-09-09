@@ -16,6 +16,8 @@
  */
 
 #include "OpenSSLCrypto.h"
+#include "Log.h"
+#include <boost/filesystem/operations.hpp>
 #include <openssl/crypto.h>
 #include <cstdlib>
 
@@ -24,6 +26,51 @@
 OSSL_PROVIDER* LegacyProvider;
 #endif
 
+namespace
+{
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+constexpr char const* LEGACY_PROVIDER_MODULE_NAME = "legacy.dll";
+#else
+constexpr char const* LEGACY_PROVIDER_MODULE_NAME = "legacy.so";
+#endif
+
+/// OpenSSL 3 does not keep its provider modules next to the application: an installed
+/// runtime puts them into a "providers" directory below its own bin. The callers hand
+/// in the executable's directory, which is where a portable deployment ships the
+/// OpenSSL DLLs, so look for the module in both places and use the directory that
+/// actually holds it. When nothing holds it, say so: a provider that cannot be loaded
+/// is otherwise completely invisible, until something asks for an algorithm that only
+/// exists in it and OpenSSL reports an opaque "unsupported" error.
+boost::filesystem::path GetProviderModuleDirectory(boost::filesystem::path const& preferred, bool& found)
+{
+    found = false;
+
+    boost::system::error_code ec;
+    boost::filesystem::path const candidates[] = {
+        preferred,
+        preferred / "providers",
+        preferred.parent_path() / "providers"
+    };
+
+    for (boost::filesystem::path const& candidate : candidates)
+    {
+        if (candidate.empty())
+            continue;
+
+        ec.clear();
+        if (boost::filesystem::exists(candidate / LEGACY_PROVIDER_MODULE_NAME, ec) && !ec)
+        {
+            found = true;
+            return candidate;
+        }
+    }
+
+    return preferred;
+}
+#endif
+}
+
 void OpenSSLCrypto::threadsSetup([[maybe_unused]] boost::filesystem::path const& providerModulePath)
 {
 #ifdef VALGRIND
@@ -31,11 +78,25 @@ void OpenSSLCrypto::threadsSetup([[maybe_unused]] boost::filesystem::path const&
 #endif
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    bool providerDirectoryLocated = false;
+    boost::filesystem::path const moduleDirectory = GetProviderModuleDirectory(providerModulePath, providerDirectoryLocated);
+
 #if TRINITY_PLATFORM == TRINITY_PLATFORM_WINDOWS
+    // Keep the string alive over the call: OpenSSL documents the path as borrowed
+    // until the context is freed on some versions.
+    std::string const modulesPath = moduleDirectory.string();
     if (!std::getenv("OPENSSL_MODULES"))
-        OSSL_PROVIDER_set_default_search_path(nullptr, providerModulePath.string().c_str());
+        OSSL_PROVIDER_set_default_search_path(nullptr, modulesPath.c_str());
 #endif
+
     LegacyProvider = OSSL_PROVIDER_try_load(nullptr, "legacy", 1);
+    if (!LegacyProvider)
+    {
+        if (providerDirectoryLocated)
+            TC_LOG_INFO("server.loading", "The OpenSSL legacy provider was found in \"{}\" but could not be loaded; algorithms that only exist in it (RC4, MD4, DES, ...) are unavailable.", moduleDirectory.generic_string());
+        else
+            TC_LOG_INFO("server.loading", "The OpenSSL legacy provider ({}) was not found next to the executable or in its \"providers\" directory, so it is not loaded. The core does not need it; copy {} into \"{}\" if a tool or feature asks for it.", LEGACY_PROVIDER_MODULE_NAME, LEGACY_PROVIDER_MODULE_NAME, moduleDirectory.generic_string());
+    }
 #endif
 }
 

@@ -19,6 +19,7 @@
 #include "AppenderConsole.h"
 #include "AppenderFile.h"
 #include "Config.h"
+#include "DataPaths.h"
 #include "Duration.h"
 #include "Errors.h"
 #include "Logger.h"
@@ -412,8 +413,28 @@ void Log::LoadFromConfig()
     AppenderId = 0;
     m_logsDir = sConfigMgr->GetStringDefault("LogsDir", "");
     if (!m_logsDir.empty())
-        if ((m_logsDir.at(m_logsDir.length() - 1) != '/') && (m_logsDir.at(m_logsDir.length() - 1) != '\\'))
+    {
+        // A relative LogsDir used to mean "the directory the process happens to have
+        // been started in", which quietly moved the logs of every server launched from
+        // elsewhere - or lost them, because a missing directory was never created and
+        // AppenderFile simply failed to open its files. Search next to the executable
+        // and the configuration as well, and create the result when needed.
+        Trinity::ResolvedDataPath logsDir = Trinity::ResolveDataDirectory("LogsDir", m_logsDir);
+        if (Trinity::EnsureDirectoryExists(logsDir.Path))
+            m_logsDir = logsDir.Path.generic_string();
+        else
+        {
+            // The appenders are created further down, so a log message here could not
+            // reach them even if it was not dropped; complain on stderr instead, which is
+            // what the other startup-time configuration errors in this file do.
+            std::string const searched = Trinity::DescribeDataPathCandidates(logsDir.Candidates);
+            fprintf(stderr, "Log: LogsDir \"%s\" does not exist and could not be created, so no log file will be written. Searched:%s\n",
+                logsDir.Path.generic_string().c_str(), searched.c_str());
+        }
+
+        if (!m_logsDir.empty() && (m_logsDir.at(m_logsDir.length() - 1) != '/') && (m_logsDir.at(m_logsDir.length() - 1) != '\\'))
             m_logsDir.push_back('/');
+    }
 
     ReadAppendersFromConfig();
     ReadLoggersFromConfig();

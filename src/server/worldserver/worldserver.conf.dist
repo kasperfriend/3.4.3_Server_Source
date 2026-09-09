@@ -74,8 +74,15 @@ RealmID = 1
 #    DataDir
 #        Description: Data directory setting.
 #        Important:   DataDir needs to be quoted, as the string might contain space characters.
+#                     Every dbc, map, vmap and mmap file name is joined onto this prefix, so a
+#                     relative value used to depend on the directory worldserver was started
+#                     from. It is now searched in the working directory, the directory of
+#                     worldserver.exe, the directory of this config file and their ..\etc
+#                     siblings, and a candidate only counts when it holds a data directory (a
+#                     maps or dbc folder below it). The searched paths are logged when none of
+#                     them does, instead of letting the extractors fail on thousands of files.
 #        Example:     "@prefix@/share/trinitycore"
-#        Default:     "."
+#        Default:     "."    - (Data next to the executables, or in the working directory)
 
 DataDir = "."
 
@@ -83,7 +90,12 @@ DataDir = "."
 #    LogsDir
 #        Description: Logs directory setting.
 #        Important:   LogsDir needs to be quoted, as the string might contain space characters.
-#                     Logs directory must exists, or log file creation will be disabled.
+#                     A relative directory is searched in the working directory, the directory
+#                     of worldserver.exe and the directory of this config file, in that order,
+#                     and is created when missing. A log file that still cannot be opened is
+#                     reported once with the path that failed; before, log file creation was
+#                     disabled in silence. PacketLogFile is written into the directory resolved
+#                     here as well.
 #        Default:     "" - (Log files will be stored in the current path)
 
 LogsDir = ""
@@ -248,6 +260,10 @@ MySQLExecutable = ""
 #
 #    IPLocationFile
 #        Description: The path to your IP2Location database CSV file.
+#        Important:   A relative path is searched in the working directory, the directory of
+#                     worldserver.exe, the directory of this config file and their ..\etc
+#                     siblings, and a file that is still missing is reported with the paths
+#                     that were tried instead of being skipped in silence.
 #        Example:     "C:/Trinity/IP2LOCATION-LITE-DB1.CSV"
 #                     "/home/trinity/IP2LOCATION-LITE-DB1.CSV"
 #        Default:     ""  - (Disabled)
@@ -582,6 +598,9 @@ Auction.TaintedSearchDelay = 3000
 #
 #    PidFile
 #        Description: World daemon PID file.
+#        Important:   A relative path is taken from the working directory of the process,
+#                     which is not the program directory when the server is started with
+#                     the Daemon option or as a service; prefer an absolute path there.
 #        Example:     "./world.pid" - (Enabled)
 #        Default:     ""            - (Disabled)
 
@@ -591,6 +610,10 @@ PidFile = ""
 #    PacketLogFile
 #        Description: Binary packet logging file for the world server.
 #                     Filename extension must be .pkt to be parsable with WowPacketParser.
+#                     Only the name of the file is used: it is created in the directory
+#                     resolved from LogsDir, together with the log files, and a file that
+#                     cannot be opened is reported rather than leaving packet logging off
+#                     without a word.
 #        Example:     "World.pkt" - (Enabled)
 #        Default:     ""          - (Disabled)
 

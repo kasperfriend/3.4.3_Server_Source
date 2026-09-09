@@ -47,10 +47,15 @@ bool LoadGameObjectModelList(std::string const& dataPath)
 {
     uint32 oldMSTime = getMSTime();
 
-    auto model_list_file = Trinity::make_unique_ptr_with_deleter(fopen((dataPath + "vmaps/" + VMAP::GAMEOBJECT_MODELS).c_str(), "rb"), &::fclose);
+    std::string const modelListPath = dataPath + "vmaps/" + VMAP::GAMEOBJECT_MODELS;
+    auto model_list_file = Trinity::make_unique_ptr_with_deleter(fopen(modelListPath.c_str(), "rb"), &::fclose);
     if (!model_list_file)
     {
-        TC_LOG_ERROR("misc", "Unable to open '{}' file.", VMAP::GAMEOBJECT_MODELS);
+        // Naming only the file told the operator nothing about where it was looked
+        // for, which is the difference between a wrong DataDir and no extracted
+        // client data at all.
+        TC_LOG_ERROR("misc", "Unable to open the '{}' file ({}). It is written by the vmap extraction into the vmaps directory of DataDir - extract the client data or correct DataDir in the server configuration.",
+            VMAP::GAMEOBJECT_MODELS, modelListPath);
         return false;
     }
 

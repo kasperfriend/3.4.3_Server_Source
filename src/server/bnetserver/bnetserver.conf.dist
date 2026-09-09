@@ -36,7 +36,11 @@
 #    LogsDir
 #        Description: Logs directory setting.
 #        Important:   LogsDir needs to be quoted, as the string might contain space characters.
-#                     Logs directory must exists, or log file creation will be disabled.
+#                     A relative directory is searched in the current directory, in the directory
+#                     of the executable and in the directory of this configuration file, in that
+#                     order, and is created when it is missing. A log file that still cannot be
+#                     opened is reported once on the console with the path that failed; before,
+#                     logging was disabled in silence.
 #        Default:     "" - (Log files will be stored in the current path)
 
 LogsDir = ""
@@ -90,6 +94,9 @@ BindIP = "0.0.0.0"
 #
 #    PidFile
 #        Description: Auth server PID file.
+#        Important:   A relative path is taken from the working directory of the process,
+#                     which is not the program directory when the server is started as a
+#                     service; prefer an absolute path there.
 #        Example:     "./bnetserver.pid"  - (Enabled)
 #        Default:     ""                  - (Disabled)
 
@@ -98,6 +105,12 @@ PidFile = ""
 #
 #    CertificatesFile
 #        Description: Certificates file. Both PEM (.crt) and PKCS#12 (.pfx) formats are supported
+#                     bnetserver refuses to start without it ("Failed to initialize
+#                     SSL context"). A relative path is looked for in the working
+#                     directory, the directory of bnetserver.exe, the directory of
+#                     this config file and their ..\etc siblings; the certificate and
+#                     key are placed next to the executable by the build, so leave
+#                     them there when you copy the binaries around.
 #        Example:     "/etc/ssl/certs/bnetserver.cert.pem"
 #        Default:     "./bnetserver.cert.pem"
 
@@ -105,7 +118,8 @@ CertificatesFile = "./bnetserver.cert.pem"
 
 #
 #    PrivateKeyFile
-#        Description: Private key file.
+#        Description: Private key file. Ignored when CertificatesFile already
+#                     contains the key. Same path lookup as CertificatesFile.
 #        Example:     "/etc/ssl/private/bnetserver.key.pem"
 #                     Leave empty if you have a certificate in PKCS#12 format
 #        Default:     "./bnetserver.key.pem"
@@ -118,6 +132,21 @@ PrivateKeyFile = "./bnetserver.key.pem"
 #        Default:     ""
 
 PrivateKeyPassword = ""
+
+#
+#    GenerateSelfSignedCertificate
+#        Description: Create a self-signed certificate and private key on startup
+#                     when the file configured in CertificatesFile does not exist,
+#                     instead of refusing to start.  What is created is written to
+#                     the configured paths (2048 bit RSA, SHA-256, valid ten years),
+#                     creating a missing directory on the way there.  Existing files
+#                     are kept, reused by later starts and never overwritten.
+#                     Meant for local and development servers.  Put a certificate of
+#                     your own in place before exposing bnetserver anywhere public.
+#        Default:     0 - (disabled, bnetserver exits when the certificate is missing)
+#                     1 - (generate a self-signed certificate on first start)
+
+GenerateSelfSignedCertificate = 0
 
 #
 #    UseProcessors
@@ -222,6 +251,10 @@ MySQLExecutable = ""
 #
 #    IPLocationFile
 #        Description: The path to your IP2Location database CSV file.
+#        Important:   A relative path is searched in the working directory, the directory of
+#                     bnetserver.exe, the directory of this config file and their ..\etc
+#                     siblings, and a file that is still missing is reported with the paths
+#                     that were tried instead of being skipped in silence.
 #        Example:     "C:/Trinity/IP2LOCATION-LITE-DB1.CSV"
 #                     "/home/trinity/IP2LOCATION-LITE-DB1.CSV"
 #        Default:     ""  - (Disabled)

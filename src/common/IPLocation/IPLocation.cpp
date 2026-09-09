@@ -17,6 +17,7 @@
 
 #include "IPLocation.h"
 #include "Config.h"
+#include "DataPaths.h"
 #include "Errors.h"
 #include "IpAddress.h"
 #include "Log.h"
@@ -38,21 +39,31 @@ void IpLocationStore::Load()
     _ipLocationStore.clear();
     TC_LOG_INFO("server.loading", "Loading IP Location Database...");
 
-    std::string databaseFilePath = sConfigMgr->GetStringDefault("IPLocationFile", "");
-    if (databaseFilePath.empty())
+    std::string const configuredFilePath = sConfigMgr->GetStringDefault("IPLocationFile", "");
+    if (configuredFilePath.empty())
         return;
 
-    // Check if file exists
-    std::ifstream databaseFile(databaseFilePath);
+    // Relative to the working directory was the only place this ever looked, so the
+    // file had to be copied twice (once where it belongs, once where the server
+    // happened to be started from) to be found at all.
+    Trinity::ResolvedDataPath const databaseFilePath = Trinity::ResolveDataFile("IPLocationFile", configuredFilePath);
+    if (!databaseFilePath.Found)
+    {
+        TC_LOG_ERROR("server.loading", "IPLocation: No ip database file exists ({}). Searched:{}",
+            databaseFilePath.Path.generic_string(), Trinity::DescribeDataPathCandidates(databaseFilePath.Candidates));
+        return;
+    }
+
+    std::ifstream databaseFile(databaseFilePath.Path.generic_string());
     if (!databaseFile)
     {
-        TC_LOG_ERROR("server.loading", "IPLocation: No ip database file exists ({}).", databaseFilePath);
+        TC_LOG_ERROR("server.loading", "IPLocation: No ip database file exists ({}).", databaseFilePath.Path.generic_string());
         return;
     }
 
     if (!databaseFile.is_open())
     {
-        TC_LOG_ERROR("server.loading", "IPLocation: Ip database file ({}) can not be opened.", databaseFilePath);
+        TC_LOG_ERROR("server.loading", "IPLocation: Ip database file ({}) can not be opened.", databaseFilePath.Path.generic_string());
         return;
     }
 
