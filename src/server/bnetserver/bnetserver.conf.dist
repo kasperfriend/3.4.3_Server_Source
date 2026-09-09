@@ -98,6 +98,12 @@ PidFile = ""
 #
 #    CertificatesFile
 #        Description: Certificates file. Both PEM (.crt) and PKCS#12 (.pfx) formats are supported
+#                     bnetserver refuses to start without it ("Failed to initialize
+#                     SSL context"). A relative path is looked for in the working
+#                     directory, the directory of bnetserver.exe, the directory of
+#                     this config file and their ..\etc siblings; the certificate and
+#                     key are placed next to the executable by the build, so leave
+#                     them there when you copy the binaries around.
 #        Example:     "/etc/ssl/certs/bnetserver.cert.pem"
 #        Default:     "./bnetserver.cert.pem"
 
@@ -105,7 +111,8 @@ CertificatesFile = "./bnetserver.cert.pem"
 
 #
 #    PrivateKeyFile
-#        Description: Private key file.
+#        Description: Private key file. Ignored when CertificatesFile already
+#                     contains the key. Same path lookup as CertificatesFile.
 #        Example:     "/etc/ssl/private/bnetserver.key.pem"
 #                     Leave empty if you have a certificate in PKCS#12 format
 #        Default:     "./bnetserver.key.pem"

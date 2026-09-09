@@ -262,6 +262,34 @@ jobs:
             throw "worldserver.conf.dist (including AI Playerbot settings) is missing from the install"
           }
 
+          # --- bnetserver TLS material ---
+          # bnetserver refuses to start without its certificate and dies with
+          #   OSSL_STORE_open failed: The system cannot find the file specified
+          #   Failed to initialize SSL context
+          # because CertificatesFile defaults to "./bnetserver.cert.pem" relative
+          # to the working directory, which the launcher sets to bin\.  The
+          # install rule (install(FILES ... DESTINATION "${CMAKE_INSTALL_PREFIX}"))
+          # drops the two .pem files into $DEST, and the normalisation above only
+          # moves *.exe / *.conf.dist, so move them into bin\ too - falling back
+          # to the source tree if the install did not produce them - and fail the
+          # release rather than shipping a zip whose bnetserver cannot start.
+          foreach ($pem in @("bnetserver.cert.pem", "bnetserver.key.pem")) {
+            $pemSource = @("$DEST\$pem", "src\server\bnetserver\$pem") |
+              Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $pemSource) {
+              throw "$pem is missing from both the install tree and src\server\bnetserver"
+            }
+            $destination = Join-Path $BINDIR $pem
+            if ((Split-Path -Parent $pemSource) -eq $DEST) {
+              # Move, do not copy: two .pem files in one package drift apart and
+              # only the one next to the executable is ever read.
+              Move-Item -LiteralPath $pemSource -Destination $destination -Force
+            } else {
+              Copy-Item -LiteralPath $pemSource -Destination $destination -Force
+            }
+            Write-Host "  placed $pem -> bin\"
+          }
+
           # --- Docs ---
           New-Item -ItemType Directory -Force "$DEST\docs" | Out-Null
           Copy-Item "docs\Playerbots.md" "$DEST\docs\" -ErrorAction SilentlyContinue
@@ -371,7 +399,21 @@ jobs:
           echo Starting bnetserver...
           echo.
           cd /d "%~dp0bin"
+          if not exist bnetserver.cert.pem goto nocert
+          if not exist bnetserver.key.pem goto nocert
           bnetserver.exe
+          goto end
+          :nocert
+          echo [ERROR] bnetserver needs bnetserver.cert.pem and bnetserver.key.pem
+          echo         in bin\, next to bnetserver.exe, to open its TLS listener.
+          echo         Without them it stops with "Failed to initialize SSL context".
+          echo         Copy both files into bin\ - they live in the source tree under
+          echo         src\server\bnetserver - or point CertificatesFile in
+          echo         bnetserver.conf at a certificate of your own.
+          echo.
+          pause
+          exit /b 1
+          :end
           pause
           "@ | Set-Content "$DEST\start-bnetserver.bat" -Encoding ASCII
 
@@ -400,6 +442,10 @@ jobs:
 
           Contents:
             bin\          - worldserver.exe, bnetserver.exe, extraction tools, DLLs
+                            and bnetserver.cert.pem + bnetserver.key.pem.  The two
+                            .pem files must stay in bin\ next to bnetserver.exe: it
+                            refuses to start without them ("Failed to initialize
+                            SSL context").
             sql\          - database schemas (base, create, custom, updates)
             etc\          - configuration files (auto-configured by Setup-Database.bat)
             docs\         - Playerbots.md documentation
@@ -418,14 +464,18 @@ jobs:
           Write-Host "=== Final package contents ==="
           $packagedExe  = @(Get-ChildItem "$BINDIR\*.exe" -ErrorAction SilentlyContinue)
           $packagedDll  = @(Get-ChildItem "$BINDIR\*.dll" -ErrorAction SilentlyContinue)
+          $packagedPem  = @(Get-ChildItem "$BINDIR\*.pem" -ErrorAction SilentlyContinue)
           foreach ($e in $packagedExe) { Write-Host "  bin\$($e.Name) ($([math]::Round($e.Length/1MB,1)) MB)" }
           foreach ($d in $packagedDll) { Write-Host "  bin\$($d.Name)" }
+          foreach ($p in $packagedPem) { Write-Host "  bin\$($p.Name)" }
 
           # Fail the job loudly if the package is missing its core binaries -
-          # a release zip without worldserver.exe is worse than no release at all.
+          # a release zip without worldserver.exe is worse than no release at all,
+          # and a zip whose bnetserver cannot start (no certificate) is not much
+          # better: it is the first thing a fresh installer runs into.
           $missing = @()
-          foreach ($need in @("worldserver.exe", "bnetserver.exe")) {
-            if (-not (Test-Path (Join-Path $BINDIR $need))) { $missing += $need }
+          foreach ($need in @("worldserver.exe", "bnetserver.exe", "bnetserver.cert.pem", "bnetserver.key.pem")) {
+            if (-not (Test-Path (Join-Path $BINDIR $need))) { $missing += "bin\$need" }
           }
           if ($missing.Count -gt 0) {
             Write-Host "::error::Windows package is missing: $($missing -join ', ')"

@@ -115,3 +115,40 @@ cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ...
 Or, if you are using the CMake GUI, change the **build directory** path to a
 fresh, empty folder.  The source directory should point to the cloned source
 tree; the build directory must be a separate, empty folder.
+
+**bnetserver: `OSSL_STORE_open failed ... / Failed to initialize SSL context`**
+
+```
+Using configuration file E:/Wotlk/Bots/bin/bnetserver.conf.
+OSSL_STORE_open failed: The system cannot find the file specified
+Failed to initialize SSL context
+```
+
+bnetserver serves the login and Battle.net REST endpoints over TLS, so it needs a
+certificate before it opens a socket and exits if it cannot read one.  This is not
+a broken certificate - the ones in this tree (`CN = *.*`, TrinityCore CA) are valid
+until 2036 - it is `CertificatesFile = "./bnetserver.cert.pem"` not resolving to a
+file.  The default is relative to the *working directory*, and the file lives in
+`src\server\bnetserver\` in the source tree (the build copies it next to the
+executables in `build\bin\<Config>\`).
+
+Fix, either of:
+
+```bat
+:: 1. put the certificate and key next to bnetserver.exe
+copy src\server\bnetserver\bnetserver.cert.pem E:\Wotlk\Bots\bin\
+copy src\server\bnetserver\bnetserver.key.pem  E:\Wotlk\Bots\bin\
+
+:: 2. or point the config at them (absolute path, either separator)
+::    bnetserver.conf:  CertificatesFile = "E:/Wotlk/Bots/bin/bnetserver.cert.pem"
+```
+
+If `bnetserver.conf` sits in an `etc\` directory next to `bin\`, start the server
+from `bin\` (the `start-bnetserver.bat` launcher in the release zip does that) so
+the certificate, the config and the `data\` files all resolve.  worldserver itself
+does not use TLS; the login failures you see there are just the fallout of
+bnetserver never having started.
+
+A rebuilt bnetserver from this source tree also prints every directory it searched
+and no longer requires the working directory to be the one containing the `.pem`
+files, so this mistake is both harder to make and obvious when it happens.

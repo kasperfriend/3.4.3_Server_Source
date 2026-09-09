@@ -19,19 +19,34 @@
 #include "Config.h"
 #include "Log.h"
 #include "Memory.h"
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <boost/dll/runtime_symbol_info.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
 #include <openssl/store.h>
 #include <openssl/ui.h>
 
+namespace fs = boost::filesystem;
+
 namespace
 {
+struct ResolvedDataFile
+{
+    std::string ConfigName;       ///< name of the configuration field the path came from
+    std::string ConfiguredValue;  ///< value as written in bnetserver.conf
+    fs::path Path;                ///< file that is actually going to be opened
+    bool Found;                   ///< false when none of the candidates exists
+    std::vector<fs::path> Candidates; ///< every location that was looked at
+};
+
 auto CreatePasswordUiMethodFromPemCallback(::pem_password_cb* callback)
 {
     return Trinity::make_unique_ptr_with_deleter(UI_UTIL_wrap_read_pem_callback(callback, 0), ::UI_destroy_method);
 }
 
-auto OpenOpenSSLStore(boost::filesystem::path const& storePath, UI_METHOD const* passwordCallback, void* passwordCallbackData)
+auto OpenOpenSSLStore(fs::path const& storePath, UI_METHOD const* passwordCallback, void* passwordCallbackData)
 {
     std::string uri;
     uri.reserve(6 + storePath.size());
@@ -56,6 +71,115 @@ boost::system::error_code GetLastOpenSSLError()
 
     return boost::system::error_code(static_cast<int>(ossl_error), boost::asio::error::get_ssl_category());
 }
+
+/// Directories a relative path from the configuration file is resolved against.
+/// This mirrors the bnetserver.conf lookup in Main.cpp: the deployment layout
+/// (executables in bin\, configuration templates in ..\etc\) and the post build
+/// step that drops the .pem files next to the executable must both work no
+/// matter which directory the server was started from. Opening the certificate
+/// strictly relative to the working directory made bnetserver abort with
+/// "OSSL_STORE_open failed: The system cannot find the file specified" whenever
+/// it was launched from anywhere else.
+std::vector<fs::path> GetDataFileSearchDirectories()
+{
+    std::vector<fs::path> dirs;
+
+    boost::system::error_code ec;
+    auto AddDir = [&dirs, &ec](fs::path dir)
+    {
+        if (dir.empty())
+            return;
+
+        dir = fs::absolute(dir, ec);
+        if (ec)
+            return;
+
+        dir = dir.lexically_normal();
+        if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end())
+            dirs.push_back(std::move(dir));
+    };
+
+    AddDir(fs::current_path(ec));                              ///< the working directory (historic behaviour)
+    AddDir(boost::dll::program_location().parent_path());       ///< next to bnetserver.exe
+    AddDir(fs::path(sConfigMgr->GetFilename()).parent_path());  ///< next to the loaded bnetserver.conf
+
+    std::vector<fs::path> const baseDirs = dirs;
+    for (fs::path const& base : baseDirs)
+        AddDir(base / ".." / "etc");                            ///< ..\etc of each of the above
+
+    return dirs;
+}
+
+/// Resolves a configured file to an existing file. Absolute paths are honoured
+/// verbatim; relative ones are searched in the data directories above, so the
+/// packaged and the in-build-tree layouts both work.
+ResolvedDataFile ResolveDataFile(std::string const& configName, std::string const& configuredValue)
+{
+    ResolvedDataFile result{ configName, configuredValue, fs::path(configuredValue), false, {} };
+
+    fs::path const requested{ configuredValue };
+    if (requested.empty())
+        return result;
+
+    // An absolute path (or one carrying a drive on Windows) is exactly what the
+    // operator asked for, so never look anywhere else.
+    if (requested.is_absolute() || requested.has_root_path())
+    {
+        result.Candidates.push_back(requested);
+
+        boost::system::error_code ec;
+        if (fs::is_regular_file(requested, ec) && !ec)
+        {
+            result.Path = requested;
+            result.Found = true;
+        }
+        return result;
+    }
+
+    for (fs::path const& dir : GetDataFileSearchDirectories())
+    {
+        fs::path candidate = (dir / requested).lexically_normal();
+        if (std::find(result.Candidates.begin(), result.Candidates.end(), candidate) == result.Candidates.end())
+            result.Candidates.push_back(std::move(candidate));
+    }
+
+    boost::system::error_code ec;
+    for (fs::path const& candidate : result.Candidates)
+    {
+        if (fs::is_regular_file(candidate, ec) && !ec)
+        {
+            result.Path = candidate;
+            result.Found = true;
+            return result;
+        }
+    }
+
+    // Nothing there: report the first candidate, which is what the operator
+    // configured resolved against the working directory.
+    if (!result.Candidates.empty())
+        result.Path = result.Candidates.front();
+
+    return result;
+}
+
+void LogMissingDataFile(ResolvedDataFile const& file)
+{
+    std::string searched;
+    for (fs::path const& candidate : file.Candidates)
+    {
+        searched += "\n";
+        searched += "        * ";
+        searched += candidate.generic_string();
+    }
+
+    TC_LOG_ERROR("server.ssl", "{} = \"{}\" was not found. Tried:{}", file.ConfigName, file.ConfiguredValue, searched.empty() ? std::string(" no candidate paths") : searched);
+    TC_LOG_ERROR("server.ssl", "Copy bnetserver.cert.pem and bnetserver.key.pem next to bnetserver.exe (they live in src/server/bnetserver in the source tree and are placed there by the build), or set {} to an absolute path. Keep both files in the same directory unless the certificate and the key are in separate files.", file.ConfigName);
+}
+
+std::string DisplayPath(fs::path const& path)
+{
+    return path.generic_string();
+}
 }
 
 bool Battlenet::SslContext::Initialize()
@@ -68,7 +192,7 @@ bool Battlenet::SslContext::Initialize()
         return false; \
     } } while (0)
 
-    std::string certificateChainFile = sConfigMgr->GetStringDefault("CertificatesFile", "./bnetserver.cert.pem");
+    ResolvedDataFile certificateFile = ResolveDataFile("CertificatesFile", sConfigMgr->GetStringDefault("CertificatesFile", "./bnetserver.cert.pem"));
 
     auto passwordCallback = [](std::size_t /*max_length*/, boost::asio::ssl::context::password_purpose /*purpose*/) -> std::string
     {
@@ -80,13 +204,15 @@ bool Battlenet::SslContext::Initialize()
     SSL_CTX* nativeContext = instance().native_handle();
     auto password_ui_method = CreatePasswordUiMethodFromPemCallback(SSL_CTX_get_default_passwd_cb(nativeContext));
 
-    auto store = OpenOpenSSLStore(boost::filesystem::absolute(certificateChainFile),
+    auto store = OpenOpenSSLStore(certificateFile.Path,
         password_ui_method.get(), SSL_CTX_get_default_passwd_cb_userdata(nativeContext));
 
     if (!store)
     {
         err = GetLastOpenSSLError();
-        TC_LOG_ERROR("server.ssl", "OSSL_STORE_open failed for certificate file \"{}\": {}", certificateChainFile, err.message());
+        TC_LOG_ERROR("server.ssl", "OSSL_STORE_open failed for certificate file \"{}\": {}", DisplayPath(certificateFile.Path), err.message());
+        if (!certificateFile.Found)
+            LogMissingDataFile(certificateFile);
         return false;
     }
 
@@ -121,11 +247,13 @@ bool Battlenet::SslContext::Initialize()
 
     if (!key)
     {
-        std::string privateKeyFile = sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem");
-        instance().use_private_key_file(privateKeyFile, boost::asio::ssl::context::pem, err);
+        ResolvedDataFile privateKeyFile = ResolveDataFile("PrivateKeyFile", sConfigMgr->GetStringDefault("PrivateKeyFile", "./bnetserver.key.pem"));
+        instance().use_private_key_file(DisplayPath(privateKeyFile.Path), boost::asio::ssl::context::pem, err);
         if (err)
         {
-            TC_LOG_ERROR("server.ssl", "Failed to load private key file \"{}\": {}", privateKeyFile, err.message());
+            TC_LOG_ERROR("server.ssl", "Failed to load private key file \"{}\": {}", DisplayPath(privateKeyFile.Path), err.message());
+            if (!privateKeyFile.Found)
+                LogMissingDataFile(privateKeyFile);
             return false;
         }
     }
