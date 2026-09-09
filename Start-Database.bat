@@ -40,7 +40,7 @@ timeout /t 1 /nobreak >nul
 set /a WAIT+=1
 "%MYSQL%" -u trinity -ptrinity -e "SELECT 1" >nul 2>&1
 if errorlevel 1 (
-    if %WAIT% LSS 30 goto :WAIT_LOOP
+    if !WAIT! LSS 30 goto :WAIT_LOOP
     echo [ERROR] MariaDB did not start within 30 seconds.
     echo         Check %DB_DIR%\mysqld-error.log
     pause
