@@ -249,6 +249,28 @@ jobs:
             Write-Host "  moved $($f.Name) -> etc\"
           }
 
+          # --- shared dependency DLLs ---
+          # dep/openssl_ed25519 is the one vendored dependency that is built SHARED
+          # unconditionally (everything else follows WITH_DYNAMIC_LINKING), so
+          # worldserver.exe and bnetserver.exe import openssl_ed25519.dll and die on
+          # load with "The code execution cannot proceed because
+          # openssl_ed25519.dll was not found" unless it sits next to them.  Like the
+          # other install rules it is installed into the package root, so move every
+          # stray .dll in place before the vcpkg DLLs are added below.
+          foreach ($d in @(Get-ChildItem "$DEST\*.dll" -ErrorAction SilentlyContinue)) {
+            Move-Item -LiteralPath $d.FullName -Destination "$BINDIR\" -Force
+            Write-Host "  moved $($d.Name) -> bin\"
+          }
+          if (-not (Test-Path "$BINDIR\openssl_ed25519.dll")) {
+            # Only a problem if the build actually produced a shared ed25519; if the
+            # dependency is ever switched to static this check must stay silent.
+            $builtSharedEd = Get-ChildItem "$env:GITHUB_WORKSPACE\build\bin\*\openssl_ed25519.dll" -ErrorAction SilentlyContinue
+            if ($builtSharedEd) {
+              Write-Host "::error::openssl_ed25519.dll was built but is not next to the executables"
+              exit 1
+            }
+          }
+
           # --- SQL ---
           New-Item -ItemType Directory -Force "$DEST\sql" | Out-Null
           Copy-Item -Recurse -Force "sql\base"   "$DEST\sql\" -ErrorAction SilentlyContinue
@@ -383,6 +405,15 @@ jobs:
           echo Starting worldserver...
           echo.
           cd /d "%~dp0bin"
+          rem Both executables import openssl_ed25519.dll (dep/openssl_ed25519 is the
+          rem one dependency that is always built as a shared library) and Windows
+          rem refuses to start them without it.
+          if exist openssl_ed25519.dll goto start
+          echo [WARN] openssl_ed25519.dll is not in bin\.  If worldserver.exe does not
+          echo        start, that is the reason - copy the .dll files from the build
+          echo        output directory (build\bin\^<Config^>) next to the executables.
+          echo.
+          :start
           worldserver.exe
           pause
           "@ | Set-Content "$DEST\start-worldserver.bat" -Encoding ASCII
@@ -399,21 +430,23 @@ jobs:
           echo Starting bnetserver...
           echo.
           cd /d "%~dp0bin"
-          if not exist bnetserver.cert.pem goto nocert
-          if not exist bnetserver.key.pem goto nocert
-          bnetserver.exe
-          goto end
-          :nocert
+          if exist bnetserver.cert.pem if exist bnetserver.key.pem goto start
+          rem GenerateSelfSignedCertificate lets bnetserver create the files itself,
+          rem so the check below only applies when it is off (the default).
+          findstr /i /r /c:"^[ ]*GenerateSelfSignedCertificate[ ]*=[ ]*1" bnetserver.conf ..\etc\bnetserver.conf >nul 2>&1 && goto start
           echo [ERROR] bnetserver needs bnetserver.cert.pem and bnetserver.key.pem
           echo         in bin\, next to bnetserver.exe, to open its TLS listener.
           echo         Without them it stops with "Failed to initialize SSL context".
           echo         Copy both files into bin\ - they live in the source tree under
-          echo         src\server\bnetserver - or point CertificatesFile in
-          echo         bnetserver.conf at a certificate of your own.
+          echo         src\server\bnetserver - point CertificatesFile in bnetserver.conf
+          echo         at a certificate of your own, or set
+          echo         GenerateSelfSignedCertificate = 1 there to have a self-signed
+          echo         key pair created on the next start.
           echo.
           pause
           exit /b 1
-          :end
+          :start
+          bnetserver.exe
           pause
           "@ | Set-Content "$DEST\start-bnetserver.bat" -Encoding ASCII
 
@@ -445,7 +478,10 @@ jobs:
                             and bnetserver.cert.pem + bnetserver.key.pem.  The two
                             .pem files must stay in bin\ next to bnetserver.exe: it
                             refuses to start without them ("Failed to initialize
-                            SSL context").
+                            SSL context").  Everything else in bin\ has to stay
+                            there too - both .exe files load openssl_ed25519.dll from
+                            their own directory and Windows refuses to start them
+                            without it.
             sql\          - database schemas (base, create, custom, updates)
             etc\          - configuration files (auto-configured by Setup-Database.bat)
             docs\         - Playerbots.md documentation

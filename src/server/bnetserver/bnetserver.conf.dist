@@ -127,6 +127,21 @@ PrivateKeyFile = "./bnetserver.key.pem"
 PrivateKeyPassword = ""
 
 #
+#    GenerateSelfSignedCertificate
+#        Description: Create a self-signed certificate and private key on startup
+#                     when the file configured in CertificatesFile does not exist,
+#                     instead of refusing to start.  What is created is written to
+#                     the configured paths (2048 bit RSA, SHA-256, valid ten years)
+#                     and reused by later starts; an existing private key is never
+#                     overwritten.
+#                     Meant for local and development servers.  Put a certificate of
+#                     your own in place before exposing bnetserver anywhere public.
+#        Default:     0 - (disabled, bnetserver exits when the certificate is missing)
+#                     1 - (generate a self-signed certificate on first start)
+
+GenerateSelfSignedCertificate = 0
+
+#
 #    UseProcessors
 #        Description: Processors mask for Windows and Linux based multi-processor systems.
 #        Example:     A computer with 2 CPUs:

@@ -132,7 +132,7 @@ file.  The default is relative to the *working directory*, and the file lives in
 `src\server\bnetserver\` in the source tree (the build copies it next to the
 executables in `build\bin\<Config>\`).
 
-Fix, either of:
+Fix, any of:
 
 ```bat
 :: 1. put the certificate and key next to bnetserver.exe
@@ -141,7 +141,14 @@ copy src\server\bnetserver\bnetserver.key.pem  E:\Wotlk\Bots\bin\
 
 :: 2. or point the config at them (absolute path, either separator)
 ::    bnetserver.conf:  CertificatesFile = "E:/Wotlk/Bots/bin/bnetserver.cert.pem"
+
+:: 3. or have bnetserver create its own self-signed key pair on the next start
+::    bnetserver.conf:  GenerateSelfSignedCertificate = 1
 ```
+
+Option 3 writes `bnetserver.cert.pem` and `bnetserver.key.pem` (2048 bit RSA,
+SHA-256, ten years) to the configured paths and reuses them afterwards; it is meant
+for a private server and never overwrites an existing key.
 
 If `bnetserver.conf` sits in an `etc\` directory next to `bin\`, start the server
 from `bin\` (the `start-bnetserver.bat` launcher in the release zip does that) so
@@ -152,3 +159,20 @@ bnetserver never having started.
 A rebuilt bnetserver from this source tree also prints every directory it searched
 and no longer requires the working directory to be the one containing the `.pem`
 files, so this mistake is both harder to make and obvious when it happens.
+
+**`The code execution cannot proceed because openssl_ed25519.dll was not found`**
+
+`dep/openssl_ed25519` (hotfix signature verification) is the one vendored
+dependency that is built as a **shared** library no matter what
+`WITH_DYNAMIC_LINKING` says, so `worldserver.exe` and `bnetserver.exe` both import
+`openssl_ed25519.dll` and load it from their own directory.  The loader fails
+before `main()` runs, which is why the console window just flashes and nothing
+reaches the log.  Copy the DLL - and in general every `.dll` the build put next to
+the executables - into the directory holding the `.exe` files:
+
+```bat
+copy build\bin\RelWithDebInfo\*.dll  E:\Wotlk\Bots\bin\
+```
+
+The release zip ships them in `bin\`; only files that were moved out of `bin\` by
+hand can produce this error.
