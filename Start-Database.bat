@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableDelayedExpansion
-title TrinityCore 3.4.3 — Start Database
+title TrinityCore 3.4.3 - Start Database
 color 0A
 
 echo ============================================================
-echo   TrinityCore 3.4.3 — Start Database
+echo   TrinityCore 3.4.3 - Start Database
 echo ============================================================
 echo.
 

@@ -1,5 +1,5 @@
 @echo off
-title TrinityCore 3.4.3 — Stop Database
+title TrinityCore 3.4.3 - Stop Database
 color 0C
 
 echo Stopping MariaDB...
