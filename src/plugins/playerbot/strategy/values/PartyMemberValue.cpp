@@ -81,12 +81,13 @@ bool PartyMemberValue::Check(Unit* player)
         bot->IsWithinLOS(player->GetPositionX(), player->GetPositionY(), player->GetPositionZ());
 }
 
-bool PartyMemberValue::IsTargetOfSpellCast(Player* target, SpellEntryPredicate &predicate)
+bool PartyMemberValue::IsTargetOfSpellCast(Unit* target, SpellEntryPredicate &predicate)
 {
 
     Group* group = bot->GetGroup();
     ObjectGuid targetGuid = target ? target->GetGUID() : bot->GetGUID();
-    ObjectGuid corpseGuid = target && target->GetCorpse() ? target->GetCorpse()->GetGUID() : ObjectGuid();
+    Player* playerTarget = target ? target->ToPlayer() : nullptr;
+    ObjectGuid corpseGuid = playerTarget && playerTarget->GetCorpse() ? playerTarget->GetCorpse()->GetGUID() : ObjectGuid();
 
     for (GroupReference *gref = group->GetFirstMember(); gref; gref = gref->next())
     {

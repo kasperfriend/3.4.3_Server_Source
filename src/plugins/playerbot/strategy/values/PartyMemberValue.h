@@ -21,7 +21,7 @@ namespace ai
         PartyMemberValue(PlayerbotAI* ai) : UnitCalculatedValue(ai) {}
 
     public:
-        bool IsTargetOfSpellCast(Player* target, SpellEntryPredicate &predicate);
+        bool IsTargetOfSpellCast(Unit* target, SpellEntryPredicate &predicate);
 
     protected:
         Unit* FindPartyMember(FindPlayerPredicate &predicate);
